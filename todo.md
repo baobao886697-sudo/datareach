@@ -93,3 +93,18 @@
 ## 部署准备
 - [ ] 环境变量配置文档
 - [ ] 独立部署指南
+
+
+## Railway独立部署改造
+
+### 移除Manus OAuth依赖
+- [ ] 修改server/_core/context.ts移除OAuth依赖
+- [ ] 实现独立的JWT用户认证
+- [ ] 实现邮箱+密码注册功能
+- [ ] 实现邮箱+密码登录功能
+- [ ] 更新routers.ts中的认证路由
+- [ ] 更新前端Login.tsx使用独立登录
+- [ ] 更新前端Register.tsx使用独立注册
+- [ ] 推送代码到GitHub
+- [ ] 重新部署Railway
+- [ ] 测试验证所有功能

@@ -33,17 +33,21 @@ export default function Admin() {
     }
   }, [adminToken, setLocation]);
 
-  const { data: stats, isLoading: statsLoading, refetch: refetchStats } = trpc.admin.stats.useQuery(
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats, error: statsError } = trpc.admin.stats.useQuery(
     undefined,
     { 
       enabled: !!adminToken,
       retry: false,
-      onError: () => {
-        localStorage.removeItem("adminToken");
-        setLocation("/admin/login");
-      }
     }
   );
+
+  // Handle stats query error
+  useEffect(() => {
+    if (statsError) {
+      localStorage.removeItem("adminToken");
+      setLocation("/admin/login");
+    }
+  }, [statsError, setLocation]);
 
   const { data: usersData, isLoading: usersLoading, refetch: refetchUsers } = trpc.admin.users.useQuery(
     undefined,
