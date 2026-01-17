@@ -1,0 +1,9 @@
+{
+  "query": "\n-- 添加search_logs表缺失的cacheHit字段\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS cacheHit BOOLEAN DEFAULT FALSE;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS searchHash VARCHAR(32);\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS params JSON;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS requestedCount INT;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS actualCount INT;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS status VARCHAR(20);\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS errorMessage TEXT;\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 45EeJhNykDRAg24.root --database QJRJWxFrojkody2y2qTtrX --execute \n-- 添加search_logs表缺失的cacheHit字段\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS cacheHit BOOLEAN DEFAULT FALSE;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS searchHash VARCHAR(32);\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS params JSON;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS requestedCount INT;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS actualCount INT;\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS status VARCHAR(20);\nALTER TABLE search_logs ADD COLUMN IF NOT EXISTS errorMessage TEXT;\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 5564
+}

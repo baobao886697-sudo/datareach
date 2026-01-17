@@ -1,0 +1,9 @@
+{
+  "query": "\n-- 修改credit_logs表的type字段以支持新的枚举值\nALTER TABLE credit_logs MODIFY COLUMN type ENUM('recharge', 'search', 'admin_add', 'admin_deduct', 'refund', 'admin_adjust', 'bonus') NOT NULL;\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 45EeJhNykDRAg24.root --database QJRJWxFrojkody2y2qTtrX --execute \n-- 修改credit_logs表的type字段以支持新的枚举值\nALTER TABLE credit_logs MODIFY COLUMN type ENUM('recharge', 'search', 'admin_add', 'admin_deduct', 'refund', 'admin_adjust', 'bonus') NOT NULL;\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1971
+}

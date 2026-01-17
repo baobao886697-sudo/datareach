@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Search, History, CreditCard, Shield, Wallet } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Search, History, CreditCard, Shield, Wallet, Target } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -173,8 +173,11 @@ function DashboardLayoutContent({
               </button>
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold tracking-tight truncate">
-                    LeadHunter Pro
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30">
+                    <Target className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="font-bold tracking-tight truncate bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                    云端寻踪
                   </span>
                 </div>
               ) : null}

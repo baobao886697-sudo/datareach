@@ -40,78 +40,109 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  
+  /* 加密货币科技风格自定义颜色 */
+  --color-neon-cyan: oklch(0.8 0.18 195);
+  --color-neon-blue: oklch(0.7 0.2 250);
+  --color-neon-purple: oklch(0.65 0.22 290);
+  --color-neon-pink: oklch(0.7 0.2 330);
+  --color-neon-green: oklch(0.75 0.2 145);
+  --color-crypto-gold: oklch(0.8 0.15 85);
 }
 
 :root {
-  /* 深色专业主题 - LeadHunter Pro */
-  --primary: oklch(0.65 0.2 250);
-  --primary-foreground: oklch(0.98 0.01 260);
-  --sidebar-primary: oklch(0.65 0.2 250);
-  --sidebar-primary-foreground: oklch(0.98 0.01 260);
-  --chart-1: oklch(0.65 0.2 250);
-  --chart-2: oklch(0.55 0.18 160);
-  --chart-3: oklch(0.6 0.15 80);
-  --chart-4: oklch(0.55 0.2 25);
-  --chart-5: oklch(0.6 0.18 300);
-  --radius: 0.5rem;
-  --background: oklch(0.13 0.01 260);
-  --foreground: oklch(0.93 0.01 260);
-  --card: oklch(0.17 0.01 260);
-  --card-foreground: oklch(0.93 0.01 260);
-  --popover: oklch(0.17 0.01 260);
-  --popover-foreground: oklch(0.93 0.01 260);
-  --secondary: oklch(0.22 0.02 260);
-  --secondary-foreground: oklch(0.88 0.01 260);
-  --muted: oklch(0.2 0.01 260);
-  --muted-foreground: oklch(0.6 0.01 260);
-  --accent: oklch(0.55 0.18 160);
-  --accent-foreground: oklch(0.98 0.01 260);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.98 0.01 260);
-  --border: oklch(0.25 0.01 260);
-  --input: oklch(0.2 0.01 260);
-  --ring: oklch(0.65 0.2 250);
-  --sidebar: oklch(0.11 0.01 260);
-  --sidebar-foreground: oklch(0.88 0.01 260);
-  --sidebar-accent: oklch(0.18 0.02 260);
-  --sidebar-accent-foreground: oklch(0.88 0.01 260);
-  --sidebar-border: oklch(0.22 0.01 260);
-  --sidebar-ring: oklch(0.65 0.2 250);
+  /* 加密货币科技风格 - 深邃太空主题 */
+  --radius: 0.75rem;
+  
+  /* 主色调 - 霓虹青蓝 */
+  --primary: oklch(0.7 0.18 195);
+  --primary-foreground: oklch(0.1 0.02 250);
+  
+  /* 背景 - 深邃太空黑 */
+  --background: oklch(0.08 0.02 260);
+  --foreground: oklch(0.92 0.01 250);
+  
+  /* 卡片 - 玻璃拟态 */
+  --card: oklch(0.12 0.02 260);
+  --card-foreground: oklch(0.92 0.01 250);
+  
+  /* 弹出层 */
+  --popover: oklch(0.14 0.02 260);
+  --popover-foreground: oklch(0.92 0.01 250);
+  
+  /* 次要色 */
+  --secondary: oklch(0.18 0.03 280);
+  --secondary-foreground: oklch(0.9 0.01 250);
+  
+  /* 静音色 */
+  --muted: oklch(0.2 0.02 260);
+  --muted-foreground: oklch(0.6 0.02 250);
+  
+  /* 强调色 - 霓虹紫 */
+  --accent: oklch(0.65 0.22 290);
+  --accent-foreground: oklch(0.98 0.01 290);
+  
+  /* 危险色 */
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  
+  /* 边框 */
+  --border: oklch(0.25 0.03 260);
+  --input: oklch(0.15 0.02 260);
+  --ring: oklch(0.7 0.18 195);
+  
+  /* 图表色 */
+  --chart-1: oklch(0.7 0.18 195);
+  --chart-2: oklch(0.65 0.22 290);
+  --chart-3: oklch(0.75 0.2 145);
+  --chart-4: oklch(0.8 0.15 85);
+  --chart-5: oklch(0.7 0.2 330);
+  
+  /* 侧边栏 */
+  --sidebar: oklch(0.06 0.02 260);
+  --sidebar-foreground: oklch(0.88 0.01 250);
+  --sidebar-primary: oklch(0.7 0.18 195);
+  --sidebar-primary-foreground: oklch(0.1 0.02 250);
+  --sidebar-accent: oklch(0.15 0.03 280);
+  --sidebar-accent-foreground: oklch(0.92 0.01 250);
+  --sidebar-border: oklch(0.2 0.02 260);
+  --sidebar-ring: oklch(0.7 0.18 195);
 }
 
 .dark {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-500);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.85 0.005 65);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.85 0.005 65);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.85 0.005 65);
-  --secondary: oklch(0.24 0.006 286.033);
-  --secondary-foreground: oklch(0.7 0.005 65);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.488 0.243 264.376);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.85 0.005 65);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.488 0.243 264.376);
+  /* 深色模式 - 与默认相同，因为整体就是深色科技风 */
+  --primary: oklch(0.7 0.18 195);
+  --primary-foreground: oklch(0.1 0.02 250);
+  --background: oklch(0.08 0.02 260);
+  --foreground: oklch(0.92 0.01 250);
+  --card: oklch(0.12 0.02 260);
+  --card-foreground: oklch(0.92 0.01 250);
+  --popover: oklch(0.14 0.02 260);
+  --popover-foreground: oklch(0.92 0.01 250);
+  --secondary: oklch(0.18 0.03 280);
+  --secondary-foreground: oklch(0.9 0.01 250);
+  --muted: oklch(0.2 0.02 260);
+  --muted-foreground: oklch(0.6 0.02 250);
+  --accent: oklch(0.65 0.22 290);
+  --accent-foreground: oklch(0.98 0.01 290);
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  --border: oklch(0.25 0.03 260);
+  --input: oklch(0.15 0.02 260);
+  --ring: oklch(0.7 0.18 195);
+  --chart-1: oklch(0.7 0.18 195);
+  --chart-2: oklch(0.65 0.22 290);
+  --chart-3: oklch(0.75 0.2 145);
+  --chart-4: oklch(0.8 0.15 85);
+  --chart-5: oklch(0.7 0.2 330);
+  --sidebar: oklch(0.06 0.02 260);
+  --sidebar-foreground: oklch(0.88 0.01 250);
+  --sidebar-primary: oklch(0.7 0.18 195);
+  --sidebar-primary-foreground: oklch(0.1 0.02 250);
+  --sidebar-accent: oklch(0.15 0.03 280);
+  --sidebar-accent-foreground: oklch(0.92 0.01 250);
+  --sidebar-border: oklch(0.2 0.02 260);
+  --sidebar-ring: oklch(0.7 0.18 195);
 }
 
 @layer base {
@@ -120,6 +151,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -135,24 +167,11 @@
 }
 
 @layer components {
-  /**
-   * Custom container utility that centers content and adds responsive padding.
-   *
-   * This overrides Tailwind's default container behavior to:
-   * - Auto-center content (mx-auto)
-   * - Add responsive horizontal padding
-   * - Set max-width for large screens
-   *
-   * Usage: <div className="container">...</div>
-   *
-   * For custom widths, use max-w-* utilities directly:
-   * <div className="max-w-6xl mx-auto px-4">...</div>
-   */
   .container {
     width: 100%;
     margin-left: auto;
     margin-right: auto;
-    padding-left: 1rem; /* 16px - mobile padding */
+    padding-left: 1rem;
     padding-right: 1rem;
   }
 
@@ -163,16 +182,143 @@
 
   @media (min-width: 640px) {
     .container {
-      padding-left: 1.5rem; /* 24px - tablet padding */
+      padding-left: 1.5rem;
       padding-right: 1.5rem;
     }
   }
 
   @media (min-width: 1024px) {
     .container {
-      padding-left: 2rem; /* 32px - desktop padding */
+      padding-left: 2rem;
       padding-right: 2rem;
-      max-width: 1280px; /* Standard content width */
+      max-width: 1280px;
     }
+  }
+  
+  /* 玻璃拟态效果 */
+  .glass {
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(56, 189, 248, 0.1);
+  }
+  
+  .glass-card {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.6) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+    box-shadow: 
+      0 0 30px rgba(56, 189, 248, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  
+  /* 霓虹发光效果 */
+  .neon-glow {
+    box-shadow: 
+      0 0 5px rgba(56, 189, 248, 0.5),
+      0 0 20px rgba(56, 189, 248, 0.3),
+      0 0 40px rgba(56, 189, 248, 0.1);
+  }
+  
+  .neon-text {
+    text-shadow: 
+      0 0 10px rgba(56, 189, 248, 0.8),
+      0 0 20px rgba(56, 189, 248, 0.5),
+      0 0 40px rgba(56, 189, 248, 0.3);
+  }
+  
+  .neon-border {
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    box-shadow: 
+      0 0 10px rgba(56, 189, 248, 0.2),
+      inset 0 0 10px rgba(56, 189, 248, 0.05);
+  }
+  
+  /* 渐变按钮 */
+  .btn-gradient {
+    background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #8b5cf6 100%);
+    background-size: 200% 200%;
+    animation: gradient-shift 3s ease infinite;
+  }
+  
+  .btn-gradient:hover {
+    background-size: 300% 300%;
+  }
+  
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  
+  /* 网格背景 */
+  .grid-bg {
+    background-image: 
+      linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  
+  /* 粒子动画背景 */
+  .particles-bg {
+    background: 
+      radial-gradient(circle at 20% 80%, rgba(56, 189, 248, 0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+      radial-gradient(circle at 40% 40%, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
+  }
+  
+  /* 数据卡片悬浮效果 */
+  .data-card {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .data-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 
+      0 20px 40px rgba(0, 0, 0, 0.3),
+      0 0 30px rgba(56, 189, 248, 0.1);
+  }
+  
+  /* 脉冲动画 */
+  .pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 5px rgba(56, 189, 248, 0.5);
+    }
+    50% {
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.8), 0 0 40px rgba(56, 189, 248, 0.4);
+    }
+  }
+  
+  /* 扫描线效果 */
+  .scan-line::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.8), transparent);
+    animation: scan 3s linear infinite;
+  }
+  
+  @keyframes scan {
+    0% { top: 0; opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { top: 100%; opacity: 0; }
+  }
+  
+  /* 统计数字动画 */
+  .stat-number {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  
+  /* 加密货币图标样式 */
+  .crypto-icon {
+    filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
   }
 }

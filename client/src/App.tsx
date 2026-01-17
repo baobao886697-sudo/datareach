@@ -13,6 +13,7 @@ import Results from "./pages/Results";
 import Recharge from "./pages/Recharge";
 import History from "./pages/History";
 import Admin from "./pages/Admin";
+import AdminLogin from "./pages/AdminLogin";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/results/:taskId" component={Results} />
       <Route path="/recharge" component={Recharge} />
       <Route path="/history" component={History} />
+      <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin" component={Admin} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

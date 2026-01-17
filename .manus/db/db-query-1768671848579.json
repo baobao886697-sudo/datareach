@@ -1,0 +1,9 @@
+{
+  "query": "\n-- 添加credit_logs表缺失的字段\nALTER TABLE credit_logs ADD COLUMN IF NOT EXISTS relatedOrderId VARCHAR(50);\nALTER TABLE credit_logs ADD COLUMN IF NOT EXISTS relatedTaskId VARCHAR(50);\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 45EeJhNykDRAg24.root --database QJRJWxFrojkody2y2qTtrX --execute \n-- 添加credit_logs表缺失的字段\nALTER TABLE credit_logs ADD COLUMN IF NOT EXISTS relatedOrderId VARCHAR(50);\nALTER TABLE credit_logs ADD COLUMN IF NOT EXISTS relatedTaskId VARCHAR(50);\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 2821
+}

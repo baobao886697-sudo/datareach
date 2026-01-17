@@ -7,6 +7,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
+import { validateAdminCredentials, generateAdminToken, verifyAdminToken, getAdminTokenFromHeader } from "./_core/adminAuth";
 import {
   createUser,
   getUserByEmail,
@@ -256,7 +257,7 @@ export const appRouter = router({
 
     // 获取任务状态
     taskStatus: protectedProcedure
-      .input(z.object({ taskId: z.number() }))
+      .input(z.object({ taskId: z.string() }))
       .query(async ({ ctx, input }) => {
         const task = await getSearchTask(input.taskId);
         if (!task || task.userId !== ctx.user.id) {
@@ -274,25 +275,25 @@ export const appRouter = router({
 
     // 获取搜索结果
     results: protectedProcedure
-      .input(z.object({ taskId: z.number() }))
+      .input(z.object({ taskId: z.string() }))
       .query(async ({ ctx, input }) => {
         const task = await getSearchTask(input.taskId);
         if (!task || task.userId !== ctx.user.id) {
           throw new TRPCError({ code: "NOT_FOUND", message: "任务不存在" });
         }
-        return getSearchResults(input.taskId);
+        return getSearchResults(task.id);
       }),
 
     // 导出CSV
     exportCsv: protectedProcedure
-      .input(z.object({ taskId: z.number() }))
+      .input(z.object({ taskId: z.string() }))
       .mutation(async ({ ctx, input }) => {
         const task = await getSearchTask(input.taskId);
         if (!task || task.userId !== ctx.user.id) {
           throw new TRPCError({ code: "NOT_FOUND", message: "任务不存在" });
         }
 
-        const results = await getSearchResults(input.taskId);
+        const results = await getSearchResults(task.id);
         
         // 生成CSV内容
         const headers = [
@@ -314,24 +315,27 @@ export const appRouter = router({
           "匹配分数",
         ];
 
-        const rows = results.map((r) => [
-          r.fullName || "",
-          r.firstName || "",
-          r.lastName || "",
-          r.age?.toString() || "",
-          r.title || "",
-          r.company || "",
-          r.city || "",
-          r.state || "",
-          r.country || "",
-          r.phoneNumber || "",
-          r.phoneType || "",
-          r.carrier || "",
-          r.email || "",
-          r.linkedinUrl || "",
-          r.verificationStatus || "",
-          r.matchScore?.toString() || "",
-        ]);
+        const rows = results.map((r) => {
+          const data = r.data as any || {};
+          return [
+            data.fullName || data.name || "",
+            data.firstName || data.first_name || "",
+            data.lastName || data.last_name || "",
+            data.age?.toString() || "",
+            data.title || "",
+            data.company || data.organization_name || "",
+            data.city || "",
+            data.state || "",
+            data.country || "",
+            data.phoneNumber || data.phone || "",
+            data.phoneType || "",
+            data.carrier || "",
+            data.email || "",
+            data.linkedinUrl || data.linkedin_url || "",
+            r.verified ? "已验证" : "未验证",
+            r.verificationScore?.toString() || "",
+          ];
+        });
 
         const csvContent = [
           headers.join(","),
@@ -389,9 +393,9 @@ export const appRouter = router({
         return {
           orderId: order.orderId,
           credits: order.credits,
-          usdtAmount: order.usdtAmount,
+          usdtAmount: order.amount,
           walletAddress: order.walletAddress,
-          network: order.usdtNetwork,
+          network: order.network,
           expiresAt: order.expiresAt,
         };
       }),
@@ -441,6 +445,55 @@ export const appRouter = router({
       }),
   }),
 
+  // ============ 管理员认证路由（独立系统）============
+  adminAuth: router({
+    // 管理员登录
+    login: publicProcedure
+      .input(
+        z.object({
+          username: z.string(),
+          password: z.string(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        if (!validateAdminCredentials(input.username, input.password)) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "用户名或密码错误",
+          });
+        }
+
+        const token = generateAdminToken(input.username);
+        return {
+          success: true,
+          token,
+          expiresIn: 24 * 60 * 60, // 24小时
+        };
+      }),
+
+    // 验证管理员token
+    verify: publicProcedure
+      .input(z.object({ token: z.string() }))
+      .query(({ input }) => {
+        const payload = verifyAdminToken(input.token);
+        if (!payload) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "管理员Token无效或已过期",
+          });
+        }
+        return {
+          valid: true,
+          username: payload.username,
+        };
+      }),
+
+    // 管理员登出（前端清除token即可）
+    logout: publicProcedure.mutation(() => {
+      return { success: true };
+    }),
+  }),
+
   // ============ 管理员路由 ============
   admin: router({
     // 获取所有用户
@@ -457,10 +510,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        const success = await updateUserStatus(input.userId, input.status);
-        if (!success) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
-        }
+        await updateUserStatus(input.userId, input.status);
         return { success: true };
       }),
 
@@ -473,10 +523,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        const success = await updateUserRole(input.userId, input.role);
-        if (!success) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
-        }
+        await updateUserRole(input.userId, input.role);
         return { success: true };
       }),
 
@@ -493,7 +540,7 @@ export const appRouter = router({
         const result = await addCredits(
           input.userId,
           input.amount,
-          "admin_adjust",
+          "admin_add",
           input.reason
         );
 
@@ -520,7 +567,7 @@ export const appRouter = router({
         })
       )
       .query(async ({ input }) => {
-        return getApiLogs(input);
+        return getApiLogs(input.limit || 50);
       }),
 
     // 获取系统配置
@@ -537,8 +584,8 @@ export const appRouter = router({
           description: z.string().optional(),
         })
       )
-      .mutation(async ({ input }) => {
-        await setConfig(input.key, input.value, input.description);
+      .mutation(async ({ input, ctx }) => {
+        await setConfig(input.key, input.value, ctx.user.email || 'admin', input.description);
         return { success: true };
       }),
   }),

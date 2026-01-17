@@ -16,13 +16,44 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// 定义搜索结果数据类型
+interface ResultData {
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  title?: string;
+  company?: string;
+  organization_name?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  phoneNumber?: string;
+  phone?: string;
+  phoneType?: string;
+  carrier?: string;
+  email?: string;
+  linkedinUrl?: string;
+  linkedin_url?: string;
+  age?: number;
+}
+
+// 定义搜索参数类型
+interface SearchParams {
+  name?: string;
+  title?: string;
+  state?: string;
+}
+
 export default function Results() {
   const { taskId } = useParams<{ taskId: string }>();
   const { user } = useAuth();
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<Array<{ timestamp: string; level: string; message: string }>>([]);
 
   const { data: task, isLoading, refetch } = trpc.search.taskStatus.useQuery(
-    { taskId: Number(taskId) },
+    { taskId: taskId || "" },
     { 
       enabled: !!user && !!taskId,
       refetchInterval: 3000
@@ -30,7 +61,7 @@ export default function Results() {
   );
 
   const { data: results } = trpc.search.results.useQuery(
-    { taskId: Number(taskId) },
+    { taskId: taskId || "" },
     { enabled: !!user && !!taskId && task?.status === "completed" }
   );
 
@@ -53,19 +84,19 @@ export default function Results() {
     },
   });
 
-  // 模拟日志更新
+  // 解析任务日志
   useEffect(() => {
-    if (task?.processLog) {
+    if (task?.logs) {
       try {
-        const logData = JSON.parse(task.processLog as string);
+        const logData = task.logs as Array<{ timestamp: string; level: string; message: string }>;
         if (Array.isArray(logData)) {
           setLogs(logData);
         }
       } catch {
-        setLogs([task.processLog as string]);
+        setLogs([]);
       }
     }
-  }, [task?.processLog]);
+  }, [task?.logs]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -73,16 +104,23 @@ export default function Results() {
         return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">已完成</Badge>;
       case "failed":
         return <Badge variant="destructive">失败</Badge>;
-      case "searching":
-      case "fetching_phones":
-      case "verifying":
+      case "running":
         return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">处理中</Badge>;
+      case "pending":
       default:
         return <Badge variant="secondary">等待中</Badge>;
     }
   };
 
-  const progress = task ? Math.round((task.phonesVerified / Math.max(task.totalResults, 1)) * 100) : 0;
+  // 解析搜索参数
+  const searchParams = task?.params as SearchParams | undefined;
+  const searchName = searchParams?.name || "";
+  const searchTitle = searchParams?.title || "";
+  const searchState = searchParams?.state || "";
+
+  // 计算进度
+  const totalResults = task?.actualCount || 0;
+  const progress = task?.progress || 0;
 
   if (isLoading) {
     return (
@@ -126,7 +164,7 @@ export default function Results() {
             <div>
               <h1 className="text-2xl font-bold text-foreground">搜索结果</h1>
               <p className="text-muted-foreground">
-                {task.searchName} · {task.searchTitle} · {task.searchState}
+                {searchName} · {searchTitle} · {searchState}
               </p>
             </div>
           </div>
@@ -134,7 +172,7 @@ export default function Results() {
             {getStatusBadge(task.status)}
             {task.status === "completed" && results && results.length > 0 && (
               <Button
-                onClick={() => exportMutation.mutate({ taskId: Number(taskId) })}
+                onClick={() => exportMutation.mutate({ taskId: taskId || "" })}
                 disabled={exportMutation.isPending}
               >
                 <Download className="mr-2 h-4 w-4" />
@@ -149,29 +187,29 @@ export default function Results() {
           <CardHeader>
             <CardTitle className="text-card-foreground">任务进度</CardTitle>
             <CardDescription>
-              消耗积分：{task.creditsUsed} · 创建时间：{new Date(task.createdAt).toLocaleString()}
+              消耗积分：{task.creditsUsed || 0} · 创建时间：{new Date(task.createdAt).toLocaleString()}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">验证进度</span>
+              <span className="text-muted-foreground">处理进度</span>
               <span className="text-foreground font-medium">
-                {task.phonesVerified} / {task.totalResults} 条
+                {progress}%
               </span>
             </div>
             <Progress value={progress} className="h-2" />
 
             <div className="grid grid-cols-3 gap-4 pt-4">
               <div className="text-center p-4 rounded-lg bg-secondary/50">
-                <div className="text-2xl font-bold text-foreground">{task.totalResults}</div>
-                <div className="text-xs text-muted-foreground">搜索结果</div>
+                <div className="text-2xl font-bold text-foreground">{task.requestedCount}</div>
+                <div className="text-xs text-muted-foreground">请求数量</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-green-500/10">
-                <div className="text-2xl font-bold text-green-400">{task.phonesVerified}</div>
-                <div className="text-xs text-muted-foreground">验证通过</div>
+                <div className="text-2xl font-bold text-green-400">{totalResults}</div>
+                <div className="text-xs text-muted-foreground">实际结果</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-primary/10">
-                <div className="text-2xl font-bold text-primary">{task.creditsUsed}</div>
+                <div className="text-2xl font-bold text-primary">{task.creditsUsed || 0}</div>
                 <div className="text-xs text-muted-foreground">消耗积分</div>
               </div>
             </div>
@@ -179,7 +217,7 @@ export default function Results() {
         </Card>
 
         {/* 处理日志 */}
-        {(task.status === "searching" || task.status === "fetching_phones" || task.status === "verifying") && (
+        {(task.status === "pending" || task.status === "running") && (
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-card-foreground">处理日志</CardTitle>
@@ -194,7 +232,9 @@ export default function Results() {
                     logs.map((log, i) => (
                       <div key={i} className="flex items-start gap-2">
                         <Clock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                        <span className="text-muted-foreground">{log}</span>
+                        <span className={`${log.level === 'error' ? 'text-red-400' : 'text-muted-foreground'}`}>
+                          [{log.timestamp}] {log.message}
+                        </span>
                       </div>
                     ))
                   ) : (
@@ -210,7 +250,7 @@ export default function Results() {
         {task.status === "completed" && results && results.length > 0 && (
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-card-foreground">验证通过的结果</CardTitle>
+              <CardTitle className="text-card-foreground">搜索结果</CardTitle>
               <CardDescription>共 {results.length} 条记录，结果将保留7天</CardDescription>
             </CardHeader>
             <CardContent>
@@ -227,48 +267,67 @@ export default function Results() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {results.map((result) => (
-                      <TableRow key={result.id} className="hover:bg-secondary/30">
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium text-foreground">{result.fullName || result.firstName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Briefcase className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">{result.title || "-"}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Building className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">{result.company || "-"}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">
-                              {result.city ? `${result.city}, ` : ""}{result.state || "-"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4 text-green-400" />
-                            <span className="font-mono text-foreground">{result.phoneNumber}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-400" />
-                            <span className="text-green-400 text-sm">已验证</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {results.map((result) => {
+                      const data = result.data as ResultData || {};
+                      const fullName = data.fullName || data.name || `${data.firstName || data.first_name || ""} ${data.lastName || data.last_name || ""}`.trim() || "-";
+                      const title = data.title || "-";
+                      const company = data.company || data.organization_name || "-";
+                      const city = data.city || "";
+                      const state = data.state || "";
+                      const phoneNumber = data.phoneNumber || data.phone || "-";
+                      
+                      return (
+                        <TableRow key={result.id} className="hover:bg-secondary/30">
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium text-foreground">{fullName}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Briefcase className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">{title}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Building className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">{company}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <MapPin className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-muted-foreground">
+                                {city ? `${city}, ` : ""}{state || "-"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-green-400" />
+                              <span className="font-mono text-foreground">{phoneNumber}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {result.verified ? (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-green-400" />
+                                  <span className="text-green-400 text-sm">已验证</span>
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="h-4 w-4 text-muted-foreground" />
+                                  <span className="text-muted-foreground text-sm">未验证</span>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -282,9 +341,9 @@ export default function Results() {
             <CardContent className="py-12">
               <div className="text-center">
                 <XCircle className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold text-foreground">未找到验证通过的结果</h3>
+                <h3 className="text-lg font-semibold text-foreground">未找到结果</h3>
                 <p className="text-muted-foreground mt-2">
-                  搜索已完成，但没有找到通过验证的电话号码
+                  搜索已完成，但没有找到匹配的结果
                 </p>
                 <Link href="/search">
                   <Button className="mt-4">尝试新的搜索</Button>
@@ -300,9 +359,9 @@ export default function Results() {
             <CardContent className="py-8">
               <div className="text-center">
                 <XCircle className="h-16 w-16 mx-auto text-destructive mb-4" />
-                <h3 className="text-lg font-semibold text-foreground">搜索失败</h3>
+                <h3 className="text-lg font-semibold text-foreground">任务失败</h3>
                 <p className="text-muted-foreground mt-2">
-                  {task.errorMessage || "搜索过程中发生错误"}
+                  {task.errorMessage || "搜索过程中发生错误，请稍后重试"}
                 </p>
                 <Link href="/search">
                   <Button className="mt-4">重新搜索</Button>
