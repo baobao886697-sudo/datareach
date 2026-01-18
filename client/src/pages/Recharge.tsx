@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Coins, Copy, Clock, CheckCircle, XCircle, Loader2, QrCode, Wallet, Zap, ArrowRight, Sparkles, AlertTriangle, RefreshCw } from "lucide-react";
+import { Coins, Copy, Clock, CheckCircle, XCircle, Loader2, QrCode, Wallet, Zap, AlertTriangle, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const PRESET_AMOUNTS = [100, 500, 1000, 5000];
@@ -57,38 +57,67 @@ export default function Recharge() {
   
   const [credits, setCredits] = useState(initialAmount ? Number(initialAmount) : 100);
   const [activeOrder, setActiveOrder] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   
-  // 使用ref来追踪是否已经显示过成功提示
-  const paidToastShownRef = useRef<string | null>(null);
+  // 使用ref来追踪是否已经显示过成功提示，避免重复触发
+  const paidToastShownRef = useRef<Set<string>>(new Set());
+  // 使用ref来追踪组件是否已挂载
+  const isMountedRef = useRef(true);
 
-  const { data: profile, refetch: refetchProfile } = trpc.user.profile.useQuery(undefined, { enabled: !!user });
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const { data: profile, refetch: refetchProfile } = trpc.user.profile.useQuery(undefined, { 
+    enabled: !!user,
+    refetchOnWindowFocus: false,
+  });
   
   const { data: ordersData, isLoading: ordersLoading, refetch: refetchOrders } = trpc.recharge.history.useQuery(
     { limit: 10 },
-    { enabled: !!user }
+    { 
+      enabled: !!user,
+      refetchOnWindowFocus: false,
+    }
   );
 
   const orders = ordersData?.orders || [];
 
+  // 创建订单mutation - 不使用onSuccess/onError回调，避免在渲染过程中触发状态更新
   const createOrderMutation = trpc.recharge.create.useMutation();
 
+  // 使用单独的状态来控制订单查询
+  const orderQueryEnabled = Boolean(activeOrder && activeOrder.length > 0);
+  
   const { data: orderDetail } = trpc.recharge.status.useQuery(
-    { orderId: activeOrder! },
+    { orderId: activeOrder || "" },
     { 
-      enabled: !!activeOrder,
-      refetchInterval: 5000
+      enabled: orderQueryEnabled,
+      refetchInterval: orderQueryEnabled ? 5000 : false,
+      refetchOnWindowFocus: false,
     }
   );
 
   // 当订单状态变为paid时，刷新用户积分
   useEffect(() => {
-    if (orderDetail?.status === "paid" && activeOrder && paidToastShownRef.current !== activeOrder) {
-      paidToastShownRef.current = activeOrder;
-      refetchProfile();
-      toast.success("充值成功！积分已到账");
-    }
+    if (!orderDetail || !activeOrder) return;
+    if (orderDetail.status !== "paid") return;
+    if (paidToastShownRef.current.has(activeOrder)) return;
+    
+    paidToastShownRef.current.add(activeOrder);
+    
+    // 使用setTimeout延迟执行，避免在渲染过程中触发状态更新
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) {
+        refetchProfile();
+        toast.success("充值成功！积分已到账");
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [orderDetail?.status, activeOrder, refetchProfile]);
 
   const countdown = useCountdown(orderDetail?.expiresAt ? new Date(orderDetail.expiresAt) : null);
@@ -101,41 +130,54 @@ export default function Recharge() {
       return;
     }
     
-    setIsCreating(true);
+    if (createOrderMutation.isPending) return;
+    
     setCreateError(null);
     
     try {
       const result = await createOrderMutation.mutateAsync({ credits, network: "TRC20" });
-      toast.success("充值订单已创建");
-      setActiveOrder(result.orderId);
-      // 使用setTimeout延迟refetch，避免在mutation回调中直接触发
-      setTimeout(() => {
-        refetchOrders();
-      }, 100);
-    } catch (error: any) {
-      const errorMessage = error?.message || "创建订单失败";
-      setCreateError(errorMessage);
       
-      // 检查是否是认证错误
-      if (errorMessage.includes("login") || errorMessage.includes("10001") || errorMessage.includes("unauthorized")) {
-        toast.error("登录已过期，请重新登录");
-        setTimeout(() => {
-          setLocation("/login");
-        }, 500);
-      } else {
-        toast.error(errorMessage);
-      }
-    } finally {
-      setIsCreating(false);
+      if (!isMountedRef.current) return;
+      
+      // 使用setTimeout延迟状态更新，避免在mutation回调中直接触发
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          toast.success("充值订单已创建");
+          setActiveOrder(result.orderId);
+          refetchOrders();
+        }
+      }, 50);
+    } catch (error: any) {
+      if (!isMountedRef.current) return;
+      
+      // 使用setTimeout延迟错误处理
+      setTimeout(() => {
+        if (!isMountedRef.current) return;
+        
+        const errorMessage = error?.message || "创建订单失败";
+        setCreateError(errorMessage);
+        
+        // 检查是否是认证错误
+        if (errorMessage.includes("login") || errorMessage.includes("10001") || errorMessage.includes("unauthorized")) {
+          toast.error("登录已过期，请重新登录");
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              setLocation("/login");
+            }
+          }, 1000);
+        } else {
+          toast.error(errorMessage);
+        }
+      }, 50);
     }
   }, [credits, createOrderMutation, refetchOrders, setLocation]);
 
-  const copyToClipboard = (text: string, label: string) => {
+  const copyToClipboard = useCallback((text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast.success(`${label}已复制`);
-  };
+  }, []);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = useCallback((status: string) => {
     switch (status) {
       case "paid":
         return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">已确认</Badge>;
@@ -150,7 +192,19 @@ export default function Recharge() {
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
-  };
+  }, []);
+
+  const handleClearActiveOrder = useCallback(() => {
+    setActiveOrder(null);
+  }, []);
+
+  const handleSelectOrder = useCallback((orderId: string) => {
+    setActiveOrder(orderId);
+  }, []);
+
+  const handleRefreshOrders = useCallback(() => {
+    refetchOrders();
+  }, [refetchOrders]);
 
   return (
     <DashboardLayout>
@@ -240,10 +294,10 @@ export default function Recharge() {
               {/* 创建订单按钮 */}
               <Button
                 onClick={handleCreateOrder}
-                disabled={isCreating || credits < 100}
+                disabled={createOrderMutation.isPending || credits < 100}
                 className="w-full h-14 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-black font-bold text-lg"
               >
-                {isCreating ? (
+                {createOrderMutation.isPending ? (
                   <>
                     <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                     创建中...
@@ -348,7 +402,7 @@ export default function Recharge() {
                     <Button
                       variant="outline"
                       className="mt-6"
-                      onClick={() => setActiveOrder(null)}
+                      onClick={handleClearActiveOrder}
                     >
                       创建新订单
                     </Button>
@@ -365,7 +419,7 @@ export default function Recharge() {
                     <Button
                       variant="outline"
                       className="mt-6"
-                      onClick={() => setActiveOrder(null)}
+                      onClick={handleClearActiveOrder}
                     >
                       创建新订单
                     </Button>
@@ -411,7 +465,7 @@ export default function Recharge() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => refetchOrders()}
+              onClick={handleRefreshOrders}
               className="text-slate-400 hover:text-white"
             >
               <RefreshCw className="w-4 h-4 mr-1" />
@@ -436,7 +490,7 @@ export default function Recharge() {
                 <div
                   key={order.id}
                   className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:border-slate-700/50 transition-colors"
-                  onClick={() => setActiveOrder(order.id)}
+                  onClick={() => handleSelectOrder(order.id)}
                 >
                   <div className="flex items-center gap-4">
                     <div className="p-2 bg-yellow-500/10 rounded-lg">
