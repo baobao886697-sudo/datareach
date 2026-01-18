@@ -63,8 +63,6 @@ export default function PaymentDetail() {
     { orderId: orderId || "" },
     { 
       enabled: !!orderId && !!user,
-      refetchInterval: 5000, // 每5秒刷新一次
-      refetchIntervalInBackground: false,
     }
   );
 
