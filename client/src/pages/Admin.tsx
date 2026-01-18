@@ -1583,14 +1583,15 @@ function WalletMonitorTab() {
       </div>
 
       {/* 用户详情对话框 */}
-      {selectedUser && (
-        <UserDetailDialog
-          userId={selectedUser}
-          open={userDetailDialogOpen}
-          onOpenChange={setUserDetailDialogOpen}
-          onRefresh={() => refetchUsers()}
-        />
-      )}
+      <UserDetailDialog
+        userId={selectedUser}
+        open={userDetailDialogOpen && selectedUser !== null}
+        onOpenChange={(open) => {
+          setUserDetailDialogOpen(open);
+          if (!open) setSelectedUser(null);
+        }}
+        onRefresh={() => refetchUsers()}
+      />
 
       {/* 订单详情对话框 */}
       {selectedOrder && (
