@@ -79,6 +79,12 @@ export default function Admin() {
     }
   }, [statsError, setLocation]);
 
+  // 调试: 监听userDetailDialogOpen状态变化
+  useEffect(() => {
+    console.log('[DEBUG] userDetailDialogOpen changed:', userDetailDialogOpen);
+    console.log('[DEBUG] detailUserId:', detailUserId);
+  }, [userDetailDialogOpen, detailUserId]);
+
   const { data: usersData, isLoading: usersLoading, refetch: refetchUsers } = trpc.admin.users.useQuery(
     undefined,
     { enabled: !!adminToken }
