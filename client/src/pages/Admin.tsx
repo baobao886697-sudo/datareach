@@ -4,16 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { 
   Users, Coins, Search, Settings, Plus, Minus, 
   RefreshCw, Shield, TrendingUp, Phone, DollarSign,
   LogOut, Target, LayoutDashboard, CreditCard, FileText,
-  Database, AlertTriangle, CheckCircle, XCircle, Clock
+  Database, AlertTriangle, CheckCircle, XCircle, Clock,
+  Eye, Edit, Ban, UserCheck, Wallet, Copy, ExternalLink,
+  Save, Trash2, Activity, Server, Zap
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -21,8 +25,23 @@ export default function Admin() {
   const [, setLocation] = useLocation();
   const [selectedUser, setSelectedUser] = useState<number | null>(null);
   const [creditAmount, setCreditAmount] = useState(0);
+  const [creditReason, setCreditReason] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [orderFilter, setOrderFilter] = useState<string>("all");
+  const [logType, setLogType] = useState<string>("api");
+  
+  // 订单确认对话框
+  const [confirmOrderDialog, setConfirmOrderDialog] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [txId, setTxId] = useState("");
+  const [receivedAmount, setReceivedAmount] = useState("");
+  
+  // 配置编辑
+  const [editingConfig, setEditingConfig] = useState<{ key: string; value: string; description?: string } | null>(null);
+  const [newConfigKey, setNewConfigKey] = useState("");
+  const [newConfigValue, setNewConfigValue] = useState("");
+  const [newConfigDesc, setNewConfigDesc] = useState("");
   
   // 检查管理员登录状态
   const adminToken = localStorage.getItem("adminToken");
@@ -33,15 +52,13 @@ export default function Admin() {
     }
   }, [adminToken, setLocation]);
 
-  const { data: stats, isLoading: statsLoading, refetch: refetchStats, error: statsError } = trpc.admin.stats.useQuery(
+  // ============ 数据查询 ============
+  
+  const { data: dashboardStats, isLoading: statsLoading, refetch: refetchStats, error: statsError } = trpc.admin.dashboardStats.useQuery(
     undefined,
-    { 
-      enabled: !!adminToken,
-      retry: false,
-    }
+    { enabled: !!adminToken, retry: false }
   );
 
-  // Handle stats query error
   useEffect(() => {
     if (statsError) {
       localStorage.removeItem("adminToken");
@@ -54,7 +71,31 @@ export default function Admin() {
     { enabled: !!adminToken }
   );
 
+  const { data: ordersData, isLoading: ordersLoading, refetch: refetchOrders } = trpc.admin.orders.useQuery(
+    { status: orderFilter === "all" ? undefined : orderFilter },
+    { enabled: !!adminToken }
+  );
+
+  const { data: configsData, isLoading: configsLoading, refetch: refetchConfigs } = trpc.admin.configs.useQuery(
+    undefined,
+    { enabled: !!adminToken }
+  );
+
+  const { data: apiLogsData, isLoading: apiLogsLoading, refetch: refetchApiLogs } = trpc.admin.apiLogs.useQuery(
+    undefined,
+    { enabled: !!adminToken && logType === "api" }
+  );
+
+  const { data: adminLogsData, isLoading: adminLogsLoading, refetch: refetchAdminLogs } = trpc.admin.adminLogs.useQuery(
+    undefined,
+    { enabled: !!adminToken && logType === "admin" }
+  );
+
   const users = usersData?.users || [];
+  const orders = ordersData?.orders || [];
+  const configs = configsData || [];
+
+  // ============ Mutations ============
 
   const adjustCreditsMutation = trpc.admin.adjustCredits.useMutation({
     onSuccess: () => {
@@ -63,11 +104,82 @@ export default function Admin() {
       refetchStats();
       setDialogOpen(false);
       setCreditAmount(0);
+      setCreditReason("");
     },
     onError: (error) => {
       toast.error(error.message || "调整失败");
     },
   });
+
+  const updateUserStatusMutation = trpc.admin.updateUserStatus.useMutation({
+    onSuccess: () => {
+      toast.success("用户状态已更新");
+      refetchUsers();
+    },
+    onError: (error) => {
+      toast.error(error.message || "更新失败");
+    },
+  });
+
+  const confirmOrderMutation = trpc.admin.confirmOrder.useMutation({
+    onSuccess: () => {
+      toast.success("订单已确认到账");
+      refetchOrders();
+      refetchStats();
+      setConfirmOrderDialog(false);
+      setTxId("");
+      setReceivedAmount("");
+    },
+    onError: (error) => {
+      toast.error(error.message || "确认失败");
+    },
+  });
+
+  const cancelOrderMutation = trpc.admin.cancelOrder.useMutation({
+    onSuccess: () => {
+      toast.success("订单已取消");
+      refetchOrders();
+    },
+    onError: (error) => {
+      toast.error(error.message || "取消失败");
+    },
+  });
+
+  const setConfigMutation = trpc.admin.setConfig.useMutation({
+    onSuccess: () => {
+      toast.success("配置已保存");
+      refetchConfigs();
+      setEditingConfig(null);
+      setNewConfigKey("");
+      setNewConfigValue("");
+      setNewConfigDesc("");
+    },
+    onError: (error) => {
+      toast.error(error.message || "保存失败");
+    },
+  });
+
+  const deleteConfigMutation = trpc.admin.deleteConfig.useMutation({
+    onSuccess: () => {
+      toast.success("配置已删除");
+      refetchConfigs();
+    },
+    onError: (error) => {
+      toast.error(error.message || "删除失败");
+    },
+  });
+
+  const initDefaultConfigsMutation = trpc.admin.initDefaultConfigs.useMutation({
+    onSuccess: () => {
+      toast.success("默认配置已初始化");
+      refetchConfigs();
+    },
+    onError: (error) => {
+      toast.error(error.message || "初始化失败");
+    },
+  });
+
+  // ============ 事件处理 ============
 
   const handleLogout = () => {
     localStorage.removeItem("adminToken");
@@ -80,8 +192,39 @@ export default function Admin() {
     adjustCreditsMutation.mutate({
       userId: selectedUser,
       amount: add ? creditAmount : -creditAmount,
-      reason: add ? "管理员手动增加" : "管理员手动扣除",
+      reason: creditReason || (add ? "管理员手动增加" : "管理员手动扣除"),
     });
+  };
+
+  const handleConfirmOrder = () => {
+    if (!selectedOrder || !txId) return;
+    confirmOrderMutation.mutate({
+      orderId: selectedOrder.orderId,
+      txId,
+      receivedAmount: receivedAmount || selectedOrder.amount,
+    });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("已复制到剪贴板");
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "paid":
+        return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">已支付</Badge>;
+      case "pending":
+        return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">待支付</Badge>;
+      case "cancelled":
+        return <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">已取消</Badge>;
+      case "expired":
+        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">已过期</Badge>;
+      case "mismatch":
+        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">金额不匹配</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
   };
 
   if (!adminToken) {
@@ -148,7 +291,7 @@ export default function Admin() {
           <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-orange-500/5 rounded-full blur-[100px]" />
         </div>
 
-        {/* 仪表盘 */}
+        {/* ============ 仪表盘 ============ */}
         {activeTab === "dashboard" && (
           <div className="relative space-y-6">
             <div className="flex items-center justify-between">
@@ -164,7 +307,7 @@ export default function Admin() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { refetchStats(); refetchUsers(); }}
+                onClick={() => { refetchStats(); refetchUsers(); refetchOrders(); }}
                 className="border-slate-700 text-slate-300 hover:bg-slate-800"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -172,13 +315,13 @@ export default function Admin() {
               </Button>
             </div>
 
-            {/* 统计卡片 */}
+            {/* 统计卡片 - 第一行 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: "总用户数", value: usersData?.total || 0, icon: Users, color: "cyan", loading: usersLoading },
-                { label: "今日搜索", value: stats?.todaySearches || 0, icon: Search, color: "purple", loading: statsLoading },
-                { label: "总搜索次数", value: stats?.totalSearches || 0, icon: TrendingUp, color: "green", loading: statsLoading },
-                { label: "今日积分消耗", value: stats?.todayCreditsUsed || 0, icon: Coins, color: "yellow", loading: statsLoading },
+                { label: "总用户数", value: dashboardStats?.users?.total || 0, icon: Users, color: "cyan", sub: `今日新增 ${dashboardStats?.users?.newToday || 0}` },
+                { label: "活跃用户", value: dashboardStats?.users?.active || 0, icon: UserCheck, color: "green", sub: `本周新增 ${dashboardStats?.users?.newThisWeek || 0}` },
+                { label: "待处理订单", value: dashboardStats?.orders?.pendingCount || 0, icon: Clock, color: "yellow", sub: `今日 ${dashboardStats?.orders?.todayCount || 0} 笔` },
+                { label: "本月收入", value: `$${dashboardStats?.orders?.monthAmount || 0}`, icon: DollarSign, color: "purple", sub: `今日 $${dashboardStats?.orders?.todayAmount || 0}` },
               ].map((stat, index) => (
                 <div
                   key={index}
@@ -186,33 +329,67 @@ export default function Admin() {
                 >
                   <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${
                     stat.color === "cyan" ? "from-cyan-500 to-blue-500" :
-                    stat.color === "purple" ? "from-purple-500 to-pink-500" :
                     stat.color === "green" ? "from-green-500 to-emerald-500" :
-                    "from-yellow-500 to-orange-500"
+                    stat.color === "yellow" ? "from-yellow-500 to-orange-500" :
+                    "from-purple-500 to-pink-500"
                   }`} />
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm text-slate-400">{stat.label}</p>
-                      {stat.loading ? (
+                      {statsLoading ? (
                         <Skeleton className="h-8 w-20 mt-2" />
                       ) : (
-                        <p className="text-3xl font-bold text-white mt-1" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                          {stat.value.toLocaleString()}
-                        </p>
+                        <>
+                          <p className="text-3xl font-bold text-white mt-1" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                            {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">{stat.sub}</p>
+                        </>
                       )}
                     </div>
                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
                       stat.color === "cyan" ? "bg-cyan-500/20" :
-                      stat.color === "purple" ? "bg-purple-500/20" :
                       stat.color === "green" ? "bg-green-500/20" :
-                      "bg-yellow-500/20"
+                      stat.color === "yellow" ? "bg-yellow-500/20" :
+                      "bg-purple-500/20"
                     }`}>
                       <stat.icon className={`h-6 w-6 ${
                         stat.color === "cyan" ? "text-cyan-400" :
-                        stat.color === "purple" ? "text-purple-400" :
                         stat.color === "green" ? "text-green-400" :
-                        "text-yellow-400"
+                        stat.color === "yellow" ? "text-yellow-400" :
+                        "text-purple-400"
                       }`} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 统计卡片 - 第二行 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { label: "今日搜索", value: dashboardStats?.searches?.todaySearches || 0, icon: Search, color: "blue" },
+                { label: "总搜索次数", value: dashboardStats?.searches?.totalSearches || 0, icon: TrendingUp, color: "indigo" },
+                { label: "今日积分消耗", value: dashboardStats?.searches?.todayCreditsUsed || 0, icon: Coins, color: "amber" },
+                { label: "缓存条目", value: dashboardStats?.cache?.totalEntries || 0, icon: Database, color: "teal" },
+              ].map((stat, index) => (
+                <div
+                  key={index}
+                  className="relative p-5 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 overflow-hidden"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm text-slate-400">{stat.label}</p>
+                      {statsLoading ? (
+                        <Skeleton className="h-8 w-20 mt-2" />
+                      ) : (
+                        <p className="text-2xl font-bold text-white mt-1" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                          {stat.value.toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-slate-800/50`}>
+                      <stat.icon className="h-5 w-5 text-slate-400" />
                     </div>
                   </div>
                 </div>
@@ -249,7 +426,7 @@ export default function Admin() {
           </div>
         )}
 
-        {/* 用户管理 */}
+        {/* ============ 用户管理 ============ */}
         {activeTab === "users" && (
           <div className="relative space-y-6">
             <div className="flex items-center justify-between">
@@ -288,7 +465,7 @@ export default function Admin() {
                       <TableHead className="text-slate-400">邮箱</TableHead>
                       <TableHead className="text-slate-400">姓名</TableHead>
                       <TableHead className="text-slate-400">积分</TableHead>
-                      <TableHead className="text-slate-400">角色</TableHead>
+                      <TableHead className="text-slate-400">状态</TableHead>
                       <TableHead className="text-slate-400">注册时间</TableHead>
                       <TableHead className="text-slate-400">操作</TableHead>
                     </TableRow>
@@ -311,74 +488,97 @@ export default function Admin() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          {u.role === "admin" ? (
-                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30">管理员</Badge>
+                          {u.status === "active" ? (
+                            <Badge className="bg-green-500/20 text-green-400 border-green-500/30">正常</Badge>
                           ) : (
-                            <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">用户</Badge>
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30">禁用</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-slate-500 text-sm">
                           {new Date(u.createdAt).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          <Dialog open={dialogOpen && selectedUser === u.id} onOpenChange={(open) => {
-                            setDialogOpen(open);
-                            if (open) setSelectedUser(u.id);
-                          }}>
-                            <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10">
-                                <Coins className="h-4 w-4 mr-1" />
-                                调整积分
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="bg-slate-900 border-slate-700">
-                              <DialogHeader>
-                                <DialogTitle className="text-white">
-                                  调整积分
-                                </DialogTitle>
-                                <DialogDescription className="text-slate-400">
-                                  为用户 {u.email} 调整积分
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="space-y-4 py-4">
-                                <div className="space-y-2">
-                                  <Label className="text-slate-300">当前积分</Label>
-                                  <p className="text-3xl font-bold text-yellow-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                                    {u.credits?.toLocaleString() || 0}
-                                  </p>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label className="text-slate-300">调整数量</Label>
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    value={creditAmount}
-                                    onChange={(e) => setCreditAmount(Number(e.target.value))}
-                                    className="bg-slate-800 border-slate-700 text-white"
-                                  />
-                                </div>
-                              </div>
-                              <DialogFooter className="gap-2">
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleAdjustCredits(false)}
-                                  disabled={adjustCreditsMutation.isPending || creditAmount <= 0}
-                                  className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-                                >
-                                  <Minus className="h-4 w-4 mr-1" />
-                                  扣除
+                          <div className="flex items-center gap-2">
+                            <Dialog open={dialogOpen && selectedUser === u.id} onOpenChange={(open) => {
+                              setDialogOpen(open);
+                              if (open) setSelectedUser(u.id);
+                            }}>
+                              <DialogTrigger asChild>
+                                <Button variant="ghost" size="sm" className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10">
+                                  <Coins className="h-4 w-4 mr-1" />
+                                  积分
                                 </Button>
-                                <Button
-                                  onClick={() => handleAdjustCredits(true)}
-                                  disabled={adjustCreditsMutation.isPending || creditAmount <= 0}
-                                  className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0"
-                                >
-                                  <Plus className="h-4 w-4 mr-1" />
-                                  增加
-                                </Button>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
+                              </DialogTrigger>
+                              <DialogContent className="bg-slate-900 border-slate-700">
+                                <DialogHeader>
+                                  <DialogTitle className="text-white">调整积分</DialogTitle>
+                                  <DialogDescription className="text-slate-400">
+                                    为用户 {u.email} 调整积分
+                                  </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-4 py-4">
+                                  <div className="space-y-2">
+                                    <Label className="text-slate-300">当前积分</Label>
+                                    <p className="text-3xl font-bold text-yellow-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                                      {u.credits?.toLocaleString() || 0}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label className="text-slate-300">调整数量</Label>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={creditAmount}
+                                      onChange={(e) => setCreditAmount(Number(e.target.value))}
+                                      className="bg-slate-800 border-slate-700 text-white"
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label className="text-slate-300">原因说明</Label>
+                                    <Input
+                                      value={creditReason}
+                                      onChange={(e) => setCreditReason(e.target.value)}
+                                      placeholder="请输入调整原因"
+                                      className="bg-slate-800 border-slate-700 text-white"
+                                    />
+                                  </div>
+                                </div>
+                                <DialogFooter className="gap-2">
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => handleAdjustCredits(false)}
+                                    disabled={adjustCreditsMutation.isPending || creditAmount <= 0}
+                                    className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                  >
+                                    <Minus className="h-4 w-4 mr-1" />
+                                    扣除
+                                  </Button>
+                                  <Button
+                                    onClick={() => handleAdjustCredits(true)}
+                                    disabled={adjustCreditsMutation.isPending || creditAmount <= 0}
+                                    className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0"
+                                  >
+                                    <Plus className="h-4 w-4 mr-1" />
+                                    增加
+                                  </Button>
+                                </DialogFooter>
+                              </DialogContent>
+                            </Dialog>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => updateUserStatusMutation.mutate({
+                                userId: u.id,
+                                status: u.status === "active" ? "disabled" : "active"
+                              })}
+                              className={u.status === "active" 
+                                ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                : "text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                              }
+                            >
+                              {u.status === "active" ? <Ban className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -394,63 +594,655 @@ export default function Admin() {
           </div>
         )}
 
-        {/* 充值订单 */}
+        {/* ============ 充值订单 ============ */}
         {activeTab === "orders" && (
           <div className="relative space-y-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <CreditCard className="w-5 h-5 text-yellow-400" />
-                <span className="text-sm text-yellow-400">订单管理</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <CreditCard className="w-5 h-5 text-yellow-400" />
+                  <span className="text-sm text-yellow-400">订单管理</span>
+                </div>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                  充值订单
+                </h1>
               </div>
-              <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-                充值订单
-              </h1>
+              <div className="flex items-center gap-3">
+                <Select value={orderFilter} onValueChange={setOrderFilter}>
+                  <SelectTrigger className="w-32 bg-slate-800 border-slate-700 text-white">
+                    <SelectValue placeholder="筛选状态" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    <SelectItem value="all">全部</SelectItem>
+                    <SelectItem value="pending">待支付</SelectItem>
+                    <SelectItem value="paid">已支付</SelectItem>
+                    <SelectItem value="cancelled">已取消</SelectItem>
+                    <SelectItem value="expired">已过期</SelectItem>
+                    <SelectItem value="mismatch">金额不匹配</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchOrders()}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  刷新
+                </Button>
+              </div>
             </div>
 
-            <div className="text-center py-12 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50">
-              <CreditCard className="h-12 w-12 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-500">订单管理功能开发中...</p>
+            <div className="rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 overflow-hidden">
+              {ordersLoading ? (
+                <div className="p-6 space-y-3">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-16 rounded-xl" />
+                  ))}
+                </div>
+              ) : orders && orders.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-700 hover:bg-transparent">
+                      <TableHead className="text-slate-400">订单号</TableHead>
+                      <TableHead className="text-slate-400">用户ID</TableHead>
+                      <TableHead className="text-slate-400">金额(USDT)</TableHead>
+                      <TableHead className="text-slate-400">积分</TableHead>
+                      <TableHead className="text-slate-400">网络</TableHead>
+                      <TableHead className="text-slate-400">状态</TableHead>
+                      <TableHead className="text-slate-400">创建时间</TableHead>
+                      <TableHead className="text-slate-400">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orders.map((order: any) => (
+                      <TableRow key={order.id} className="border-slate-700/50 hover:bg-slate-800/30">
+                        <TableCell className="font-mono text-slate-300 text-sm">
+                          {order.orderId}
+                        </TableCell>
+                        <TableCell className="text-slate-400">
+                          {order.userId}
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono text-green-400">
+                            ${order.amount}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono text-yellow-400">
+                            {order.credits?.toLocaleString()}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-slate-400 border-slate-600">
+                            {order.network}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {getStatusBadge(order.status)}
+                        </TableCell>
+                        <TableCell className="text-slate-500 text-sm">
+                          {new Date(order.createdAt).toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {order.status === "pending" && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedOrder(order);
+                                    setConfirmOrderDialog(true);
+                                  }}
+                                  className="text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                                >
+                                  <CheckCircle className="h-4 w-4 mr-1" />
+                                  确认
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => cancelOrderMutation.mutate({ orderId: order.orderId })}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            {order.txId && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => copyToClipboard(order.txId)}
+                                className="text-slate-400 hover:text-slate-300"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="text-center py-12">
+                  <CreditCard className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                  <p className="text-slate-500">暂无订单数据</p>
+                </div>
+              )}
             </div>
+
+            {/* 确认订单对话框 */}
+            <Dialog open={confirmOrderDialog} onOpenChange={setConfirmOrderDialog}>
+              <DialogContent className="bg-slate-900 border-slate-700">
+                <DialogHeader>
+                  <DialogTitle className="text-white">确认订单到账</DialogTitle>
+                  <DialogDescription className="text-slate-400">
+                    订单号: {selectedOrder?.orderId}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-slate-400">订单金额</Label>
+                      <p className="text-2xl font-bold text-green-400">${selectedOrder?.amount}</p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-400">积分数量</Label>
+                      <p className="text-2xl font-bold text-yellow-400">{selectedOrder?.credits}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">交易哈希 (TxID) *</Label>
+                    <Input
+                      value={txId}
+                      onChange={(e) => setTxId(e.target.value)}
+                      placeholder="请输入区块链交易哈希"
+                      className="bg-slate-800 border-slate-700 text-white font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">实际到账金额 (可选)</Label>
+                    <Input
+                      value={receivedAmount}
+                      onChange={(e) => setReceivedAmount(e.target.value)}
+                      placeholder={selectedOrder?.amount}
+                      className="bg-slate-800 border-slate-700 text-white"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setConfirmOrderDialog(false)}
+                    className="border-slate-700 text-slate-300"
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    onClick={handleConfirmOrder}
+                    disabled={!txId || confirmOrderMutation.isPending}
+                    className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    确认到账
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         )}
 
-        {/* 系统日志 */}
+        {/* ============ 系统日志 ============ */}
         {activeTab === "logs" && (
           <div className="relative space-y-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <FileText className="w-5 h-5 text-green-400" />
-                <span className="text-sm text-green-400">系统日志</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <FileText className="w-5 h-5 text-green-400" />
+                  <span className="text-sm text-green-400">系统日志</span>
+                </div>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                  操作日志
+                </h1>
               </div>
-              <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-                操作日志
-              </h1>
+              <div className="flex items-center gap-3">
+                <Select value={logType} onValueChange={setLogType}>
+                  <SelectTrigger className="w-32 bg-slate-800 border-slate-700 text-white">
+                    <SelectValue placeholder="日志类型" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    <SelectItem value="api">API日志</SelectItem>
+                    <SelectItem value="admin">管理员日志</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => logType === "api" ? refetchApiLogs() : refetchAdminLogs()}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  刷新
+                </Button>
+              </div>
             </div>
 
-            <div className="text-center py-12 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50">
-              <FileText className="h-12 w-12 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-500">日志查看功能开发中...</p>
+            <div className="rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 overflow-hidden">
+              {(logType === "api" ? apiLogsLoading : adminLogsLoading) ? (
+                <div className="p-6 space-y-3">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-12 rounded-xl" />
+                  ))}
+                </div>
+              ) : logType === "api" ? (
+                apiLogsData?.logs && apiLogsData.logs.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-slate-700 hover:bg-transparent">
+                        <TableHead className="text-slate-400">时间</TableHead>
+                        <TableHead className="text-slate-400">类型</TableHead>
+                        <TableHead className="text-slate-400">端点</TableHead>
+                        <TableHead className="text-slate-400">状态</TableHead>
+                        <TableHead className="text-slate-400">响应时间</TableHead>
+                        <TableHead className="text-slate-400">结果</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {apiLogsData.logs.map((log: any) => (
+                        <TableRow key={log.id} className="border-slate-700/50 hover:bg-slate-800/30">
+                          <TableCell className="text-slate-500 text-sm">
+                            {new Date(log.createdAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-slate-400 border-slate-600">
+                              {log.apiType}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-slate-300 text-sm font-mono max-w-xs truncate">
+                            {log.endpoint}
+                          </TableCell>
+                          <TableCell className="text-slate-400">
+                            {log.responseStatus}
+                          </TableCell>
+                          <TableCell className="text-slate-400">
+                            {log.responseTime}ms
+                          </TableCell>
+                          <TableCell>
+                            {log.success ? (
+                              <CheckCircle className="h-4 w-4 text-green-400" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-red-400" />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="text-center py-12">
+                    <Activity className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-500">暂无API日志</p>
+                  </div>
+                )
+              ) : (
+                adminLogsData?.logs && adminLogsData.logs.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-slate-700 hover:bg-transparent">
+                        <TableHead className="text-slate-400">时间</TableHead>
+                        <TableHead className="text-slate-400">管理员</TableHead>
+                        <TableHead className="text-slate-400">操作</TableHead>
+                        <TableHead className="text-slate-400">目标类型</TableHead>
+                        <TableHead className="text-slate-400">目标ID</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {adminLogsData.logs.map((log: any) => (
+                        <TableRow key={log.id} className="border-slate-700/50 hover:bg-slate-800/30">
+                          <TableCell className="text-slate-500 text-sm">
+                            {new Date(log.createdAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-cyan-400">
+                            {log.adminUsername}
+                          </TableCell>
+                          <TableCell className="text-slate-300">
+                            {log.action}
+                          </TableCell>
+                          <TableCell className="text-slate-400">
+                            {log.targetType || "-"}
+                          </TableCell>
+                          <TableCell className="text-slate-400 font-mono">
+                            {log.targetId || "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="text-center py-12">
+                    <FileText className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-500">暂无管理员日志</p>
+                  </div>
+                )
+              )}
             </div>
           </div>
         )}
 
-        {/* 系统配置 */}
+        {/* ============ 系统配置 ============ */}
         {activeTab === "settings" && (
           <div className="relative space-y-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Settings className="w-5 h-5 text-purple-400" />
-                <span className="text-sm text-purple-400">系统配置</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Settings className="w-5 h-5 text-purple-400" />
+                  <span className="text-sm text-purple-400">系统配置</span>
+                </div>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                  配置管理
+                </h1>
               </div>
-              <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-                配置管理
-              </h1>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => initDefaultConfigsMutation.mutate()}
+                  disabled={initDefaultConfigsMutation.isPending}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                >
+                  <Zap className="h-4 w-4 mr-2" />
+                  初始化默认配置
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchConfigs()}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  刷新
+                </Button>
+              </div>
             </div>
 
-            <div className="text-center py-12 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50">
-              <Settings className="h-12 w-12 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-500">配置管理功能开发中...</p>
+            {/* 配置分组 */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* 充值配置 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Wallet className="h-5 w-5 text-yellow-400" />
+                    充值配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    USDT收款地址和充值参数
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['USDT_WALLET_TRC20', 'USDT_WALLET_ERC20', 'USDT_WALLET_BEP20', 'MIN_RECHARGE_CREDITS', 'CREDITS_PER_USDT', 'ORDER_EXPIRE_MINUTES'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{key}</Label>
+                          {config && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditingConfig({ key, value: config.value, description: config.description || undefined })}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <Input
+                          value={config?.value || ''}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder="未配置"
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {/* 搜索配置 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Search className="h-5 w-5 text-cyan-400" />
+                    搜索配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    搜索和缓存相关参数
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['SEARCH_CREDITS_PER_PERSON', 'PREVIEW_CREDITS', 'CACHE_TTL_DAYS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{key}</Label>
+                          {config && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditingConfig({ key, value: config.value, description: config.description || undefined })}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <Input
+                          value={config?.value || ''}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder="未配置"
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
             </div>
+
+            {/* 添加新配置 */}
+            <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Plus className="h-5 w-5 text-green-400" />
+                  添加配置
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">配置键</Label>
+                    <Input
+                      value={newConfigKey}
+                      onChange={(e) => setNewConfigKey(e.target.value)}
+                      placeholder="CONFIG_KEY"
+                      className="bg-slate-800 border-slate-700 text-white font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">配置值</Label>
+                    <Input
+                      value={newConfigValue}
+                      onChange={(e) => setNewConfigValue(e.target.value)}
+                      placeholder="value"
+                      className="bg-slate-800 border-slate-700 text-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">描述</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newConfigDesc}
+                        onChange={(e) => setNewConfigDesc(e.target.value)}
+                        placeholder="配置说明"
+                        className="bg-slate-800 border-slate-700 text-white"
+                      />
+                      <Button
+                        onClick={() => {
+                          if (newConfigKey && newConfigValue) {
+                            setConfigMutation.mutate({
+                              key: newConfigKey,
+                              value: newConfigValue,
+                              description: newConfigDesc,
+                            });
+                          }
+                        }}
+                        disabled={!newConfigKey || !newConfigValue || setConfigMutation.isPending}
+                        className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0"
+                      >
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 所有配置列表 */}
+            <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Database className="h-5 w-5 text-slate-400" />
+                  所有配置
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {configsLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-12 rounded-xl" />
+                    ))}
+                  </div>
+                ) : configs.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-slate-700 hover:bg-transparent">
+                        <TableHead className="text-slate-400">键</TableHead>
+                        <TableHead className="text-slate-400">值</TableHead>
+                        <TableHead className="text-slate-400">描述</TableHead>
+                        <TableHead className="text-slate-400">更新者</TableHead>
+                        <TableHead className="text-slate-400">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {configs.map((config: any) => (
+                        <TableRow key={config.id} className="border-slate-700/50 hover:bg-slate-800/30">
+                          <TableCell className="font-mono text-cyan-400">
+                            {config.key}
+                          </TableCell>
+                          <TableCell className="text-white max-w-xs truncate">
+                            {config.value}
+                          </TableCell>
+                          <TableCell className="text-slate-400 text-sm">
+                            {config.description || "-"}
+                          </TableCell>
+                          <TableCell className="text-slate-500 text-sm">
+                            {config.updatedBy || "-"}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setEditingConfig({ key: config.key, value: config.value, description: config.description })}
+                                className="text-slate-400 hover:text-white"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (confirm(`确定删除配置 ${config.key}？`)) {
+                                    deleteConfigMutation.mutate({ key: config.key });
+                                  }
+                                }}
+                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="text-center py-8">
+                    <Settings className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-500">暂无配置，点击"初始化默认配置"开始</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 编辑配置对话框 */}
+            <Dialog open={!!editingConfig} onOpenChange={(open) => !open && setEditingConfig(null)}>
+              <DialogContent className="bg-slate-900 border-slate-700">
+                <DialogHeader>
+                  <DialogTitle className="text-white">编辑配置</DialogTitle>
+                  <DialogDescription className="text-slate-400 font-mono">
+                    {editingConfig?.key}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">配置值</Label>
+                    <Textarea
+                      value={editingConfig?.value || ''}
+                      onChange={(e) => setEditingConfig(prev => prev ? { ...prev, value: e.target.value } : null)}
+                      className="bg-slate-800 border-slate-700 text-white font-mono min-h-[100px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300">描述</Label>
+                    <Input
+                      value={editingConfig?.description || ''}
+                      onChange={(e) => setEditingConfig(prev => prev ? { ...prev, description: e.target.value } : null)}
+                      className="bg-slate-800 border-slate-700 text-white"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setEditingConfig(null)}
+                    className="border-slate-700 text-slate-300"
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (editingConfig) {
+                        setConfigMutation.mutate({
+                          key: editingConfig.key,
+                          value: editingConfig.value,
+                          description: editingConfig.description,
+                        });
+                      }
+                    }}
+                    disabled={setConfigMutation.isPending}
+                    className="bg-gradient-to-r from-purple-500 to-pink-600 text-white border-0"
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    保存
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </div>

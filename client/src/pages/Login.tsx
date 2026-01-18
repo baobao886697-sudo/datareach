@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,15 +7,53 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Loader2, Target, Mail, Lock, Eye, EyeOff, ArrowRight, Sparkles } from "lucide-react";
 
+// 生成或获取设备ID
+function getDeviceId(): string {
+  let deviceId = localStorage.getItem("deviceId");
+  if (!deviceId) {
+    // 生成唯一设备ID
+    deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    localStorage.setItem("deviceId", deviceId);
+  }
+  return deviceId;
+}
+
 export default function Login() {
   const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [deviceId, setDeviceId] = useState("");
+
+  useEffect(() => {
+    setDeviceId(getDeviceId());
+  }, []);
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: () => {
       toast.success("登录成功");
+      setLocation("/dashboard");
+    },
+    onError: (error) => {
+      if (error.message.includes("其他设备")) {
+        toast.error(error.message, {
+          duration: 5000,
+          action: {
+            label: "强制登录",
+            onClick: () => {
+              forceLoginMutation.mutate({ email, password, deviceId, force: true });
+            },
+          },
+        });
+      } else {
+        toast.error(error.message || "登录失败");
+      }
+    },
+  });
+
+  const forceLoginMutation = trpc.auth.login.useMutation({
+    onSuccess: () => {
+      toast.success("登录成功，其他设备已下线");
       setLocation("/dashboard");
     },
     onError: (error) => {
@@ -25,7 +63,7 @@ export default function Login() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loginMutation.mutate({ email, password });
+    loginMutation.mutate({ email, password, deviceId });
   };
 
   return (
@@ -117,10 +155,10 @@ export default function Login() {
 
             <Button
               type="submit"
-              disabled={loginMutation.isPending}
+              disabled={loginMutation.isPending || forceLoginMutation.isPending}
               className="w-full h-12 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg shadow-cyan-500/25 rounded-xl border-0"
             >
-              {loginMutation.isPending ? (
+              {(loginMutation.isPending || forceLoginMutation.isPending) ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   登录中...

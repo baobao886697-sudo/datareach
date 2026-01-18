@@ -179,6 +179,13 @@ export async function getAllConfigs(): Promise<SystemConfig[]> {
   return db.select().from(systemConfigs).orderBy(systemConfigs.key);
 }
 
+export async function deleteConfig(key: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(systemConfigs).where(eq(systemConfigs.key, key));
+  configCache.delete(key);
+}
+
 // ============ 充值订单相关 ============
 
 export async function createRechargeOrder(userId: number, credits: number, amount: string, walletAddress: string, network: string = "TRC20"): Promise<RechargeOrder | undefined> {
@@ -187,6 +194,36 @@ export async function createRechargeOrder(userId: number, credits: number, amoun
   const orderId = crypto.randomBytes(8).toString('hex');
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
   await db.insert(rechargeOrders).values({ orderId, userId, credits, amount, walletAddress, network, expiresAt });
+  return getRechargeOrder(orderId);
+}
+
+// 创建带唯一尾数的充值订单
+export async function createRechargeOrderWithUniqueAmount(userId: number, credits: number, baseAmount: number, walletAddress: string, network: string = "TRC20"): Promise<RechargeOrder | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  
+  // 获取所有活跃订单的尾数
+  const activeOrders = await getPendingOrders();
+  const usedDecimals = new Set(
+    activeOrders
+      .filter(o => Math.floor(parseFloat(o.amount)) === Math.floor(baseAmount))
+      .map(o => Math.round((parseFloat(o.amount) % 1) * 100))
+  );
+  
+  // 生成未使用的尾数 (01-99)
+  let decimal = 1;
+  for (let i = 1; i <= 99; i++) {
+    if (!usedDecimals.has(i)) {
+      decimal = i;
+      break;
+    }
+  }
+  
+  const uniqueAmount = (baseAmount + decimal / 100).toFixed(2);
+  const orderId = crypto.randomBytes(8).toString('hex');
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  
+  await db.insert(rechargeOrders).values({ orderId, userId, credits, amount: uniqueAmount, walletAddress, network, expiresAt });
   return getRechargeOrder(orderId);
 }
 
@@ -235,6 +272,57 @@ export async function getAllRechargeOrders(page: number = 1, limit: number = 20,
   const result = await query.orderBy(desc(rechargeOrders.createdAt)).limit(limit).offset(offset);
   const countResult = await countQuery;
   return { orders: result, total: countResult[0]?.count || 0 };
+}
+
+// 更新订单状态
+export async function updateRechargeOrderStatus(orderId: string, status: "pending" | "paid" | "cancelled" | "expired" | "mismatch", adminNote?: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const order = await getRechargeOrder(orderId);
+  if (!order) return false;
+  await db.update(rechargeOrders).set({ status, adminNote }).where(eq(rechargeOrders.orderId, orderId));
+  return true;
+}
+
+// 取消订单
+export async function cancelRechargeOrder(orderId: string, reason?: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const order = await getRechargeOrder(orderId);
+  if (!order || order.status !== "pending") return false;
+  await db.update(rechargeOrders).set({ status: "cancelled", adminNote: reason }).where(eq(rechargeOrders.orderId, orderId));
+  return true;
+}
+
+// 标记为金额不匹配
+export async function markOrderMismatch(orderId: string, receivedAmount: string, txId: string, adminNote?: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const order = await getRechargeOrder(orderId);
+  if (!order) return false;
+  await db.update(rechargeOrders).set({ status: "mismatch", receivedAmount, txId, adminNote }).where(eq(rechargeOrders.orderId, orderId));
+  return true;
+}
+
+// 处理金额不匹配订单 - 按实际金额发放积分
+export async function resolveMismatchOrder(orderId: string, actualCredits: number, adminNote?: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const order = await getRechargeOrder(orderId);
+  if (!order || order.status !== "mismatch") return false;
+  await db.update(rechargeOrders).set({ status: "paid", credits: actualCredits, adminNote, paidAt: new Date() }).where(eq(rechargeOrders.orderId, orderId));
+  await addCredits(order.userId, actualCredits, "recharge", `充值订单 ${orderId} (金额调整)`, orderId);
+  return true;
+}
+
+// 过期未支付订单
+export async function expireOldOrders(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.update(rechargeOrders)
+    .set({ status: "expired" })
+    .where(and(eq(rechargeOrders.status, "pending"), lte(rechargeOrders.expiresAt, new Date())));
+  return (result as any).affectedRows || 0;
 }
 
 // ============ 搜索任务相关 ============
@@ -302,6 +390,24 @@ export async function setCache(cacheKey: string, cacheType: "search" | "person" 
   await db.insert(globalCache).values({ cacheKey, cacheType, data, expiresAt }).onDuplicateKeyUpdate({ set: { data, expiresAt } });
 }
 
+export async function getCacheStats(): Promise<{ totalEntries: number; searchCache: number; personCache: number; verificationCache: number; totalHits: number }> {
+  const db = await getDb();
+  if (!db) return { totalEntries: 0, searchCache: 0, personCache: 0, verificationCache: 0, totalHits: 0 };
+  
+  const totalResult = await db.select({ count: sql<number>`count(*)`, hits: sql<number>`COALESCE(SUM(hitCount), 0)` }).from(globalCache);
+  const searchResult = await db.select({ count: sql<number>`count(*)` }).from(globalCache).where(eq(globalCache.cacheType, "search"));
+  const personResult = await db.select({ count: sql<number>`count(*)` }).from(globalCache).where(eq(globalCache.cacheType, "person"));
+  const verificationResult = await db.select({ count: sql<number>`count(*)` }).from(globalCache).where(eq(globalCache.cacheType, "verification"));
+  
+  return {
+    totalEntries: totalResult[0]?.count || 0,
+    searchCache: searchResult[0]?.count || 0,
+    personCache: personResult[0]?.count || 0,
+    verificationCache: verificationResult[0]?.count || 0,
+    totalHits: totalResult[0]?.hits || 0
+  };
+}
+
 // ============ 日志相关 ============
 
 export async function logApi(apiType: "apollo_search" | "apollo_enrich" | "scrape_tps" | "scrape_fps", endpoint: string, requestParams: any, responseStatus: number, responseTime: number, success: boolean, errorMessage?: string, creditsUsed: number = 0, userId?: number): Promise<void> {
@@ -310,12 +416,18 @@ export async function logApi(apiType: "apollo_search" | "apollo_enrich" | "scrap
   await db.insert(apiLogs).values({ userId, apiType, endpoint, requestParams, responseStatus, responseTime, success, errorMessage, creditsUsed });
 }
 
-export async function getApiLogs(page: number = 1, limit: number = 50): Promise<{ logs: ApiLog[]; total: number }> {
+export async function getApiLogs(page: number = 1, limit: number = 50, apiType?: string): Promise<{ logs: ApiLog[]; total: number }> {
   const db = await getDb();
   if (!db) return { logs: [], total: 0 };
   const offset = (page - 1) * limit;
-  const result = await db.select().from(apiLogs).orderBy(desc(apiLogs.createdAt)).limit(limit).offset(offset);
-  const countResult = await db.select({ count: sql<number>`count(*)` }).from(apiLogs);
+  let query = db.select().from(apiLogs);
+  let countQuery = db.select({ count: sql<number>`count(*)` }).from(apiLogs);
+  if (apiType) {
+    query = query.where(eq(apiLogs.apiType, apiType as any)) as typeof query;
+    countQuery = countQuery.where(eq(apiLogs.apiType, apiType as any)) as typeof countQuery;
+  }
+  const result = await query.orderBy(desc(apiLogs.createdAt)).limit(limit).offset(offset);
+  const countResult = await countQuery;
   return { logs: result, total: countResult[0]?.count || 0 };
 }
 
@@ -325,17 +437,45 @@ export async function logAdmin(adminUsername: string, action: string, targetType
   await db.insert(adminLogs).values({ adminUsername, action, targetType, targetId, details, ipAddress });
 }
 
+export async function getAdminLogs(page: number = 1, limit: number = 50): Promise<{ logs: AdminLog[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { logs: [], total: 0 };
+  const offset = (page - 1) * limit;
+  const result = await db.select().from(adminLogs).orderBy(desc(adminLogs.createdAt)).limit(limit).offset(offset);
+  const countResult = await db.select({ count: sql<number>`count(*)` }).from(adminLogs);
+  return { logs: result, total: countResult[0]?.count || 0 };
+}
+
+export async function logLogin(userId: number, deviceId: string | null, ipAddress: string | null, userAgent: string | null, success: boolean, failReason?: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(loginLogs).values({ userId, deviceId, ipAddress, userAgent, success, failReason });
+}
+
+export async function getLoginLogs(page: number = 1, limit: number = 50, userId?: number): Promise<{ logs: LoginLog[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { logs: [], total: 0 };
+  const offset = (page - 1) * limit;
+  let query = db.select().from(loginLogs);
+  let countQuery = db.select({ count: sql<number>`count(*)` }).from(loginLogs);
+  if (userId) {
+    query = query.where(eq(loginLogs.userId, userId)) as typeof query;
+    countQuery = countQuery.where(eq(loginLogs.userId, userId)) as typeof countQuery;
+  }
+  const result = await query.orderBy(desc(loginLogs.createdAt)).limit(limit).offset(offset);
+  const countResult = await countQuery;
+  return { logs: result, total: countResult[0]?.count || 0 };
+}
+
 // ============ 统计相关 ============
 
 export async function getSearchStats(): Promise<{ todaySearches: number; todayCreditsUsed: number; totalSearches: number; cacheHitRate: number }> {
   const db = await getDb();
   if (!db) return { todaySearches: 0, todayCreditsUsed: 0, totalSearches: 0, cacheHitRate: 0 };
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayResult = await db.select({ count: sql<number>`count(*)`, credits: sql<number>`COALESCE(SUM(creditsUsed), 0)` }).from(searchLogs).where(gte(searchLogs.createdAt, today));
-  const totalResult = await db.select({ count: sql<number>`count(*)`, cacheHits: sql<number>`SUM(CASE WHEN cacheHit = true THEN 1 ELSE 0 END)` }).from(searchLogs);
-  const total = totalResult[0]?.count || 0;
-  const cacheHits = totalResult[0]?.cacheHits || 0;
-  return { todaySearches: todayResult[0]?.count || 0, todayCreditsUsed: todayResult[0]?.credits || 0, totalSearches: total, cacheHitRate: total > 0 ? Math.round((cacheHits / total) * 100) : 0 };
+  const todayResult = await db.select({ count: sql<number>`count(*)`, credits: sql<number>`COALESCE(SUM(creditsUsed), 0)` }).from(searchTasks).where(gte(searchTasks.createdAt, today));
+  const totalResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks);
+  return { todaySearches: todayResult[0]?.count || 0, todayCreditsUsed: todayResult[0]?.credits || 0, totalSearches: totalResult[0]?.count || 0, cacheHitRate: 0 };
 }
 
 export async function getUserStats(): Promise<{ total: number; active: number; newToday: number; newThisWeek: number }> {
@@ -359,6 +499,28 @@ export async function getRechargeStats(): Promise<{ pendingCount: number; todayC
   const todayResult = await db.select({ count: sql<number>`count(*)`, amount: sql<number>`COALESCE(SUM(CAST(amount AS DECIMAL(10,2))), 0)` }).from(rechargeOrders).where(and(eq(rechargeOrders.status, "paid"), gte(rechargeOrders.paidAt, today)));
   const monthResult = await db.select({ amount: sql<number>`COALESCE(SUM(CAST(amount AS DECIMAL(10,2))), 0)` }).from(rechargeOrders).where(and(eq(rechargeOrders.status, "paid"), gte(rechargeOrders.paidAt, monthStart)));
   return { pendingCount: pendingResult[0]?.count || 0, todayCount: todayResult[0]?.count || 0, todayAmount: todayResult[0]?.amount || 0, monthAmount: monthResult[0]?.amount || 0 };
+}
+
+// 获取完整的管理员仪表盘统计
+export async function getAdminDashboardStats(): Promise<{
+  users: { total: number; active: number; newToday: number; newThisWeek: number };
+  orders: { pendingCount: number; todayCount: number; todayAmount: number; monthAmount: number };
+  searches: { todaySearches: number; todayCreditsUsed: number; totalSearches: number; cacheHitRate: number };
+  cache: { totalEntries: number; searchCache: number; personCache: number; verificationCache: number; totalHits: number };
+}> {
+  const [userStats, rechargeStats, searchStats, cacheStats] = await Promise.all([
+    getUserStats(),
+    getRechargeStats(),
+    getSearchStats(),
+    getCacheStats()
+  ]);
+  
+  return {
+    users: userStats,
+    orders: rechargeStats,
+    searches: searchStats,
+    cache: cacheStats
+  };
 }
 
 // OAuth兼容

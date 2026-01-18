@@ -16,6 +16,7 @@ import {
   createPasswordResetToken,
   resetPassword,
   updateUserLastSignIn,
+  updateUserDevice,
   getAllUsers,
   updateUserStatus,
   updateUserRole,
@@ -28,14 +29,31 @@ import {
   getUserSearchTasks,
   getSearchResults,
   createRechargeOrder,
+  createRechargeOrderWithUniqueAmount,
   getRechargeOrder,
   confirmRechargeOrder,
   getUserRechargeOrders,
+  getAllRechargeOrders,
+  updateRechargeOrderStatus,
+  cancelRechargeOrder,
+  markOrderMismatch,
+  resolveMismatchOrder,
+  expireOldOrders,
   getApiLogs,
+  getAdminLogs,
+  getLoginLogs,
+  logAdmin,
+  logLogin,
   getConfig,
   setConfig,
   getAllConfigs,
+  deleteConfig,
   getSearchStats,
+  getUserStats,
+  getRechargeStats,
+  getAdminDashboardStats,
+  getCacheStats,
+  clearUserDevice,
 } from "./db";
 import { executeSearch } from "./services/searchProcessor";
 
@@ -107,12 +125,14 @@ export const appRouter = router({
         };
       }),
 
-    // 邮箱登录
+    // 邮箱登录（支持单设备限制）
     login: publicProcedure
       .input(
         z.object({
           email: z.string().email(),
           password: z.string(),
+          deviceId: z.string().optional(),
+          force: z.boolean().optional(), // 强制登录，踢掉其他设备
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -130,6 +150,27 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "账户已被禁用" });
         }
 
+        // 单设备登录检查
+        const deviceId = input.deviceId || `unknown_${Date.now()}`;
+        if (user.currentDeviceId && user.currentDeviceId !== deviceId && !input.force) {
+          // 已在其他设备登录
+          const loginTime = user.currentDeviceLoginAt 
+            ? new Date(user.currentDeviceLoginAt).toLocaleString()
+            : "未知时间";
+          throw new TRPCError({ 
+            code: "FORBIDDEN", 
+            message: `账户已在其他设备登录（${loginTime}）。如需在此设备登录，请点击"强制登录"` 
+          });
+        }
+
+        // 更新设备信息
+        await updateUserDevice(user.id, deviceId);
+
+        // 记录登录日志
+        const ipAddress = ctx.req.headers["x-forwarded-for"] as string || ctx.req.socket?.remoteAddress || null;
+        const userAgent = ctx.req.headers["user-agent"] || null;
+        await logLogin(user.id, deviceId, ipAddress, userAgent, true);
+
         // 创建会话
         const openId = user.openId || `email_${user.id}`;
         const sessionToken = await sdk.createSessionToken(openId, {
@@ -139,8 +180,6 @@ export const appRouter = router({
 
         const cookieOptions = getSessionCookieOptions(ctx.req);
         ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-
-        await updateUserLastSignIn(user.id);
 
         return {
           success: true,
@@ -367,7 +406,7 @@ export const appRouter = router({
 
   // ============ 充值路由 ============
   recharge: router({
-    // 创建充值订单
+    // 创建充值订单（带唯一尾数）
     create: protectedProcedure
       .input(
         z.object({
@@ -377,7 +416,7 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         // 1 USDT = 100 积分
-        const usdtAmount = (input.credits / 100).toFixed(2);
+        const baseAmount = input.credits / 100;
 
         // 获取收款地址
         const walletAddress = await getConfig(`USDT_WALLET_${input.network || "TRC20"}`);
@@ -388,10 +427,11 @@ export const appRouter = router({
           });
         }
 
-        const order = await createRechargeOrder(
+        // 使用唯一尾数创建订单
+        const order = await createRechargeOrderWithUniqueAmount(
           ctx.user.id,
           input.credits,
-          usdtAmount,
+          baseAmount,
           walletAddress,
           input.network || "TRC20"
         );
@@ -440,7 +480,7 @@ export const appRouter = router({
           actualAmount: z.string(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const success = await confirmRechargeOrder(
           input.orderId,
           input.txHash,
@@ -453,6 +493,15 @@ export const appRouter = router({
             message: "确认支付失败",
           });
         }
+
+        // 记录管理员操作日志
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'confirm_order',
+          'order',
+          input.orderId,
+          { txHash: input.txHash, actualAmount: input.actualAmount }
+        );
 
         return { success: true };
       }),
@@ -509,10 +558,21 @@ export const appRouter = router({
 
   // ============ 管理员路由 ============
   admin: router({
-    // 获取所有用户
-    users: adminProcedure.query(async () => {
-      return getAllUsers();
+    // 获取完整仪表盘统计
+    dashboardStats: adminProcedure.query(async () => {
+      return getAdminDashboardStats();
     }),
+
+    // 获取所有用户
+    users: adminProcedure
+      .input(z.object({
+        page: z.number().optional(),
+        limit: z.number().optional(),
+        search: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return getAllUsers(input?.page || 1, input?.limit || 20, input?.search);
+      }),
 
     // 更新用户状态
     updateUserStatus: adminProcedure
@@ -522,8 +582,15 @@ export const appRouter = router({
           status: z.enum(["active", "disabled"]),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await updateUserStatus(input.userId, input.status);
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'update_user_status',
+          'user',
+          input.userId.toString(),
+          { status: input.status }
+        );
         return { success: true };
       }),
 
@@ -535,8 +602,29 @@ export const appRouter = router({
           role: z.enum(["user", "admin"]),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await updateUserRole(input.userId, input.role);
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'update_user_role',
+          'user',
+          input.userId.toString(),
+          { role: input.role }
+        );
+        return { success: true };
+      }),
+
+    // 强制用户下线（清除设备绑定）
+    forceLogout: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        await clearUserDevice(input.userId);
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'force_logout',
+          'user',
+          input.userId.toString()
+        );
         return { success: true };
       }),
 
@@ -549,7 +637,7 @@ export const appRouter = router({
           reason: z.string(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const result = await addCredits(
           input.userId,
           input.amount,
@@ -561,6 +649,14 @@ export const appRouter = router({
           throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
         }
 
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          input.amount > 0 ? 'add_credits' : 'deduct_credits',
+          'user',
+          input.userId.toString(),
+          { amount: input.amount, reason: input.reason, newBalance: result.newBalance }
+        );
+
         return { success: true, newBalance: result.newBalance };
       }),
 
@@ -569,24 +665,168 @@ export const appRouter = router({
       return getSearchStats();
     }),
 
+    // ============ 订单管理 ============
+    
+    // 获取所有充值订单
+    orders: adminProcedure
+      .input(z.object({
+        page: z.number().optional(),
+        limit: z.number().optional(),
+        status: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return getAllRechargeOrders(input?.page || 1, input?.limit || 20, input?.status);
+      }),
+
+    // 获取单个订单详情
+    orderDetail: adminProcedure
+      .input(z.object({ orderId: z.string() }))
+      .query(async ({ input }) => {
+        const order = await getRechargeOrder(input.orderId);
+        if (!order) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "订单不存在" });
+        }
+        // 获取用户信息
+        const user = await getUserById(order.userId);
+        return { ...order, user };
+      }),
+
+    // 手动确认订单到账
+    confirmOrder: adminProcedure
+      .input(z.object({
+        orderId: z.string(),
+        txId: z.string(),
+        receivedAmount: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const success = await confirmRechargeOrder(input.orderId, input.txId, input.receivedAmount);
+        if (!success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "确认失败，订单可能已处理或不存在" });
+        }
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'confirm_order',
+          'order',
+          input.orderId,
+          { txId: input.txId, receivedAmount: input.receivedAmount }
+        );
+        return { success: true };
+      }),
+
+    // 取消订单
+    cancelOrder: adminProcedure
+      .input(z.object({
+        orderId: z.string(),
+        reason: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const success = await cancelRechargeOrder(input.orderId, input.reason);
+        if (!success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "取消失败，订单可能已处理" });
+        }
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'cancel_order',
+          'order',
+          input.orderId,
+          { reason: input.reason }
+        );
+        return { success: true };
+      }),
+
+    // 标记订单金额不匹配
+    markOrderMismatch: adminProcedure
+      .input(z.object({
+        orderId: z.string(),
+        receivedAmount: z.string(),
+        txId: z.string(),
+        adminNote: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const success = await markOrderMismatch(input.orderId, input.receivedAmount, input.txId, input.adminNote);
+        if (!success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "操作失败" });
+        }
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'mark_order_mismatch',
+          'order',
+          input.orderId,
+          { receivedAmount: input.receivedAmount, txId: input.txId }
+        );
+        return { success: true };
+      }),
+
+    // 处理金额不匹配订单
+    resolveMismatchOrder: adminProcedure
+      .input(z.object({
+        orderId: z.string(),
+        actualCredits: z.number(),
+        adminNote: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const success = await resolveMismatchOrder(input.orderId, input.actualCredits, input.adminNote);
+        if (!success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "处理失败" });
+        }
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'resolve_mismatch_order',
+          'order',
+          input.orderId,
+          { actualCredits: input.actualCredits }
+        );
+        return { success: true };
+      }),
+
+    // ============ 日志管理 ============
+
     // 获取API日志
     apiLogs: adminProcedure
-      .input(
-        z.object({
-          userId: z.number().optional(),
-          taskId: z.number().optional(),
-          apiType: z.string().optional(),
-          limit: z.number().optional(),
-        })
-      )
+      .input(z.object({
+        page: z.number().optional(),
+        limit: z.number().optional(),
+        apiType: z.string().optional(),
+      }).optional())
       .query(async ({ input }) => {
-        return getApiLogs(input.limit || 50);
+        return getApiLogs(input?.page || 1, input?.limit || 50, input?.apiType);
       }),
+
+    // 获取管理员操作日志
+    adminLogs: adminProcedure
+      .input(z.object({
+        page: z.number().optional(),
+        limit: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return getAdminLogs(input?.page || 1, input?.limit || 50);
+      }),
+
+    // 获取登录日志
+    loginLogs: adminProcedure
+      .input(z.object({
+        page: z.number().optional(),
+        limit: z.number().optional(),
+        userId: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return getLoginLogs(input?.page || 1, input?.limit || 50, input?.userId);
+      }),
+
+    // ============ 系统配置 ============
 
     // 获取系统配置
     configs: adminProcedure.query(async () => {
       return getAllConfigs();
     }),
+
+    // 获取单个配置
+    getConfig: adminProcedure
+      .input(z.object({ key: z.string() }))
+      .query(async ({ input }) => {
+        const value = await getConfig(input.key);
+        return { key: input.key, value };
+      }),
 
     // 更新系统配置
     setConfig: adminProcedure
@@ -599,8 +839,68 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         await setConfig(input.key, input.value, (ctx as any).adminUser?.username || 'admin', input.description);
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'update_config',
+          'config',
+          input.key,
+          { value: input.value }
+        );
         return { success: true };
       }),
+
+    // 删除系统配置
+    deleteConfig: adminProcedure
+      .input(z.object({ key: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteConfig(input.key);
+        await logAdmin(
+          (ctx as any).adminUser?.username || 'admin',
+          'delete_config',
+          'config',
+          input.key
+        );
+        return { success: true };
+      }),
+
+    // 批量设置默认配置
+    initDefaultConfigs: adminProcedure.mutation(async ({ ctx }) => {
+      const defaultConfigs = [
+        { key: 'USDT_WALLET_TRC20', value: '', description: 'TRC20 USDT收款地址' },
+        { key: 'USDT_WALLET_ERC20', value: '', description: 'ERC20 USDT收款地址' },
+        { key: 'USDT_WALLET_BEP20', value: '', description: 'BEP20 USDT收款地址' },
+        { key: 'MIN_RECHARGE_CREDITS', value: '100', description: '最低充值积分数' },
+        { key: 'CREDITS_PER_USDT', value: '100', description: '1 USDT兑换积分数' },
+        { key: 'ORDER_EXPIRE_MINUTES', value: '30', description: '订单过期时间(分钟)' },
+        { key: 'CACHE_TTL_DAYS', value: '180', description: '缓存有效期(天)' },
+        { key: 'SEARCH_CREDITS_PER_PERSON', value: '2', description: '每条搜索结果消耗积分' },
+        { key: 'PREVIEW_CREDITS', value: '1', description: '预览搜索消耗积分' },
+      ];
+
+      for (const config of defaultConfigs) {
+        const existing = await getConfig(config.key);
+        if (!existing) {
+          await setConfig(config.key, config.value, (ctx as any).adminUser?.username || 'admin', config.description);
+        }
+      }
+
+      await logAdmin(
+        (ctx as any).adminUser?.username || 'admin',
+        'init_default_configs',
+        'config',
+        undefined,
+        { count: defaultConfigs.length }
+      );
+
+      return { success: true, message: '默认配置已初始化' };
+    }),
+
+    // ============ 缓存管理 ============
+
+    // 获取缓存统计
+    cacheStats: adminProcedure.query(async () => {
+      return getCacheStats();
+    }),
   }),
 });
 

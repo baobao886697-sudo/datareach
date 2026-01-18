@@ -7,6 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { startUsdtMonitor } from "../services/usdtMonitor";
+import { startOrderExpirationChecker } from "../services/orderExpiration";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -60,6 +62,17 @@ async function startServer() {
   const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
   server.listen(port, host, () => {
     console.log(`Server running on http://${host}:${port}/`);
+    
+    // 启动后台服务
+    if (process.env.NODE_ENV === 'production') {
+      // 启动USDT自动检测服务（每30秒检查一次）
+      startUsdtMonitor(30000);
+      console.log("[Background] USDT monitor started");
+      
+      // 启动订单过期检查服务（每5分钟检查一次）
+      startOrderExpirationChecker(5 * 60 * 1000);
+      console.log("[Background] Order expiration checker started");
+    }
   });
 }
 
