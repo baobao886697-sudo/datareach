@@ -1594,14 +1594,15 @@ function WalletMonitorTab() {
       />
 
       {/* 订单详情对话框 */}
-      {selectedOrder && (
-        <OrderDetailDialog
-          order={selectedOrder}
-          open={orderDetailDialogOpen}
-          onOpenChange={setOrderDetailDialogOpen}
-          onRefresh={() => refetchOrders()}
-        />
-      )}
+      <OrderDetailDialog
+        order={selectedOrder}
+        open={orderDetailDialogOpen && selectedOrder !== null}
+        onOpenChange={(open) => {
+          setOrderDetailDialogOpen(open);
+          if (!open) setSelectedOrder(null);
+        }}
+        onRefresh={() => refetchOrders()}
+      />
 
       {/* 批量消息对话框 */}
       <BulkMessageDialog
