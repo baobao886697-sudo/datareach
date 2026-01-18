@@ -513,7 +513,7 @@ export default function Recharge() {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setLocation(`/payment/${order.id}`);
+                        setLocation(`/payment/${order.orderId}`);
                       }}
                       className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
                     >
