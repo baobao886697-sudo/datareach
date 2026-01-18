@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearch, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -59,6 +59,9 @@ export default function Recharge() {
   const [activeOrder, setActiveOrder] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  
+  // 使用ref来追踪是否已经显示过成功提示
+  const paidToastShownRef = useRef<string | null>(null);
 
   const { data: profile, refetch: refetchProfile } = trpc.user.profile.useQuery(undefined, { enabled: !!user });
   
@@ -71,21 +74,22 @@ export default function Recharge() {
 
   const createOrderMutation = trpc.recharge.create.useMutation();
 
-  const { data: orderDetail, refetch: refetchOrderDetail } = trpc.recharge.status.useQuery(
+  const { data: orderDetail } = trpc.recharge.status.useQuery(
     { orderId: activeOrder! },
     { 
       enabled: !!activeOrder,
-      refetchInterval: 5000 // 每5秒检查一次状态
+      refetchInterval: 5000
     }
   );
 
   // 当订单状态变为paid时，刷新用户积分
   useEffect(() => {
-    if (orderDetail?.status === "paid") {
+    if (orderDetail?.status === "paid" && activeOrder && paidToastShownRef.current !== activeOrder) {
+      paidToastShownRef.current = activeOrder;
       refetchProfile();
       toast.success("充值成功！积分已到账");
     }
-  }, [orderDetail?.status, refetchProfile]);
+  }, [orderDetail?.status, activeOrder, refetchProfile]);
 
   const countdown = useCountdown(orderDetail?.expiresAt ? new Date(orderDetail.expiresAt) : null);
 
@@ -104,7 +108,10 @@ export default function Recharge() {
       const result = await createOrderMutation.mutateAsync({ credits, network: "TRC20" });
       toast.success("充值订单已创建");
       setActiveOrder(result.orderId);
-      refetchOrders();
+      // 使用setTimeout延迟refetch，避免在mutation回调中直接触发
+      setTimeout(() => {
+        refetchOrders();
+      }, 100);
     } catch (error: any) {
       const errorMessage = error?.message || "创建订单失败";
       setCreateError(errorMessage);
@@ -112,10 +119,9 @@ export default function Recharge() {
       // 检查是否是认证错误
       if (errorMessage.includes("login") || errorMessage.includes("10001") || errorMessage.includes("unauthorized")) {
         toast.error("登录已过期，请重新登录");
-        // 延迟跳转，避免在渲染过程中更新状态
         setTimeout(() => {
           setLocation("/login");
-        }, 100);
+        }, 500);
       } else {
         toast.error(errorMessage);
       }
@@ -282,55 +288,54 @@ export default function Recharge() {
 
                     {/* 支付金额 - 突出显示 */}
                     <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-xl p-6 mb-6">
-                      <p className="text-sm text-slate-400 mb-2">请支付精确金额</p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-4xl font-bold text-yellow-400 font-mono">
-                          {orderDetail.usdtAmount}
-                        </span>
+                      <div className="text-center">
+                        <p className="text-slate-400 text-sm mb-2">请精确转账以下金额</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-4xl font-bold text-yellow-400 font-mono">{orderDetail.usdtAmount}</span>
+                          <span className="text-xl text-yellow-400">USDT</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">* 金额包含唯一尾数，请勿修改</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-4 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+                        onClick={() => copyToClipboard(orderDetail.usdtAmount, "支付金额")}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        复制金额
+                      </Button>
+                    </div>
+
+                    {/* 钱包地址 */}
+                    <div className="bg-slate-800/30 rounded-xl p-4 mb-6">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-slate-400 text-sm">收款地址 ({orderDetail.network})</span>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
-                          onClick={() => copyToClipboard(orderDetail.usdtAmount, "金额")}
+                          className="h-8 text-cyan-400 hover:text-cyan-300"
+                          onClick={() => copyToClipboard(orderDetail.walletAddress, "钱包地址")}
                         >
                           <Copy className="w-4 h-4 mr-1" />
                           复制
                         </Button>
                       </div>
-                      <p className="text-xs text-yellow-400/70 mt-2">
-                        <AlertTriangle className="w-3 h-3 inline mr-1" />
-                        请务必支付精确金额，否则可能无法自动到账
-                      </p>
+                      <p className="text-white font-mono text-sm break-all">{orderDetail.walletAddress}</p>
                     </div>
 
-                    {/* 收款地址 */}
-                    <div className="space-y-4">
-                      <div>
-                        <Label className="text-slate-400 text-sm">TRC20 收款地址</Label>
-                        <div className="flex items-center gap-2 mt-2">
-                          <div className="flex-1 bg-slate-800/50 rounded-lg p-3 font-mono text-sm text-white break-all">
-                            {orderDetail.walletAddress}
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="border-slate-700 hover:border-cyan-500"
-                            onClick={() => copyToClipboard(orderDetail.walletAddress, "地址")}
-                          >
-                            <Copy className="w-4 h-4" />
-                          </Button>
-                        </div>
+                    {/* 注意事项 */}
+                    <div className="bg-slate-800/30 rounded-xl p-4">
+                      <div className="flex items-center gap-2 text-orange-400 mb-3">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span className="text-sm font-medium">注意事项</span>
                       </div>
-                    </div>
-
-                    <div className="mt-6 p-4 bg-slate-800/30 rounded-xl">
-                      <div className="flex items-center gap-2 text-cyan-400 mb-2">
-                        <Sparkles className="w-4 h-4" />
-                        <span className="text-sm font-medium">自动检测中</span>
-                      </div>
-                      <p className="text-xs text-slate-400">
-                        系统每30秒自动检测链上交易，支付成功后积分将自动到账
-                      </p>
+                      <ul className="text-xs text-slate-400 space-y-2">
+                        <li>• 请使用 TRC20 网络转账 USDT</li>
+                        <li>• 请确保转账金额与显示金额完全一致</li>
+                        <li>• 转账后系统将自动检测并发放积分</li>
+                        <li>• 订单过期后请重新创建</li>
+                      </ul>
                     </div>
                   </>
                 )}
@@ -338,25 +343,29 @@ export default function Recharge() {
                 {orderDetail.status === "paid" && (
                   <div className="text-center py-8">
                     <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-white mb-2">充值成功</h3>
-                    <p className="text-slate-400">
-                      {orderDetail.credits} 积分已到账
-                    </p>
+                    <h3 className="text-xl font-bold text-white mb-2">充值成功！</h3>
+                    <p className="text-slate-400">已到账 {orderDetail.credits} 积分</p>
+                    <Button
+                      variant="outline"
+                      className="mt-6"
+                      onClick={() => setActiveOrder(null)}
+                    >
+                      创建新订单
+                    </Button>
                   </div>
                 )}
 
                 {(orderDetail.status === "expired" || orderDetail.status === "cancelled") && (
                   <div className="text-center py-8">
                     <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-white mb-2">
-                      订单{orderDetail.status === "expired" ? "已过期" : "已取消"}
+                    <h3 className="text-xl font-bold text-white mb-2">
+                      {orderDetail.status === "expired" ? "订单已过期" : "订单已取消"}
                     </h3>
-                    <p className="text-slate-400 mb-4">
-                      请创建新的充值订单
-                    </p>
+                    <p className="text-slate-400">请重新创建充值订单</p>
                     <Button
+                      variant="outline"
+                      className="mt-6"
                       onClick={() => setActiveOrder(null)}
-                      className="bg-gradient-to-r from-cyan-500 to-blue-500"
                     >
                       创建新订单
                     </Button>
@@ -365,29 +374,29 @@ export default function Recharge() {
               </div>
             ) : (
               <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-6">
-                <div className="text-center py-8">
-                  <QrCode className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-white mb-2">创建订单开始充值</h3>
-                  <p className="text-slate-400 text-sm">
-                    选择充值金额后点击"创建充值订单"
-                  </p>
+                <div className="flex items-center justify-center mb-6">
+                  <QrCode className="w-16 h-16 text-slate-600" />
                 </div>
-
-                <div className="border-t border-slate-800 pt-6 mt-6">
-                  <h4 className="text-sm font-medium text-white mb-4">充值流程</h4>
-                  <div className="space-y-4">
-                    {[
-                      { step: 1, text: "选择充值金额并创建订单" },
-                      { step: 2, text: "按照显示的精确金额转账USDT" },
-                      { step: 3, text: "系统自动检测到账并发放积分" },
-                    ].map(({ step, text }) => (
-                      <div key={step} className="flex items-center gap-3">
-                        <div className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-xs font-bold">
-                          {step}
-                        </div>
-                        <span className="text-sm text-slate-400">{text}</span>
-                      </div>
-                    ))}
+                <h3 className="text-lg font-semibold text-white text-center mb-2">创建订单开始充值</h3>
+                <p className="text-slate-400 text-center text-sm mb-6">
+                  选择充值金额后点击"创建充值订单"
+                </p>
+                
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium text-slate-300">充值流程</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-xs shrink-0">1</div>
+                      <p className="text-sm text-slate-400">选择充值金额并创建订单</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-xs shrink-0">2</div>
+                      <p className="text-sm text-slate-400">按照显示的精确金额转账USDT</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-xs shrink-0">3</div>
+                      <p className="text-sm text-slate-400">系统自动检测到账并发放积分</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -397,56 +406,52 @@ export default function Recharge() {
 
         {/* 充值记录 */}
         <div className="relative">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-white">充值记录</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white">充值记录</h2>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => refetchOrders()}
               className="text-slate-400 hover:text-white"
             >
-              <RefreshCw className="w-4 h-4 mr-2" />
+              <RefreshCw className="w-4 h-4 mr-1" />
               刷新
             </Button>
           </div>
 
           {ordersLoading ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-20 bg-slate-800/50" />
+                <Skeleton key={i} className="h-16 bg-slate-800/50" />
               ))}
             </div>
           ) : orders.length === 0 ? (
-            <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-12 text-center">
-              <Coins className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+            <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-8 text-center">
+              <Wallet className="w-12 h-12 text-slate-600 mx-auto mb-3" />
               <p className="text-slate-400">暂无充值记录</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {orders.map((order: any) => (
                 <div
                   key={order.id}
-                  className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-xl p-4 hover:border-slate-700 transition-colors cursor-pointer"
-                  onClick={() => order.status === "pending" && setActiveOrder(order.orderId)}
+                  className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:border-slate-700/50 transition-colors"
+                  onClick={() => setActiveOrder(order.id)}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 bg-yellow-500/10 rounded-lg">
-                        <Coins className="w-5 h-5 text-yellow-400" />
-                      </div>
-                      <div>
-                        <p className="text-white font-medium">{order.credits} 积分</p>
-                        <p className="text-sm text-slate-400">
-                          {order.usdtAmount} USDT · {new Date(order.createdAt).toLocaleString()}
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 bg-yellow-500/10 rounded-lg">
+                      <Coins className="w-5 h-5 text-yellow-400" />
                     </div>
-                    <div className="flex items-center gap-3">
-                      {getStatusBadge(order.status)}
-                      {order.status === "pending" && (
-                        <ArrowRight className="w-4 h-4 text-slate-400" />
-                      )}
+                    <div>
+                      <p className="text-white font-medium">{order.credits} 积分</p>
+                      <p className="text-sm text-slate-400">{order.usdtAmount} USDT</p>
                     </div>
+                  </div>
+                  <div className="text-right">
+                    {getStatusBadge(order.status)}
+                    <p className="text-xs text-slate-500 mt-1">
+                      {new Date(order.createdAt).toLocaleString()}
+                    </p>
                   </div>
                 </div>
               ))}
