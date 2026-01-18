@@ -50,6 +50,7 @@ export default function Admin() {
   const [newConfigDesc, setNewConfigDesc] = useState("");
   
   // 新增对话框状态
+  const [detailUserId, setDetailUserId] = useState<number | null>(null);
   const [userDetailDialogOpen, setUserDetailDialogOpen] = useState(false);
   const [orderDetailDialogOpen, setOrderDetailDialogOpen] = useState(false);
   const [bulkMessageDialogOpen, setBulkMessageDialogOpen] = useState(false);
@@ -594,7 +595,7 @@ export default function Admin() {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
-                                setSelectedUser(u.id);
+                                setDetailUserId(u.id);
                                 setUserDetailDialogOpen(true);
                               }}
                               className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
@@ -1584,11 +1585,11 @@ function WalletMonitorTab() {
 
       {/* 用户详情对话框 */}
       <UserDetailDialog
-        userId={selectedUser}
-        open={userDetailDialogOpen && selectedUser !== null}
+        userId={detailUserId}
+        open={userDetailDialogOpen && detailUserId !== null}
         onOpenChange={(open) => {
           setUserDetailDialogOpen(open);
-          if (!open) setSelectedUser(null);
+          if (!open) setDetailUserId(null);
         }}
         onRefresh={() => refetchUsers()}
       />
