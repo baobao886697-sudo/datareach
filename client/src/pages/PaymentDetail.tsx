@@ -8,8 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { 
   Copy, Download, ArrowLeft, Clock, CheckCircle, XCircle, 
-  Loader2, QrCode, Wallet, AlertTriangle, RefreshCw, Share2,
-  FileText, Image as ImageIcon
+  Loader2, QrCode, Wallet, AlertTriangle, RefreshCw
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toPng } from "html-to-image";
@@ -64,7 +63,10 @@ export default function PaymentDetail() {
     { orderId: orderId || "" },
     { 
       enabled: !!orderId && !!user,
-      refetchInterval: (query) => query.state.data?.status === "pending" ? 5000 : false,
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        return status === "pending" ? 5000 : false;
+      },
     }
   );
 
@@ -178,24 +180,22 @@ ${orderDetail.walletAddress}
     setTimeout(() => setCopied(false), 2000);
   }, [orderDetail, orderId]);
 
-  if (!user) {
-    return null;
-  }
-
+  // 加载中状态
   if (isLoading) {
     return (
       <DashboardLayout>
         <div className="p-6 space-y-6">
-          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-8 w-48" />
           <div className="grid lg:grid-cols-2 gap-6">
-            <Skeleton className="h-[400px]" />
-            <Skeleton className="h-[400px]" />
+            <Skeleton className="h-96" />
+            <Skeleton className="h-96" />
           </div>
         </div>
       </DashboardLayout>
     );
   }
 
+  // 订单不存在
   if (!orderDetail) {
     return (
       <DashboardLayout>
@@ -216,12 +216,6 @@ ${orderDetail.walletAddress}
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 relative">
-        {/* 背景装饰 */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[100px]" />
-          <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[100px]" />
-        </div>
-
         {/* 头部 */}
         <div className="relative flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -234,7 +228,7 @@ ${orderDetail.walletAddress}
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+              <h1 className="text-2xl font-bold text-white">
                 订单详情
               </h1>
               <p className="text-slate-400 text-sm">
@@ -258,7 +252,7 @@ ${orderDetail.walletAddress}
           <div className="space-y-6">
             {/* 支付状态卡片 */}
             {orderDetail.status === "pending" && (
-              <>
+              <React.Fragment>
                 {/* 倒计时 */}
                 {countdown && (
                   <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
@@ -321,47 +315,36 @@ ${orderDetail.walletAddress}
                         复制
                       </Button>
                     </div>
-                    <div className="p-3 bg-slate-800/50 rounded-xl">
+                    <div className="bg-slate-800/50 rounded-lg p-3">
                       <p className="text-white font-mono text-sm break-all">{orderDetail.walletAddress}</p>
                     </div>
                   </div>
                 </div>
 
                 {/* 注意事项 */}
-                <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-6">
-                  <div className="flex items-center gap-2 text-orange-400 mb-4">
-                    <AlertTriangle className="w-5 h-5" />
-                    <span className="font-medium">注意事项</span>
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-slate-400">
+                      <p className="font-medium text-amber-400 mb-2">重要提示</p>
+                      <ul className="space-y-1 list-disc list-inside">
+                        <li>请确保转账金额与显示金额完全一致</li>
+                        <li>仅支持 {orderDetail.network} 网络转账</li>
+                        <li>转账完成后系统将自动检测到账</li>
+                      </ul>
+                    </div>
                   </div>
-                  <ul className="text-sm text-slate-400 space-y-3">
-                    <li className="flex items-start gap-2">
-                      <span className="text-orange-400">•</span>
-                      请使用 TRC20 网络转账 USDT
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-orange-400">•</span>
-                      请确保转账金额与显示金额完全一致
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-orange-400">•</span>
-                      转账后系统将自动检测并发放积分
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-orange-400">•</span>
-                      订单过期后请重新创建
-                    </li>
-                  </ul>
                 </div>
-              </>
+              </React.Fragment>
             )}
 
             {orderDetail.status === "paid" && (
-              <div className="bg-slate-900/50 backdrop-blur-sm border border-green-500/30 rounded-2xl p-8 text-center">
-                <CheckCircle className="w-20 h-20 text-green-400 mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-white mb-2">充值成功！</h3>
+              <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-6 text-center">
+                <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">支付成功</h3>
                 <p className="text-slate-400 mb-2">已到账 {orderDetail.credits.toLocaleString()} 积分</p>
                 {orderDetail.txId && (
-                  <p className="text-xs text-slate-500 font-mono">
+                  <p className="text-xs text-slate-500">
                     交易哈希: {orderDetail.txId.slice(0, 16)}...
                   </p>
                 )}
@@ -369,16 +352,13 @@ ${orderDetail.walletAddress}
             )}
 
             {(orderDetail.status === "expired" || orderDetail.status === "cancelled") && (
-              <div className="bg-slate-900/50 backdrop-blur-sm border border-red-500/30 rounded-2xl p-8 text-center">
-                <XCircle className="w-20 h-20 text-red-400 mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-white mb-2">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 text-center">
+                <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">
                   {orderDetail.status === "expired" ? "订单已过期" : "订单已取消"}
                 </h3>
-                <p className="text-slate-400">请重新创建充值订单</p>
-                <Button
-                  className="mt-6"
-                  onClick={() => setLocation("/recharge")}
-                >
+                <p className="text-slate-400 mb-4">请重新创建充值订单</p>
+                <Button onClick={() => setLocation("/recharge")}>
                   创建新订单
                 </Button>
               </div>
@@ -389,7 +369,7 @@ ${orderDetail.walletAddress}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-white">账单预览</h3>
-              <div className="flex items-center gap-2">
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -410,14 +390,14 @@ ${orderDetail.walletAddress}
                   onClick={handleCopyText}
                   className="border-slate-700 text-slate-300 hover:bg-slate-800"
                 >
-                  {copied ? <CheckCircle className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                  复制文本
+                  <Copy className="w-4 h-4 mr-2" />
+                  {copied ? "已复制" : "复制文本"}
                 </Button>
               </div>
             </div>
 
-            {/* 账单卡片 - 用于导出 */}
-            <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-4 overflow-auto">
+            {/* 账单卡片 */}
+            <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-6 overflow-hidden">
               <div 
                 ref={invoiceRef} 
                 style={{ 
@@ -505,7 +485,8 @@ ${orderDetail.walletAddress}
                         width: "4px", 
                         height: "16px", 
                         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                        borderRadius: "2px"
+                        borderRadius: "2px",
+                        display: "inline-block"
                       }}></span>
                       购买明细
                     </p>
@@ -542,7 +523,8 @@ ${orderDetail.walletAddress}
                         width: "4px", 
                         height: "16px", 
                         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                        borderRadius: "2px"
+                        borderRadius: "2px",
+                        display: "inline-block"
                       }}></span>
                       支付信息
                     </p>
@@ -577,19 +559,19 @@ ${orderDetail.walletAddress}
                         width: "4px", 
                         height: "16px", 
                         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                        borderRadius: "2px"
+                        borderRadius: "2px",
+                        display: "inline-block"
                       }}></span>
                       收款地址
                     </p>
                     <div style={{ 
-                      padding: "12px",
+                      padding: "10px",
                       background: "#f8fafc",
                       borderRadius: "6px",
-                      fontFamily: "monospace",
+                      wordBreak: "break-all",
                       fontSize: "11px",
                       color: "#64748b",
-                      wordBreak: "break-all",
-                      lineHeight: "1.5"
+                      fontFamily: "monospace"
                     }}>
                       {orderDetail.walletAddress}
                     </div>
@@ -597,13 +579,13 @@ ${orderDetail.walletAddress}
 
                   {/* Total */}
                   <div style={{ 
-                    borderTop: "2px dashed #e2e8f0",
+                    borderTop: "2px dashed #e2e8f0", 
                     paddingTop: "14px",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center"
                   }}>
-                    <span style={{ fontSize: "14px", color: "#64748b" }}>应付总额</span>
+                    <span style={{ color: "#64748b", fontSize: "14px" }}>应付总额</span>
                     <span style={{ 
                       fontSize: "24px", 
                       fontWeight: "700", 
@@ -616,8 +598,8 @@ ${orderDetail.walletAddress}
 
                 {/* Footer */}
                 <div style={{ 
-                  background: "#f8fafc",
-                  padding: "12px 20px",
+                  background: "#f8fafc", 
+                  padding: "12px 20px", 
                   textAlign: "center",
                   borderTop: "1px solid #e2e8f0"
                 }}>
