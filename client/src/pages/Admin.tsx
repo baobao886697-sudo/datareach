@@ -459,6 +459,20 @@ export default function Admin() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => {
+                    console.log('测试按钮被点击');
+                    setDetailUserId(1);
+                    setUserDetailDialogOpen(true);
+                    console.log('userDetailDialogOpen 已设置为 true');
+                  }}
+                  className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10"
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  测试Dialog
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setBulkMessageDialogOpen(true)}
                   className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
                 >
