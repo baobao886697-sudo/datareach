@@ -1584,7 +1584,17 @@ function WalletMonitorTab() {
         )}
       </div>
 
-      {/* 用户详情对话框 */}
+      {/* 测试Dialog */}
+      <Dialog open={userDetailDialogOpen} onOpenChange={setUserDetailDialogOpen}>
+        <DialogContent className="bg-slate-900 border-slate-700">
+          <DialogHeader>
+            <DialogTitle>测试对话框</DialogTitle>
+            <DialogDescription>这是一个测试对话框，用户ID: {detailUserId}</DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+
+      {/* 用户详情对话框 - 暂时禁用
       <UserDetailDialog
         userId={detailUserId}
         open={userDetailDialogOpen}
@@ -1594,6 +1604,7 @@ function WalletMonitorTab() {
         }}
         onRefresh={() => refetchUsers()}
       />
+      */}
 
       {/* 订单详情对话框 */}
       <OrderDetailDialog
