@@ -8,8 +8,19 @@ import App from "./App";
 import { getLoginUrl } from "./const";
 import "./index.css";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});
 
+// 使用setTimeout延迟重定向，避免在React渲染过程中触发
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
@@ -18,12 +29,15 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
 
   if (!isUnauthorized) return;
 
-  // 如果在管理员页面，跳转到管理员登录
-  if (window.location.pathname.startsWith("/admin")) {
-    window.location.href = "/admin/login";
-  } else {
-    window.location.href = getLoginUrl();
-  }
+  // 使用setTimeout延迟重定向，避免React渲染冲突
+  setTimeout(() => {
+    // 如果在管理员页面，跳转到管理员登录
+    if (window.location.pathname.startsWith("/admin")) {
+      window.location.href = "/admin/login";
+    } else {
+      window.location.href = getLoginUrl();
+    }
+  }, 0);
 };
 
 queryClient.getQueryCache().subscribe(event => {
