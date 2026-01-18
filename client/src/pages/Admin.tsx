@@ -79,12 +79,6 @@ export default function Admin() {
     }
   }, [statsError, setLocation]);
 
-  // 调试: 监听userDetailDialogOpen状态变化
-  useEffect(() => {
-    console.log('[DEBUG] userDetailDialogOpen changed:', userDetailDialogOpen);
-    console.log('[DEBUG] detailUserId:', detailUserId);
-  }, [userDetailDialogOpen, detailUserId]);
-
   const { data: usersData, isLoading: usersLoading, refetch: refetchUsers } = trpc.admin.users.useQuery(
     undefined,
     { enabled: !!adminToken }
@@ -466,10 +460,8 @@ export default function Admin() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    window.alert('测试按钮被点击!');
                     setDetailUserId(1);
                     setUserDetailDialogOpen(true);
-                    window.alert('状态已设置: userDetailDialogOpen = true');
                   }}
                   className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10"
                 >
