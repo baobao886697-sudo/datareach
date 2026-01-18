@@ -63,10 +63,8 @@ export default function PaymentDetail() {
     { orderId: orderId || "" },
     { 
       enabled: !!orderId && !!user,
-      refetchInterval: (query) => {
-        const status = query.state.data?.status;
-        return status === "pending" ? 5000 : false;
-      },
+      refetchInterval: 5000, // 每5秒刷新一次
+      refetchIntervalInBackground: false,
     }
   );
 
