@@ -1313,7 +1313,7 @@ export default function Admin() {
         )}
       </div>
 
-      {/* 用户详情对话框 - 暂时禁用
+      {/* 用户详情对话框 */}
       <UserDetailDialog
         userId={detailUserId}
         open={userDetailDialogOpen}
@@ -1323,7 +1323,6 @@ export default function Admin() {
         }}
         onRefresh={() => refetchUsers()}
       />
-      */}
 
       {/* 订单详情对话框 */}
       <OrderDetailDialog
