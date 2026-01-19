@@ -364,8 +364,32 @@ export async function getSearchTask(taskId: string): Promise<SearchTask | undefi
 
 export async function updateSearchTask(taskId: string, updates: Partial<SearchTask>): Promise<void> {
   const db = await getDb();
-  if (!db) return;
-  await db.update(searchTasks).set(updates as any).where(eq(searchTasks.taskId, taskId));
+  if (!db) {
+    console.error('[DB] updateSearchTask: Database not available');
+    return;
+  }
+  
+  // 重试机制
+  const maxRetries = 3;
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await db.update(searchTasks).set(updates as any).where(eq(searchTasks.taskId, taskId));
+      return; // 成功则返回
+    } catch (error: any) {
+      lastError = error;
+      console.error(`[DB] updateSearchTask attempt ${attempt}/${maxRetries} failed:`, error.message);
+      
+      if (attempt < maxRetries) {
+        // 等待后重试 (指数退避)
+        await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+      }
+    }
+  }
+  
+  // 所有重试都失败，记录错误但不抛出异常
+  console.error('[DB] updateSearchTask failed after all retries:', lastError?.message);
 }
 
 export async function updateSearchTaskStatus(taskId: string, status: string): Promise<void> {
