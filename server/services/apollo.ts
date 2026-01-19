@@ -26,11 +26,14 @@ export interface ApolloPerson {
     status: string;
   }>;
   organization?: {
+    id?: string;
     name?: string;
     phone?: string;
     sanitized_phone?: string;
     industry?: string;
+    primary_domain?: string;
   };
+  organization_id?: string;
   has_email?: boolean;
   has_direct_phone?: string;
 }
@@ -486,4 +489,54 @@ function chunkArray<T>(array: T[], size: number): T[][] {
     chunks.push(array.slice(i, i + size));
   }
   return chunks;
+}
+
+
+// 获取公司行业信息
+export interface OrganizationInfo {
+  id: string;
+  name: string;
+  industry?: string;
+  industries?: string[];
+  primary_domain?: string;
+}
+
+export async function enrichOrganization(domain: string, userId?: number): Promise<OrganizationInfo | null> {
+  const apiKey = await getApolloApiKey();
+  const startTime = Date.now();
+
+  try {
+    const response = await axios.get(
+      `${APOLLO_API_BASE}/organizations/enrich`,
+      { 
+        params: { domain },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'x-api-key': apiKey
+        }, 
+        timeout: 30000 
+      }
+    );
+
+    const responseTime = Date.now() - startTime;
+    await logApi('apollo_enrich', '/organizations/enrich', { domain }, response.status, responseTime, true, undefined, 0, userId);
+
+    const org = response.data.organization;
+    if (org) {
+      return {
+        id: org.id,
+        name: org.name,
+        industry: org.industry,
+        industries: org.industries,
+        primary_domain: org.primary_domain,
+      };
+    }
+    return null;
+  } catch (error: any) {
+    const responseTime = Date.now() - startTime;
+    const errorMessage = error.response?.data?.error || error.message;
+    await logApi('apollo_enrich', '/organizations/enrich', { domain }, error.response?.status || 0, responseTime, false, errorMessage, 0, userId);
+    return null;
+  }
 }

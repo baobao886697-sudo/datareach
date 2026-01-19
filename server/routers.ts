@@ -527,15 +527,15 @@ export const appRouter = router({
             searchParams.state || "",
           ];
         } else {
-          // 标准版 - 平衡的字段选择
+          // 标准版 - 精简字段选择（删除运营商/匹配分数/验证来源）
           headers = [
             "序号", "姓名", "名", "姓", "年龄",
             "职位", "公司", "行业",
             "城市", "州", "国家",
-            "电话号码", "电话类型", "运营商", "电话状态",
+            "电话号码", "电话类型", "电话状态",
             "邮箱",
             "LinkedIn",
-            "验证状态", "匹配分数", "验证来源",
+            "双验证",
             "获取时间",
           ];
           getRowData = (r, data, index) => [
@@ -552,13 +552,10 @@ export const appRouter = router({
             data.country || "",
             data.phone || data.phoneNumber || "",
             data.phoneType || "",
-            data.carrier || "",
             data.phoneStatus || "",
             data.email || "",
             data.linkedinUrl || data.linkedin_url || "",
             r.verified ? "已验证" : "未验证",
-            r.verificationScore?.toString() || "",
-            r.verificationSource || data.verificationSource || "",
             r.createdAt ? new Date(r.createdAt).toLocaleString('zh-CN') : "",
           ];
         }
