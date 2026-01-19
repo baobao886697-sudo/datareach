@@ -55,20 +55,30 @@ export async function handleApolloWebhook(payload: any): Promise<{ processed: nu
   let excluded = 0;
   
   // Apollo webhook 返回的数据格式可能是:
-  // 1. { matches: [{ id, phone_numbers: [...] }] } - bulk_match 响应
-  // 2. { person: { id, phone_numbers: [...] } } - 单个 match 响应
-  // 3. 直接是数组 [{ id, phone_numbers: [...] }]
+  // 1. { people: [{ id, status, phone_numbers: [...] }] } - bulk_match webhook 响应 (最常见)
+  // 2. { matches: [{ id, phone_numbers: [...] }] } - bulk_match 响应
+  // 3. { person: { id, phone_numbers: [...] } } - 单个 match 响应
+  // 4. 直接是数组 [{ id, phone_numbers: [...] }]
+  // 5. { id, phone_numbers: [...] } - 单个对象
   
   let peopleToProcess: any[] = [];
   
-  if (payload.matches && Array.isArray(payload.matches)) {
+  if (payload.people && Array.isArray(payload.people)) {
+    // Apollo bulk_match webhook 返回格式
+    peopleToProcess = payload.people;
+    console.log(`[Apollo Webhook] Found ${peopleToProcess.length} people in payload.people`);
+  } else if (payload.matches && Array.isArray(payload.matches)) {
     peopleToProcess = payload.matches;
+    console.log(`[Apollo Webhook] Found ${peopleToProcess.length} people in payload.matches`);
   } else if (payload.person) {
     peopleToProcess = [payload.person];
+    console.log(`[Apollo Webhook] Found 1 person in payload.person`);
   } else if (Array.isArray(payload)) {
     peopleToProcess = payload;
+    console.log(`[Apollo Webhook] Found ${peopleToProcess.length} people in array payload`);
   } else if (payload.id && payload.phone_numbers) {
     peopleToProcess = [payload];
+    console.log(`[Apollo Webhook] Found 1 person in direct payload`);
   }
   
   if (peopleToProcess.length === 0) {
