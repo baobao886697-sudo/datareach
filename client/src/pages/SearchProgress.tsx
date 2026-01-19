@@ -40,6 +40,7 @@ interface ResultData {
   phoneNumber?: string;
   phone?: string;
   phoneType?: string;
+  phoneStatus?: 'pending' | 'received' | 'verified' | 'no_phone' | 'failed';
   carrier?: string;
   email?: string;
   linkedinUrl?: string;
@@ -106,9 +107,20 @@ export default function SearchProgress() {
   );
 
   // 获取搜索结果
-  const { data: results } = trpc.search.results.useQuery(
+  const { data: results, refetch: refetchResults } = trpc.search.results.useQuery(
     { taskId: taskId || "" },
-    { enabled: !!user && !!taskId && (task?.status === "completed" || task?.status === "failed" || task?.status === "stopped") }
+    { 
+      enabled: !!user && !!taskId,
+      // 如果任务已完成且有待获取的电话号码，每5秒刷新一次
+      refetchInterval: (data) => {
+        if (!data || data.length === 0) return false;
+        const hasPendingPhones = data.some((r: any) => {
+          const d = r.data as ResultData;
+          return d?.phoneStatus === 'pending';
+        });
+        return hasPendingPhones ? 5000 : false;
+      }
+    }
   );
 
   // 停止搜索
@@ -518,7 +530,7 @@ export default function SearchProgress() {
                 </div>
 
                 {/* 统计卡片 */}
-                <div className="grid grid-cols-4 gap-3 pt-2">
+                <div className="grid grid-cols-5 gap-3 pt-2">
                   <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-center">
                     <div className="text-2xl font-bold text-white font-mono">{searchLimit}</div>
                     <div className="text-xs text-slate-500 mt-1">请求数量</div>
@@ -528,11 +540,19 @@ export default function SearchProgress() {
                     <div className="text-xs text-slate-500 mt-1">有效结果</div>
                   </div>
                   <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-center">
-                    <div className="text-2xl font-bold text-cyan-400 font-mono">{stats.phonesFound}</div>
-                    <div className="text-xs text-slate-500 mt-1">找到电话</div>
+                    <div className="text-2xl font-bold text-cyan-400 font-mono">
+                      {results?.filter((r: any) => (r.data as ResultData)?.phone).length || 0}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">已获取电话</div>
                   </div>
                   <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-center">
-                    <div className="text-2xl font-bold text-yellow-400 font-mono">{creditsUsed}</div>
+                    <div className="text-2xl font-bold text-yellow-400 font-mono">
+                      {results?.filter((r: any) => (r.data as ResultData)?.phoneStatus === 'pending').length || 0}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">电话获取中</div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-center">
+                    <div className="text-2xl font-bold text-purple-400 font-mono">{creditsUsed}</div>
                     <div className="text-xs text-slate-500 mt-1">消耗积分</div>
                   </div>
                 </div>
@@ -706,19 +726,38 @@ export default function SearchProgress() {
                                     <TableCell className="text-slate-400">{company}</TableCell>
                                     <TableCell>
                                       <div className="flex items-center gap-2">
-                                        <Phone className="h-4 w-4 text-slate-500" />
-                                        <span className="text-cyan-400 font-mono">{phone}</span>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-6 w-6 text-slate-500 hover:text-white"
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(phone);
-                                            toast.success("已复制电话号码");
-                                          }}
-                                        >
-                                          <Copy className="h-3 w-3" />
-                                        </Button>
+                                        {data.phoneStatus === 'pending' ? (
+                                          <>
+                                            <Loader2 className="h-4 w-4 text-yellow-400 animate-spin" />
+                                            <span className="text-yellow-400 text-sm">获取中...</span>
+                                          </>
+                                        ) : data.phoneStatus === 'no_phone' ? (
+                                          <>
+                                            <Phone className="h-4 w-4 text-slate-500" />
+                                            <span className="text-slate-500 text-sm">无电话</span>
+                                          </>
+                                        ) : phone && phone !== '-' ? (
+                                          <>
+                                            <Phone className="h-4 w-4 text-slate-500" />
+                                            <span className="text-cyan-400 font-mono">{phone}</span>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6 text-slate-500 hover:text-white"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(phone);
+                                                toast.success("已复制电话号码");
+                                              }}
+                                            >
+                                              <Copy className="h-3 w-3" />
+                                            </Button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Phone className="h-4 w-4 text-slate-500" />
+                                            <span className="text-slate-500 text-sm">-</span>
+                                          </>
+                                        )}
                                       </div>
                                     </TableCell>
                                     <TableCell>

@@ -5,11 +5,13 @@ import {
   updateSearchTask, 
   getSearchTask,
   saveSearchResult,
+  updateSearchResult,
+  getSearchResults,
   getCacheByKey,
   setCache,
   logApi
 } from '../db';
-import { searchPeople, enrichPerson, ApolloPerson, getOrganizationPhone } from './apollo';
+import { searchPeople, enrichPerson, ApolloPerson, requestPhoneNumberAsync } from './apollo';
 import { verifyPhoneNumber, PersonToVerify } from './scraper';
 import { SearchTask } from '../../drizzle/schema';
 import crypto from 'crypto';
@@ -31,6 +33,7 @@ export interface SearchProgress {
     validResults: number;
     phonesFound: number;
     phonesVerified: number;
+    phonesPending: number;
     verifySuccessRate: number;
     creditsUsed: number;
     // 排除统计
@@ -92,6 +95,7 @@ export async function executeSearch(
     validResults: 0,
     phonesFound: 0,
     phonesVerified: 0,
+    phonesPending: 0,
     verifySuccessRate: 0,
     creditsUsed: 0,
     excludedNoPhone: 0,
@@ -176,6 +180,7 @@ export async function executeSearch(
       addLog(`🎂 年龄筛选: ${ageMin} - ${ageMax} 岁`, 'info');
     }
     addLog(`💰 预估消耗: ~${searchCredits + requestedCount * phoneCreditsPerPerson} 积分`, 'info');
+    addLog(`📱 电话号码将通过异步方式获取，请稍候...`, 'info');
     addLog(`─────────────────────────────────────`, 'info');
     await updateProgress('初始化搜索任务', 'running');
 
@@ -238,7 +243,7 @@ export async function executeSearch(
     addLog(`🔀 已打乱数据顺序，采用跳动提取策略`, 'info');
     addLog(`─────────────────────────────────────`, 'info');
 
-    // ===== 分批获取详细信息 =====
+    // ===== 分批获取详细信息并请求电话号码 =====
     const toProcess = shuffledResults.slice(0, requestedCount);
     let processedCount = 0;
 
@@ -277,92 +282,19 @@ export async function executeSearch(
       addLog(`🔍 [${processedCount}/${requestedCount}] 正在处理: ${personName}`, 'info', processedCount, requestedCount);
       await updateProgress(`处理 ${personName}`);
 
-      // 获取详细信息（包含公司电话）
+      // 获取详细信息（邮箱等，不包含电话）
       const startTime = Date.now();
       const enrichedPerson = await enrichPerson(person.id, userId);
       
       await logApi('apollo_enrich', '/people/match', { id: person.id }, enrichedPerson ? 200 : 500, Date.now() - startTime, !!enrichedPerson, undefined, phoneCreditsPerPerson, userId);
 
       if (!enrichedPerson) {
-        stats.excludedNoPhone++;
+        stats.excludedOther++;
         addLog(`⚠️ [${processedCount}/${requestedCount}] ${personName} - 获取详情失败`, 'warning', processedCount, requestedCount, { name: personName, reason: '获取详情失败' });
         continue;
       }
 
-      // 尝试获取电话号码：优先使用个人电话，其次使用公司电话
-      let phoneNumber = '';
-      let phoneSource = '';
-      
-      // 检查个人电话
-      if (enrichedPerson.phone_numbers && enrichedPerson.phone_numbers.length > 0) {
-        phoneNumber = enrichedPerson.phone_numbers[0].sanitized_number || enrichedPerson.phone_numbers[0].raw_number || '';
-        phoneSource = 'personal';
-      }
-      
-      // 如果没有个人电话，尝试使用公司电话
-      if (!phoneNumber) {
-        const orgPhone = getOrganizationPhone(enrichedPerson);
-        if (orgPhone) {
-          phoneNumber = orgPhone;
-          phoneSource = 'organization';
-        }
-      }
-
-      if (!phoneNumber) {
-        stats.excludedNoPhone++;
-        addLog(`⚠️ [${processedCount}/${requestedCount}] ${personName} - 未找到电话号码`, 'warning', processedCount, requestedCount, { name: personName, reason: '无电话号码' });
-        continue;
-      }
-
-      stats.phonesFound++;
-      const maskedPhone = phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-      addLog(`📞 [${processedCount}/${requestedCount}] 找到${phoneSource === 'organization' ? '公司' : ''}电话: ${maskedPhone}`, 'info', processedCount, requestedCount);
-
-      // 验证电话号码
-      const personToVerify: PersonToVerify = {
-        firstName: enrichedPerson.first_name || '',
-        lastName: enrichedPerson.last_name || '',
-        city: enrichedPerson.city || '',
-        state: enrichedPerson.state || searchState,
-        phone: phoneNumber
-      };
-
-      addLog(`🔍 [${processedCount}/${requestedCount}] 正在验证电话...`, 'info', processedCount, requestedCount);
-      stats.verifyRequests++;
-
-      const verifyStartTime = Date.now();
-      const verifyResult = await verifyPhoneNumber(personToVerify);
-      
-      await logApi(verifyResult.source === 'TruePeopleSearch' ? 'scrape_tps' : 'scrape_fps', verifyResult.source || 'unknown', personToVerify, verifyResult.verified ? 200 : 404, Date.now() - verifyStartTime, verifyResult.verified, undefined, 0, userId);
-
-      // 年龄筛选
-      if (ageMin && ageMax && verifyResult.details?.age) {
-        const age = verifyResult.details.age;
-        if (age < ageMin || age > ageMax) {
-          stats.excludedAgeFilter++;
-          addLog(`🎂 [${processedCount}/${requestedCount}] ${personName} - 年龄 ${age} 岁不在筛选范围内`, 'warning', processedCount, requestedCount, { name: personName, reason: `年龄 ${age} 不符合` });
-          continue;
-        }
-      }
-
-      if (verifyResult.verified) {
-        stats.phonesVerified++;
-        stats.validResults++;
-        addLog(`✅ [${processedCount}/${requestedCount}] 验证通过: ${personName} (匹配度: ${verifyResult.matchScore}%)`, 'success', processedCount, requestedCount, { 
-          name: personName, 
-          phone: phoneNumber,
-          matchScore: verifyResult.matchScore 
-        });
-      } else {
-        stats.excludedVerifyFailed++;
-        addLog(`❌ [${processedCount}/${requestedCount}] 验证失败: ${personName} (匹配度: ${verifyResult.matchScore}%)`, 'error', processedCount, requestedCount, { 
-          name: personName, 
-          matchScore: verifyResult.matchScore,
-          reason: '验证失败'
-        });
-      }
-
-      // 保存结果（无论验证是否通过都保存）
+      // 保存基础结果（电话号码待异步获取）
       const resultData = {
         apolloId: enrichedPerson.id,
         firstName: enrichedPerson.first_name,
@@ -374,14 +306,37 @@ export async function executeSearch(
         state: enrichedPerson.state,
         country: enrichedPerson.country,
         email: enrichedPerson.email,
-        phone: phoneNumber,
-        phoneType: phoneSource === 'organization' ? 'organization' : (enrichedPerson.phone_numbers?.[0]?.type || 'unknown'),
+        phone: null, // 电话号码待异步获取
+        phoneStatus: 'pending', // pending, received, verified, failed
+        phoneType: null,
         linkedinUrl: enrichedPerson.linkedin_url,
-        age: verifyResult.details?.age,
-        carrier: verifyResult.details?.carrier,
+        age: null,
+        carrier: null,
       };
 
-      await saveSearchResult(task.id, enrichedPerson.id, resultData, verifyResult.verified, verifyResult.matchScore, verifyResult.details);
+      // 保存结果到数据库
+      const savedResult = await saveSearchResult(task.id, enrichedPerson.id, resultData, false, 0, null);
+      
+      if (savedResult) {
+        stats.validResults++;
+        stats.phonesPending++;
+        addLog(`📧 [${processedCount}/${requestedCount}] ${personName} - 邮箱: ${enrichedPerson.email || '无'}`, 'success', processedCount, requestedCount);
+        addLog(`📱 [${processedCount}/${requestedCount}] 正在异步获取电话号码...`, 'info', processedCount, requestedCount);
+        
+        // 异步请求电话号码（通过 webhook 返回）
+        const phoneRequested = await requestPhoneNumberAsync(
+          enrichedPerson.id,
+          task.taskId,
+          enrichedPerson,
+          userId
+        );
+        
+        if (phoneRequested) {
+          addLog(`✅ [${processedCount}/${requestedCount}] 电话号码请求已发送`, 'success', processedCount, requestedCount);
+        } else {
+          addLog(`⚠️ [${processedCount}/${requestedCount}] 电话号码请求失败`, 'warning', processedCount, requestedCount);
+        }
+      }
 
       // 缓存个人数据
       const personCacheKey = `person:${enrichedPerson.id}`;
@@ -395,7 +350,7 @@ export async function executeSearch(
       await updateProgress();
     }
 
-    // ===== 完成 =====
+    // ===== 完成基础搜索 =====
     addLog(`─────────────────────────────────────`, 'info');
     
     const finalStatus = progress.status === 'stopped' ? 'stopped' : 
@@ -406,20 +361,18 @@ export async function executeSearch(
     } else if (finalStatus === 'insufficient_credits') {
       addLog(`⚠️ 积分不足，搜索提前结束`, 'warning');
     } else {
-      addLog(`🎉 搜索完成！`, 'success');
+      addLog(`🎉 基础搜索完成！`, 'success');
+      addLog(`📱 电话号码正在后台异步获取中，请稍候刷新查看...`, 'info');
     }
     addLog(`📊 结果统计:`, 'info');
     addLog(`   • 处理记录: ${processedCount}`, 'info');
-    addLog(`   • 找到电话: ${stats.phonesFound}`, 'info');
-    addLog(`   • 验证通过: ${stats.phonesVerified}`, 'info');
-    addLog(`   • 验证成功率: ${stats.verifySuccessRate}%`, 'info');
+    addLog(`   • 有效结果: ${stats.validResults}`, 'info');
+    addLog(`   • 电话待获取: ${stats.phonesPending}`, 'info');
     addLog(`💰 总消耗积分: ${stats.creditsUsed}`, 'info');
     
-    if (stats.excludedNoPhone > 0 || stats.excludedVerifyFailed > 0 || stats.excludedAgeFilter > 0) {
+    if (stats.excludedOther > 0) {
       addLog(`🚫 排除统计:`, 'info');
-      if (stats.excludedNoPhone > 0) addLog(`   • 无电话号码: ${stats.excludedNoPhone}`, 'info');
-      if (stats.excludedVerifyFailed > 0) addLog(`   • 验证失败: ${stats.excludedVerifyFailed}`, 'info');
-      if (stats.excludedAgeFilter > 0) addLog(`   • 年龄不符: ${stats.excludedAgeFilter}`, 'info');
+      addLog(`   • 获取失败: ${stats.excludedOther}`, 'info');
     }
 
     progress.status = finalStatus;

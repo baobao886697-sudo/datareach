@@ -397,6 +397,55 @@ export async function getSearchResults(taskId: number): Promise<SearchResult[]> 
   return db.select().from(searchResults).where(eq(searchResults.taskId, taskId)).orderBy(desc(searchResults.createdAt));
 }
 
+export async function updateSearchResult(resultId: number, updates: Partial<{ data: any; verified: boolean; verificationScore: number; verificationDetails: any }>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(searchResults).set(updates).where(eq(searchResults.id, resultId));
+}
+
+export async function updateSearchResultByApolloId(taskId: string, apolloId: string, dataUpdates: Record<string, any>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  // 先获取任务ID
+  const task = await getSearchTask(taskId);
+  if (!task) return;
+  
+  // 查找对应的搜索结果
+  const results = await db.select().from(searchResults).where(
+    and(
+      eq(searchResults.taskId, task.id),
+      eq(searchResults.apolloId, apolloId)
+    )
+  ).limit(1);
+  
+  if (results.length === 0) return;
+  
+  const result = results[0];
+  const existingData = result.data as Record<string, any> || {};
+  
+  // 合并更新数据
+  const newData = { ...existingData, ...dataUpdates };
+  
+  // 更新记录
+  await db.update(searchResults).set({
+    data: newData,
+    verified: dataUpdates.verified !== undefined ? dataUpdates.verified : result.verified,
+    verificationScore: dataUpdates.verificationScore !== undefined ? dataUpdates.verificationScore : result.verificationScore,
+    verificationDetails: dataUpdates.verificationDetails !== undefined ? dataUpdates.verificationDetails : result.verificationDetails
+  }).where(eq(searchResults.id, result.id));
+}
+
+export async function getSearchResultsByTaskId(taskId: string): Promise<SearchResult[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const task = await getSearchTask(taskId);
+  if (!task) return [];
+  
+  return db.select().from(searchResults).where(eq(searchResults.taskId, task.id)).orderBy(desc(searchResults.createdAt));
+}
+
 // ============ 全局缓存相关 ============
 
 export async function getCacheByKey(cacheKey: string): Promise<GlobalCache | undefined> {
