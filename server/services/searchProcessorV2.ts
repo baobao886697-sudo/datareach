@@ -574,7 +574,7 @@ export async function executeSearchV2(
         lastName: enrichedPerson.last_name,
         fullName: `${enrichedPerson.first_name} ${enrichedPerson.last_name}`,
         title: enrichedPerson.title,
-        company: enrichedPerson.organization_name,
+        company: enrichedPerson.organization?.name || enrichedPerson.organization_name,
         city: enrichedPerson.city,
         state: enrichedPerson.state,
         country: enrichedPerson.country,

@@ -132,7 +132,17 @@ export async function handleApolloWebhook(payload: any): Promise<{ processed: nu
       }
       
       const phoneNumber = selectedPhone.sanitized_number || selectedPhone.raw_number;
-      const phoneType = selectedPhone.type_cd || selectedPhone.type || 'unknown';
+      const phoneTypeRaw = selectedPhone.type_cd || selectedPhone.type || 'unknown';
+      // 将电话类型映射为中文
+      const phoneTypeMap: Record<string, string> = {
+        'mobile': '手机',
+        'personal': '手机',
+        'work': '座机',
+        'direct_dial': '座机',
+        'other': '其他',
+        'unknown': '未知'
+      };
+      const phoneType = phoneTypeMap[phoneTypeRaw] || phoneTypeRaw;
       
       console.log(`[Apollo Webhook] Found phone ${phoneNumber} (${phoneType}) for person ${personId}`);
       
