@@ -42,6 +42,12 @@ export interface ApolloSearchResult {
 }
 
 async function getApolloApiKey(): Promise<string> {
+  // 优先使用环境变量中的 API Key
+  const envKey = process.env.APOLLO_API_KEY;
+  if (envKey && envKey.trim()) {
+    return envKey.trim();
+  }
+  // 其次从数据库配置读取
   const key = await getConfig('APOLLO_API_KEY');
   if (!key) throw new Error('Apollo API key not configured');
   return key;

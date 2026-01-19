@@ -72,7 +72,7 @@ async function migrateOldData(db: any) {
       { key: 'CACHE_TTL_DAYS', value: '180', description: '缓存有效期(天)' },
       { key: 'SEARCH_CREDITS_PER_PERSON', value: '2', description: '每条搜索结果消耗积分' },
       { key: 'PREVIEW_CREDITS', value: '1', description: '预览搜索消耗积分' },
-      { key: 'APOLLO_API_KEY', value: 'cU-fA-bc9GwpNIcxObMtyw', description: 'Apollo API密钥' }
+      { key: 'APOLLO_API_KEY', value: process.env.APOLLO_API_KEY || '', description: 'Apollo API密钥 (优先使用环境变量)' }
     ];
     
     for (const config of configsToUpdate) {
