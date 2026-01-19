@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, sql, like, or } from "drizzle-orm";
+import { sql, eq, desc, and, gte, lte, like, or, isNull, ne, asc, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   users, InsertUser, User,
@@ -373,22 +373,56 @@ export async function updateSearchTask(taskId: string, updates: Partial<SearchTa
   const maxRetries = 3;
   let lastError: any;
   
+  // 处理 logs 字段，截断过长的日志
+  const processedUpdates = { ...updates };
+  if (processedUpdates.logs && Array.isArray(processedUpdates.logs)) {
+    if (processedUpdates.logs.length > 100) {
+      processedUpdates.logs = processedUpdates.logs.slice(-100);
+    }
+  }
+  
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await db.update(searchTasks).set(updates as any).where(eq(searchTasks.taskId, taskId));
+      // 分离 logs 字段，单独处理
+      const { logs, ...otherUpdates } = processedUpdates;
+      
+      // 先更新非 JSON 字段
+      if (Object.keys(otherUpdates).length > 0) {
+        await db.update(searchTasks).set(otherUpdates as any).where(eq(searchTasks.taskId, taskId));
+      }
+      
+      // 如果有 logs，使用原生 SQL 更新
+      if (logs) {
+        const logsJson = JSON.stringify(logs);
+        await db.execute(sql`UPDATE search_tasks SET logs = ${logsJson} WHERE taskId = ${taskId}`);
+      }
+      
       return; // 成功则返回
     } catch (error: any) {
       lastError = error;
       console.error(`[DB] updateSearchTask attempt ${attempt}/${maxRetries} failed:`, error.message);
       
+      // 如果失败，尝试只更新非 logs 字段
+      if (attempt === 2) {
+        console.warn('[DB] Retrying without logs field...');
+        const { logs, ...updatesWithoutLogs } = processedUpdates;
+        try {
+          if (Object.keys(updatesWithoutLogs).length > 0) {
+            await db.update(searchTasks).set(updatesWithoutLogs as any).where(eq(searchTasks.taskId, taskId));
+            console.log('[DB] Update succeeded without logs field');
+            return;
+          }
+        } catch (e) {
+          // 继续重试
+        }
+      }
+      
       if (attempt < maxRetries) {
-        // 等待后重试 (指数退避)
         await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt)));
       }
     }
   }
   
-  // 所有重试都失败，记录错误但不抛出异常
   console.error('[DB] updateSearchTask failed after all retries:', lastError?.message);
 }
 
