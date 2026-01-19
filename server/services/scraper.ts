@@ -165,7 +165,7 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
   const tpsResult = await verifyWithTruePeopleSearch(person, userId);
   
   // 如果第一阶段验证成功（姓名匹配且年龄在范围内），直接返回
-  if (tpsResult.verified && tpsResult.matchScore >= 70) {
+  if (tpsResult.verified && tpsResult.matchScore >= 60) {
     console.log(`[Scraper] TruePeopleSearch verification passed`);
     return { ...tpsResult, source: 'TruePeopleSearch' };
   }
@@ -174,7 +174,7 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
   console.log(`[Scraper] TruePeopleSearch failed (verified=${tpsResult.verified}, score=${tpsResult.matchScore}), trying FastPeopleSearch`);
   const fpsResult = await verifyWithFastPeopleSearch(person, userId);
   
-  if (fpsResult.verified && fpsResult.matchScore >= 70) {
+  if (fpsResult.verified && fpsResult.matchScore >= 60) {
     console.log(`[Scraper] FastPeopleSearch verification passed`);
     return { ...fpsResult, source: 'FastPeopleSearch' };
   }

@@ -530,7 +530,7 @@ export const appRouter = router({
           // 标准版 - 平衡的字段选择
           headers = [
             "序号", "姓名", "名", "姓", "年龄",
-            "职位", "公司",
+            "职位", "公司", "行业",
             "城市", "州", "国家",
             "电话号码", "电话类型", "运营商", "电话状态",
             "邮箱",
@@ -546,6 +546,7 @@ export const appRouter = router({
             data.age?.toString() || "",
             data.title || "",
             data.company || data.organization_name || "",
+            data.industry || "",
             data.city || "",
             data.state || "",
             data.country || "",

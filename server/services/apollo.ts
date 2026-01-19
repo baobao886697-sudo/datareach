@@ -29,6 +29,7 @@ export interface ApolloPerson {
     name?: string;
     phone?: string;
     sanitized_phone?: string;
+    industry?: string;
   };
   has_email?: boolean;
   has_direct_phone?: string;

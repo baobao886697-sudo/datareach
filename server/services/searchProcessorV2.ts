@@ -588,6 +588,7 @@ export async function executeSearchV2(
         verificationSource: null as string | null,
         verificationScore: null as number | null,
         verifiedAt: null as Date | null,
+        industry: enrichedPerson.organization?.industry || null,
       };
 
       // 保存结果到数据库
