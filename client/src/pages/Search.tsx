@@ -14,7 +14,8 @@ import { toast } from "sonner";
 import { 
   Search as SearchIcon, Loader2, AlertCircle, Info, Zap, Target, MapPin, 
   Briefcase, User, Sparkles, Users, Calendar, ChevronRight, Coins,
-  CheckCircle2, AlertTriangle
+  CheckCircle2, AlertTriangle, Eye, Database, Shield, TrendingUp,
+  ArrowRight, RefreshCw
 } from "lucide-react";
 
 const US_STATES = [
@@ -54,15 +55,43 @@ export default function Search() {
   const [enableAgeFilter, setEnableAgeFilter] = useState(false);
   const [ageRange, setAgeRange] = useState<[number, number]>([25, 65]);
   
+  // 电话验证开关
+  const [enableVerification, setEnableVerification] = useState(true);
+  
+  // 预览结果
+  const [previewResult, setPreviewResult] = useState<{
+    success: boolean;
+    totalAvailable: number;
+    estimatedCredits: number;
+    canAfford: boolean;
+    userCredits: number;
+    maxAffordable: number;
+    cacheHit: boolean;
+    message: string;
+  } | null>(null);
+  
   // 确认对话框
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
 
-  const { data: profile } = trpc.user.profile.useQuery(undefined, { enabled: !!user });
+  const { data: profile, refetch: refetchProfile } = trpc.user.profile.useQuery(undefined, { enabled: !!user });
+
+  // 预览搜索
+  const previewMutation = trpc.search.preview.useMutation({
+    onSuccess: (data) => {
+      setPreviewResult(data);
+      setShowPreviewDialog(true);
+    },
+    onError: (error) => {
+      toast.error(error.message || "预览搜索失败");
+    },
+  });
 
   const searchMutation = trpc.search.start.useMutation({
     onSuccess: (data) => {
       toast.success("搜索任务已创建，正在处理中...");
       setShowConfirmDialog(false);
+      setShowPreviewDialog(false);
       if (data.taskId) {
         // 跳转到新的进度页面
         setLocation(`/progress/${data.taskId}`);
@@ -95,7 +124,27 @@ export default function Search() {
     };
   }, [searchLimit, profile?.credits]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // 预览搜索
+  const handlePreview = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!name.trim() || !title.trim() || !state) {
+      toast.error("请填写所有必填字段");
+      return;
+    }
+
+    previewMutation.mutate({ 
+      name: name.trim(), 
+      title: title.trim(), 
+      state,
+      limit: searchLimit,
+      ageMin: enableAgeFilter ? ageRange[0] : undefined,
+      ageMax: enableAgeFilter ? ageRange[1] : undefined,
+    });
+  };
+
+  // 直接搜索（跳过预览）
+  const handleDirectSearch = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!name.trim() || !title.trim() || !state) {
@@ -117,9 +166,10 @@ export default function Search() {
       name: name.trim(), 
       title: title.trim(), 
       state,
-      limit: searchLimit,
+      limit: previewResult ? Math.min(searchLimit, previewResult.totalAvailable) : searchLimit,
       ageMin: enableAgeFilter ? ageRange[0] : undefined,
       ageMax: enableAgeFilter ? ageRange[1] : undefined,
+      enableVerification,
     });
   };
 
@@ -186,7 +236,7 @@ export default function Search() {
                 </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-slate-300 flex items-center gap-2">
                     <User className="h-4 w-4 text-slate-500" />
@@ -255,7 +305,7 @@ export default function Search() {
                         }`}
                       >
                         {option.recommended && (
-                          <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 text-[10px] bg-cyan-500 text-white rounded-full">
+                          <span className="absolute -top-2 -right-2 px-1.5 py-0.5 text-[10px] bg-cyan-500 text-white rounded-full">
                             推荐
                           </span>
                         )}
@@ -267,26 +317,22 @@ export default function Search() {
                 </div>
 
                 {/* 年龄筛选 */}
-                <div className="space-y-3 p-4 rounded-xl bg-slate-800/30 border border-slate-700/50">
+                <div className="space-y-3 p-4 rounded-xl bg-slate-800/30 border border-slate-700/30">
                   <div className="flex items-center justify-between">
                     <Label className="text-slate-300 flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-slate-500" />
                       年龄筛选
-                      <span className="text-xs text-slate-500">(可选)</span>
                     </Label>
                     <Switch
                       checked={enableAgeFilter}
                       onCheckedChange={setEnableAgeFilter}
                     />
                   </div>
-                  
                   {enableAgeFilter && (
                     <div className="space-y-4 pt-2">
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex justify-between text-sm">
                         <span className="text-slate-400">年龄范围</span>
-                        <span className="text-cyan-400 font-mono">
-                          {ageRange[0]} - {ageRange[1]} 岁
-                        </span>
+                        <span className="text-cyan-400 font-mono">{ageRange[0]} - {ageRange[1]} 岁</span>
                       </div>
                       <Slider
                         value={ageRange}
@@ -296,55 +342,90 @@ export default function Search() {
                         step={1}
                         className="py-2"
                       />
-                      <div className="flex justify-between text-xs text-slate-500">
-                        <span>18岁</span>
-                        <span>80岁</span>
-                      </div>
                     </div>
                   )}
                 </div>
 
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={searchMutation.isPending || !creditEstimate.canAfford}
-                  className="w-full h-14 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-medium shadow-lg shadow-cyan-500/25 rounded-xl border-0 text-lg"
-                >
-                  {searchMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      正在创建搜索任务...
-                    </>
-                  ) : (
-                    <>
-                      <SearchIcon className="mr-2 h-5 w-5" />
-                      开始搜索
-                      <ChevronRight className="ml-2 h-5 w-5" />
-                    </>
-                  )}
-                </Button>
+                {/* 电话验证开关 */}
+                <div className="space-y-3 p-4 rounded-xl bg-slate-800/30 border border-slate-700/30">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-slate-300 flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-slate-500" />
+                      电话二次验证
+                      <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded">免费</span>
+                    </Label>
+                    <Switch
+                      checked={enableVerification}
+                      onCheckedChange={setEnableVerification}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    启用后将通过 Scrape.do 验证电话号码真实性，提高数据质量
+                  </p>
+                </div>
+
+                {/* 搜索按钮 */}
+                <div className="flex gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handlePreview}
+                    disabled={previewMutation.isPending || !name.trim() || !title.trim() || !state}
+                    className="flex-1 h-12 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 rounded-xl"
+                  >
+                    {previewMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        查询中...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="mr-2 h-4 w-4" />
+                        预览搜索
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleDirectSearch}
+                    disabled={searchMutation.isPending || !creditEstimate.canAfford || !name.trim() || !title.trim() || !state}
+                    className="flex-1 h-12 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white rounded-xl shadow-lg shadow-cyan-500/25"
+                  >
+                    {searchMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        处理中...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="mr-2 h-4 w-4" />
+                        直接搜索
+                      </>
+                    )}
+                  </Button>
+                </div>
               </form>
             </div>
           </div>
 
-          {/* 右侧：积分预估面板 */}
+          {/* 右侧：费用预估 */}
           <div className="space-y-6">
-            {/* 积分预估卡片 */}
+            {/* 费用预估卡片 */}
             <div className="relative p-6 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
-                  <Zap className="h-5 w-5 text-purple-400" />
+                  <TrendingUp className="h-5 w-5 text-purple-400" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white">积分预估</h3>
-                  <p className="text-sm text-slate-400">本次搜索费用</p>
+                  <h3 className="text-lg font-semibold text-white">费用预估</h3>
+                  <p className="text-sm text-slate-400">预计消耗积分</p>
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/50">
                   <span className="text-slate-400">搜索费用</span>
-                  <span className="text-white font-mono">{creditEstimate.searchCost} 积分</span>
+                  <span className="text-white font-mono">{SEARCH_COST} 积分</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/50">
                   <span className="text-slate-400">电话获取</span>
@@ -407,9 +488,37 @@ export default function Search() {
                   <ul className="space-y-1">
                     <li>• 搜索费用：每次搜索 1 积分</li>
                     <li>• 电话获取：每条结果 2 积分</li>
-                    <li>• 电话验证：免费（TruePeopleSearch）</li>
+                    <li>• 电话验证：免费（Scrape.do）</li>
                     <li>• 实际消耗可能因结果数量有所浮动</li>
                   </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* 搜索流程说明 */}
+            <div className="relative p-4 rounded-xl bg-purple-500/5 border border-purple-500/20">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-purple-400 shrink-0 mt-0.5" />
+                <div className="text-sm text-slate-400">
+                  <p className="text-purple-400 font-medium mb-2">搜索流程</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Database className="h-3 w-3 text-blue-400" />
+                      <span>Apollo 数据获取</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ArrowRight className="h-3 w-3 text-slate-600" />
+                      <span>异步获取电话号码</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-3 w-3 text-green-400" />
+                      <span>Scrape.do 二次验证</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3 w-3 text-cyan-400" />
+                      <span>导出 CSV 报表</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -417,7 +526,129 @@ export default function Search() {
         </div>
       </div>
 
-      {/* 搜索确认对话框 */}
+      {/* 预览结果对话框 */}
+      <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
+        <DialogContent className="bg-slate-900 border-slate-700 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Eye className="h-5 w-5 text-cyan-400" />
+              预览搜索结果
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              查看搜索预估结果
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewResult && (
+            <div className="space-y-4 py-4">
+              {/* 搜索结果预估 */}
+              <div className="p-4 rounded-xl bg-slate-800/50 space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  {previewResult.cacheHit ? (
+                    <Sparkles className="h-4 w-4 text-yellow-400" />
+                  ) : (
+                    <Database className="h-4 w-4 text-blue-400" />
+                  )}
+                  <span className={previewResult.cacheHit ? "text-yellow-400" : "text-blue-400"}>
+                    {previewResult.cacheHit ? "命中缓存" : "Apollo 查询"}
+                  </span>
+                </div>
+                
+                <div className="text-center py-4">
+                  <div className="text-4xl font-bold text-cyan-400 font-mono">
+                    {previewResult.totalAvailable}
+                  </div>
+                  <div className="text-sm text-slate-400 mt-1">可用记录数</div>
+                </div>
+
+                <div className="text-sm text-slate-400 text-center">
+                  {previewResult.message}
+                </div>
+              </div>
+
+              {/* 积分消耗 */}
+              <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 space-y-2">
+                <h4 className="text-sm text-purple-400 mb-3">积分消耗</h4>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">实际可获取</span>
+                  <span className="text-white font-mono">
+                    {Math.min(searchLimit, previewResult.totalAvailable)} 条
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">预估消耗</span>
+                  <span className="text-cyan-400 font-mono font-bold">
+                    ~{SEARCH_COST + Math.min(searchLimit, previewResult.totalAvailable) * PHONE_COST_PER_PERSON} 积分
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">当前余额</span>
+                  <span className="text-yellow-400 font-mono">{previewResult.userCredits} 积分</span>
+                </div>
+              </div>
+
+              {/* 积分不足警告 */}
+              {!previewResult.canAfford && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-red-400 font-medium">积分不足</p>
+                      <p className="text-sm text-slate-400 mt-1">
+                        最多可搜索 <span className="text-white font-mono">{previewResult.maxAffordable}</span> 条
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 结果数量不足提示 */}
+              {previewResult.totalAvailable < searchLimit && previewResult.totalAvailable > 0 && (
+                <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-yellow-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-yellow-400 font-medium">结果数量不足</p>
+                      <p className="text-sm text-slate-400 mt-1">
+                        您请求 {searchLimit} 条，但只有 {previewResult.totalAvailable} 条可用
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowPreviewDialog(false)}
+              className="border-slate-700 text-slate-400 hover:bg-slate-800"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleConfirmSearch}
+              disabled={searchMutation.isPending || !previewResult?.canAfford || previewResult?.totalAvailable === 0}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700"
+            >
+              {searchMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  处理中...
+                </>
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  开始搜索
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 直接搜索确认对话框 */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <DialogContent className="bg-slate-900 border-slate-700 max-w-md">
           <DialogHeader>
@@ -456,6 +687,12 @@ export default function Search() {
                   <span className="text-white">{ageRange[0]} - {ageRange[1]} 岁</span>
                 </div>
               )}
+              <div className="flex justify-between">
+                <span className="text-slate-400">电话验证</span>
+                <span className={enableVerification ? "text-green-400" : "text-slate-500"}>
+                  {enableVerification ? "已启用" : "已禁用"}
+                </span>
+              </div>
             </div>
 
             {/* 积分消耗 */}

@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { 
@@ -19,7 +20,8 @@ import {
   Copy, ExternalLink, Trash2, CheckCircle2, Loader2, Coins,
   BarChart3, Users, PhoneCall, ShieldCheck, Ban, StopCircle,
   Play, Pause, Search, Database, Shield, FileDown, Eye,
-  ChevronRight, Sparkles, Globe, Linkedin
+  ChevronRight, Sparkles, Globe, Linkedin, ChevronDown,
+  FileText, FileSpreadsheet, Terminal, Info
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -46,6 +48,9 @@ interface ResultData {
   linkedinUrl?: string;
   linkedin_url?: string;
   age?: number;
+  verificationStatus?: string;
+  verificationSource?: string;
+  verificationScore?: number;
 }
 
 // 定义搜索参数类型
@@ -56,20 +61,23 @@ interface SearchParams {
   limit?: number;
   ageMin?: number;
   ageMax?: number;
+  enableVerification?: boolean;
 }
 
 // 定义日志类型
 interface LogEntry {
   timestamp: string;
-  level: 'info' | 'success' | 'warning' | 'error';
+  level: 'info' | 'success' | 'warning' | 'error' | 'debug';
   step?: number;
   total?: number;
+  phase?: string;
   message: string;
   details?: {
     name?: string;
     phone?: string;
     matchScore?: number;
     reason?: string;
+    source?: string;
   };
 }
 
@@ -77,8 +85,16 @@ interface LogEntry {
 const SEARCH_PHASES = [
   { id: 'init', label: '初始化', icon: Play, color: 'cyan' },
   { id: 'apollo', label: 'Apollo 数据获取', icon: Database, color: 'blue' },
-  { id: 'verification', label: '电话验证', icon: Shield, color: 'purple' },
-  { id: 'done', label: '完成', icon: CheckCircle, color: 'green' },
+  { id: 'phone', label: '电话号码获取', icon: Phone, color: 'purple' },
+  { id: 'verification', label: 'Scrape.do 验证', icon: Shield, color: 'green' },
+  { id: 'done', label: '完成', icon: CheckCircle, color: 'emerald' },
+];
+
+// CSV 导出格式选项
+const CSV_FORMATS = [
+  { value: 'simple', label: '简洁版', description: '基本信息（姓名、职位、电话）', icon: FileText },
+  { value: 'standard', label: '标准版', description: '常用字段（含公司、邮箱）', icon: FileSpreadsheet },
+  { value: 'detailed', label: '详细版', description: '全部字段（40+字段）', icon: Database },
 ];
 
 export default function SearchProgress() {
@@ -88,6 +104,8 @@ export default function SearchProgress() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeTab, setActiveTab] = useState("progress");
   const [showStopDialog, setShowStopDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [selectedExportFormat, setSelectedExportFormat] = useState<string>('standard');
   const [autoScroll, setAutoScroll] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -111,7 +129,6 @@ export default function SearchProgress() {
     { taskId: taskId || "" },
     { 
       enabled: !!user && !!taskId,
-      // 如果任务已完成且有待获取的电话号码，每5秒刷新一次
       refetchInterval: (data) => {
         if (!data || !Array.isArray(data) || data.length === 0) return false;
         const hasPendingPhones = data.some((r: any) => {
@@ -148,6 +165,7 @@ export default function SearchProgress() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       toast.success("导出成功");
+      setShowExportDialog(false);
     },
     onError: (error) => {
       toast.error(error.message || "导出失败");
@@ -199,6 +217,7 @@ export default function SearchProgress() {
   const searchLimit = searchParams?.limit || 50;
   const ageMin = searchParams?.ageMin;
   const ageMax = searchParams?.ageMax;
+  const enableVerification = searchParams?.enableVerification !== false;
 
   // 计算进度和统计
   const progress = task?.progress || 0;
@@ -212,15 +231,26 @@ export default function SearchProgress() {
   // 确定当前阶段
   const currentPhase = useMemo(() => {
     if (!task) return 'init';
+    
+    // 从日志中检测当前阶段
+    const lastLog = logs[logs.length - 1];
+    if (lastLog?.phase) return lastLog.phase;
+    
+    // 根据日志内容推断
+    const lastMessages = logs.slice(-5).map(l => l.message).join(' ');
+    if (lastMessages.includes('验证') || lastMessages.includes('Scrape')) return 'verification';
+    if (lastMessages.includes('电话')) return 'phone';
+    if (lastMessages.includes('Apollo') || lastMessages.includes('获取')) return 'apollo';
+    
     switch (task.status) {
       case 'pending': return 'init';
-      case 'running': return 'verification';
+      case 'running': return 'apollo';
       case 'completed':
       case 'stopped':
       case 'failed': return 'done';
       default: return 'init';
     }
-  }, [task?.status]);
+  }, [task?.status, logs]);
 
   // 从日志中提取统计信息
   const stats = useMemo(() => {
@@ -233,16 +263,20 @@ export default function SearchProgress() {
       excludedAgeFilter: 0,
       cacheHits: 0,
       processedCount: 0,
+      scrapeDoVerified: 0,
+      scrapeDoFailed: 0,
     };
     
     logs.forEach(log => {
-      if (log.message.includes('Apollo')) result.apolloCalls++;
-      if (log.message.includes('找到电话')) result.phonesFound++;
-      if (log.message.includes('验证通过')) result.phonesVerified++;
+      if (log.message.includes('Apollo') || log.message.includes('获取数据')) result.apolloCalls++;
+      if (log.message.includes('找到电话') || log.message.includes('获取到电话')) result.phonesFound++;
+      if (log.message.includes('验证通过') || log.message.includes('验证成功')) result.phonesVerified++;
       if (log.message.includes('验证失败')) result.verifyFailed++;
-      if (log.message.includes('未找到电话')) result.excludedNoPhone++;
+      if (log.message.includes('未找到电话') || log.message.includes('无电话')) result.excludedNoPhone++;
       if (log.message.includes('年龄') && log.message.includes('不在')) result.excludedAgeFilter++;
-      if (log.message.includes('缓存命中')) result.cacheHits++;
+      if (log.message.includes('缓存命中') || log.message.includes('缓存')) result.cacheHits++;
+      if (log.message.includes('Scrape.do') && log.message.includes('验证通过')) result.scrapeDoVerified++;
+      if (log.message.includes('Scrape.do') && log.message.includes('验证失败')) result.scrapeDoFailed++;
       if (log.step) result.processedCount = Math.max(result.processedCount, log.step);
     });
     
@@ -307,21 +341,24 @@ export default function SearchProgress() {
   const getLogIcon = (level: string, message: string) => {
     // 根据消息内容返回更具体的图标
     if (message.includes('Apollo')) return <Database className="h-4 w-4 text-blue-400" />;
+    if (message.includes('Scrape.do') && message.includes('验证通过')) return <ShieldCheck className="h-4 w-4 text-green-400" />;
+    if (message.includes('Scrape.do') && message.includes('验证失败')) return <Ban className="h-4 w-4 text-red-400" />;
     if (message.includes('验证通过')) return <ShieldCheck className="h-4 w-4 text-green-400" />;
     if (message.includes('验证失败')) return <Ban className="h-4 w-4 text-red-400" />;
-    if (message.includes('找到电话')) return <Phone className="h-4 w-4 text-cyan-400" />;
-    if (message.includes('未找到电话')) return <Phone className="h-4 w-4 text-yellow-400" />;
-    if (message.includes('积分')) return <Coins className="h-4 w-4 text-yellow-400" />;
+    if (message.includes('找到电话') || message.includes('获取到电话')) return <Phone className="h-4 w-4 text-cyan-400" />;
+    if (message.includes('未找到电话') || message.includes('无电话')) return <Phone className="h-4 w-4 text-yellow-400" />;
     if (message.includes('缓存')) return <Zap className="h-4 w-4 text-purple-400" />;
+    if (message.includes('完成') || message.includes('成功')) return <CheckCircle className="h-4 w-4 text-green-400" />;
     if (message.includes('开始') || message.includes('初始化')) return <Play className="h-4 w-4 text-cyan-400" />;
-    if (message.includes('完成')) return <CheckCircle2 className="h-4 w-4 text-green-400" />;
-    if (message.includes('错误') || message.includes('失败')) return <XCircle className="h-4 w-4 text-red-400" />;
+    if (message.includes('处理') || message.includes('搜索')) return <Search className="h-4 w-4 text-blue-400" />;
+    if (message.includes('年龄')) return <User className="h-4 w-4 text-orange-400" />;
     
     switch (level) {
-      case 'success': return <CheckCircle2 className="h-4 w-4 text-green-400" />;
+      case 'success': return <CheckCircle className="h-4 w-4 text-green-400" />;
       case 'warning': return <AlertTriangle className="h-4 w-4 text-yellow-400" />;
       case 'error': return <XCircle className="h-4 w-4 text-red-400" />;
-      default: return <Activity className="h-4 w-4 text-cyan-400" />;
+      case 'debug': return <Terminal className="h-4 w-4 text-slate-500" />;
+      default: return <Info className="h-4 w-4 text-blue-400" />;
     }
   };
 
@@ -330,16 +367,74 @@ export default function SearchProgress() {
       case 'success': return 'text-green-400';
       case 'warning': return 'text-yellow-400';
       case 'error': return 'text-red-400';
+      case 'debug': return 'text-slate-500';
       default: return 'text-slate-300';
     }
+  };
+
+  const getPhoneStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'verified':
+        return (
+          <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
+            <ShieldCheck className="h-3 w-3 mr-1" />
+            已验证
+          </Badge>
+        );
+      case 'received':
+        return (
+          <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs">
+            <Phone className="h-3 w-3 mr-1" />
+            已获取
+          </Badge>
+        );
+      case 'pending':
+        return (
+          <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-xs">
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            获取中
+          </Badge>
+        );
+      case 'failed':
+        return (
+          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs">
+            <XCircle className="h-3 w-3 mr-1" />
+            失败
+          </Badge>
+        );
+      case 'no_phone':
+        return (
+          <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30 text-xs">
+            <Phone className="h-3 w-3 mr-1" />
+            无电话
+          </Badge>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const handleExport = () => {
+    exportMutation.mutate({ 
+      taskId: taskId || "",
+      format: selectedExportFormat as 'simple' | 'standard' | 'detailed'
+    });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("已复制到剪贴板");
   };
 
   if (isLoading) {
     return (
       <DashboardLayout>
-        <div className="p-6 space-y-6">
-          <Skeleton className="h-8 w-48" />
-          <Skeleton className="h-64" />
+        <div className="p-6 max-w-7xl mx-auto">
+          <div className="space-y-6">
+            <Skeleton className="h-8 w-64 bg-slate-800" />
+            <Skeleton className="h-48 w-full bg-slate-800" />
+            <Skeleton className="h-96 w-full bg-slate-800" />
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -348,14 +443,14 @@ export default function SearchProgress() {
   if (!task) {
     return (
       <DashboardLayout>
-        <div className="p-6">
+        <div className="p-6 max-w-7xl mx-auto">
           <div className="text-center py-12">
-            <XCircle className="h-16 w-16 mx-auto text-destructive mb-4" />
-            <h2 className="text-xl font-semibold text-foreground">任务不存在</h2>
-            <p className="text-muted-foreground mt-2">该搜索任务可能已过期或不存在</p>
-            <Link href="/history">
-              <Button className="mt-4">返回历史记录</Button>
-            </Link>
+            <XCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2">任务不存在</h2>
+            <p className="text-slate-400 mb-6">找不到指定的搜索任务</p>
+            <Button onClick={() => setLocation('/search')} className="bg-cyan-500 hover:bg-cyan-600">
+              返回搜索
+            </Button>
           </div>
         </div>
       </DashboardLayout>
@@ -364,21 +459,24 @@ export default function SearchProgress() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="p-6 max-w-7xl mx-auto relative">
         {/* 背景装饰 */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
           <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[100px]" />
           <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[100px]" />
         </div>
 
-        {/* 头部 */}
-        <div className="relative flex items-center justify-between">
+        {/* 标题栏 */}
+        <div className="relative flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            <Link href="/history">
-              <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white hover:bg-slate-800">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setLocation('/search')}
+              className="text-slate-400 hover:text-white hover:bg-slate-800"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
@@ -386,118 +484,54 @@ export default function SearchProgress() {
                 </h1>
                 {getStatusBadge(task.status)}
               </div>
-              <p className="text-slate-400 mt-1 flex items-center gap-2">
-                <User className="h-4 w-4" />
-                {searchName}
-                <span className="text-slate-600">•</span>
-                <Briefcase className="h-4 w-4" />
-                {searchTitle}
-                <span className="text-slate-600">•</span>
-                <MapPin className="h-4 w-4" />
-                {searchState}
-                {ageMin && ageMax && (
-                  <>
-                    <span className="text-slate-600">•</span>
-                    <span>{ageMin}-{ageMax}岁</span>
-                  </>
-                )}
+              <p className="text-sm text-slate-400 mt-1">
+                {searchName} · {searchTitle} · {searchState}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {isRunning && (
-              <>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => refetch()} 
-                  className="border-slate-700 text-slate-400 hover:bg-slate-800"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  刷新
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setShowStopDialog(true)}
-                  className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-                >
-                  <StopCircle className="h-4 w-4 mr-2" />
-                  停止搜索
-                </Button>
-              </>
-            )}
-            {(isCompleted || isStopped) && results && results.length > 0 && (
               <Button
-                onClick={() => exportMutation.mutate({ taskId: taskId || "" })}
-                disabled={exportMutation.isPending}
+                variant="outline"
+                onClick={() => setShowStopDialog(true)}
+                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+              >
+                <StopCircle className="h-4 w-4 mr-2" />
+                停止搜索
+              </Button>
+            )}
+            {results && results.length > 0 && (
+              <Button
+                onClick={() => setShowExportDialog(true)}
                 className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700"
               >
-                <Download className="mr-2 h-4 w-4" />
-                导出CSV
+                <Download className="h-4 w-4 mr-2" />
+                导出 CSV
               </Button>
             )}
           </div>
         </div>
 
-        {/* 阶段指示器 */}
-        <div className="relative p-6 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50">
-          <div className="flex items-center justify-between">
-            {SEARCH_PHASES.map((phase, index) => {
-              const PhaseIcon = phase.icon;
-              const isActive = currentPhase === phase.id;
-              const isPast = SEARCH_PHASES.findIndex(p => p.id === currentPhase) > index;
-              const isLast = index === SEARCH_PHASES.length - 1;
-              
-              return (
-                <div key={phase.id} className="flex items-center flex-1">
-                  <div className="flex flex-col items-center">
-                    <div className={`
-                      w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-300
-                      ${isActive ? `bg-${phase.color}-500/20 border-2 border-${phase.color}-500 shadow-lg shadow-${phase.color}-500/20` : ''}
-                      ${isPast ? 'bg-green-500/20 border-2 border-green-500' : ''}
-                      ${!isActive && !isPast ? 'bg-slate-800/50 border border-slate-700' : ''}
-                    `}>
-                      {isPast ? (
-                        <CheckCircle className="h-6 w-6 text-green-400" />
-                      ) : (
-                        <PhaseIcon className={`h-6 w-6 ${isActive ? `text-${phase.color}-400` : 'text-slate-500'} ${isActive && isRunning ? 'animate-pulse' : ''}`} />
-                      )}
-                    </div>
-                    <span className={`mt-2 text-sm font-medium ${isActive ? 'text-white' : isPast ? 'text-green-400' : 'text-slate-500'}`}>
-                      {phase.label}
-                    </span>
-                  </div>
-                  {!isLast && (
-                    <div className={`flex-1 h-0.5 mx-4 ${isPast ? 'bg-green-500' : 'bg-slate-700'}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 主要内容区域 */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左侧：进度和日志 */}
-          <div className="lg:col-span-2 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* 左侧：主要内容 */}
+          <div className="lg:col-span-3 space-y-6">
             {/* 进度卡片 */}
-            <Card className="border-slate-700/50 bg-gradient-to-br from-slate-900/80 to-slate-800/50 overflow-hidden">
+            <Card className="border-slate-700/50 bg-gradient-to-br from-slate-900/80 to-slate-800/50">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center">
-                      <Target className="h-5 w-5 text-cyan-400" />
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center">
+                      <Activity className="h-5 w-5 text-cyan-400" />
                     </div>
                     <div>
-                      <CardTitle className="text-white">任务进度</CardTitle>
-                      <CardDescription>
-                        创建于 {new Date(task.createdAt).toLocaleString()}
+                      <CardTitle className="text-white">搜索进度</CardTitle>
+                      <CardDescription className="text-slate-400">
+                        任务 ID: {taskId?.slice(0, 8)}...
                       </CardDescription>
                     </div>
                   </div>
                   {isRunning && (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30">
+                    <div className="flex items-center gap-2">
                       <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
@@ -508,6 +542,43 @@ export default function SearchProgress() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 阶段进度指示器 */}
+                <div className="flex items-center justify-between py-4">
+                  {SEARCH_PHASES.map((phase, index) => {
+                    const PhaseIcon = phase.icon;
+                    const isActive = currentPhase === phase.id;
+                    const isPast = SEARCH_PHASES.findIndex(p => p.id === currentPhase) > index;
+                    
+                    return (
+                      <div key={phase.id} className="flex items-center">
+                        <div className={`flex flex-col items-center ${index < SEARCH_PHASES.length - 1 ? 'flex-1' : ''}`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                            isActive 
+                              ? 'bg-cyan-500/30 border-2 border-cyan-500 animate-pulse' 
+                              : isPast 
+                                ? 'bg-green-500/20 border border-green-500/50'
+                                : 'bg-slate-800 border border-slate-700'
+                          }`}>
+                            <PhaseIcon className={`h-5 w-5 ${
+                              isActive ? 'text-cyan-400' : isPast ? 'text-green-400' : 'text-slate-500'
+                            }`} />
+                          </div>
+                          <span className={`text-xs mt-2 ${
+                            isActive ? 'text-cyan-400' : isPast ? 'text-green-400' : 'text-slate-500'
+                          }`}>
+                            {phase.label}
+                          </span>
+                        </div>
+                        {index < SEARCH_PHASES.length - 1 && (
+                          <div className={`h-0.5 flex-1 mx-2 ${
+                            isPast ? 'bg-green-500/50' : 'bg-slate-700'
+                          }`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
                 {/* 进度条 */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
@@ -566,7 +637,7 @@ export default function SearchProgress() {
                   value="progress" 
                   className="data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400 px-4"
                 >
-                  <Activity className="h-4 w-4 mr-2" />
+                  <Terminal className="h-4 w-4 mr-2" />
                   实时日志
                   {isRunning && <span className="ml-2 w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />}
                 </TabsTrigger>
@@ -629,10 +700,15 @@ export default function SearchProgress() {
                               >
                                 <span className="text-slate-600 shrink-0 text-xs">[{log.timestamp}]</span>
                                 <span className="shrink-0">{getLogIcon(log.level, log.message)}</span>
+                                {log.step && log.total && (
+                                  <span className="text-slate-500 shrink-0 text-xs">
+                                    [{log.step}/{log.total}]
+                                  </span>
+                                )}
                                 <span className={`${getLogColor(log.level)} flex-1`}>
                                   {log.message}
                                 </span>
-                                {log.details?.matchScore && (
+                                {log.details?.matchScore !== undefined && (
                                   <Badge 
                                     variant="outline" 
                                     className={`text-xs shrink-0 ${log.details.matchScore >= 70 ? 'border-green-500/30 text-green-400' : 'border-yellow-500/30 text-yellow-400'}`}
@@ -670,8 +746,7 @@ export default function SearchProgress() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => exportMutation.mutate({ taskId: taskId || "" })}
-                            disabled={exportMutation.isPending}
+                            onClick={() => setShowExportDialog(true)}
                             className="text-cyan-400 hover:text-cyan-300"
                           >
                             <FileDown className="h-4 w-4 mr-1" />
@@ -693,7 +768,7 @@ export default function SearchProgress() {
                                 <TableHead className="text-slate-400">职位</TableHead>
                                 <TableHead className="text-slate-400">公司</TableHead>
                                 <TableHead className="text-slate-400">电话</TableHead>
-                                <TableHead className="text-slate-400">验证</TableHead>
+                                <TableHead className="text-slate-400">状态</TableHead>
                                 <TableHead className="text-slate-400 w-12"></TableHead>
                               </TableRow>
                             </TableHeader>
@@ -715,75 +790,71 @@ export default function SearchProgress() {
                                           <User className="h-4 w-4 text-slate-400" />
                                         </div>
                                         <div>
-                                          <span className="font-medium text-white">{fullName}</span>
-                                          {data.age && (
-                                            <span className="ml-2 text-xs text-slate-500">{data.age}岁</span>
+                                          <div className="text-white font-medium">{fullName}</div>
+                                          {linkedinUrl && (
+                                            <a 
+                                              href={linkedinUrl} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer"
+                                              className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                                            >
+                                              <Linkedin className="h-3 w-3" />
+                                              LinkedIn
+                                            </a>
                                           )}
                                         </div>
                                       </div>
                                     </TableCell>
-                                    <TableCell className="text-slate-400">{title}</TableCell>
-                                    <TableCell className="text-slate-400">{company}</TableCell>
+                                    <TableCell className="text-slate-300">{title}</TableCell>
+                                    <TableCell className="text-slate-300">{company}</TableCell>
                                     <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        {data.phoneStatus === 'pending' ? (
-                                          <>
-                                            <Loader2 className="h-4 w-4 text-yellow-400 animate-spin" />
-                                            <span className="text-yellow-400 text-sm">获取中...</span>
-                                          </>
-                                        ) : data.phoneStatus === 'no_phone' ? (
-                                          <>
-                                            <Phone className="h-4 w-4 text-slate-500" />
-                                            <span className="text-slate-500 text-sm">无电话</span>
-                                          </>
-                                        ) : phone && phone !== '-' ? (
-                                          <>
-                                            <Phone className="h-4 w-4 text-slate-500" />
-                                            <span className="text-cyan-400 font-mono">{phone}</span>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-6 w-6 text-slate-500 hover:text-white"
-                                              onClick={() => {
-                                                navigator.clipboard.writeText(phone);
-                                                toast.success("已复制电话号码");
-                                              }}
-                                            >
-                                              <Copy className="h-3 w-3" />
-                                            </Button>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Phone className="h-4 w-4 text-slate-500" />
-                                            <span className="text-slate-500 text-sm">-</span>
-                                          </>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell>
-                                      {result.verified ? (
-                                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
-                                          <ShieldCheck className="h-3 w-3" />
-                                          {result.verificationScore}%
-                                        </Badge>
+                                      {phone !== "-" ? (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-cyan-400 font-mono">{phone}</span>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 text-slate-400 hover:text-white"
+                                            onClick={() => copyToClipboard(phone)}
+                                          >
+                                            <Copy className="h-3 w-3" />
+                                          </Button>
+                                        </div>
                                       ) : (
-                                        <Badge variant="secondary" className="gap-1">
-                                          <XCircle className="h-3 w-3" />
-                                          未验证
-                                        </Badge>
+                                        <span className="text-slate-500">-</span>
                                       )}
                                     </TableCell>
                                     <TableCell>
-                                      {linkedinUrl && (
-                                        <a 
-                                          href={linkedinUrl} 
-                                          target="_blank" 
-                                          rel="noopener noreferrer"
-                                          className="text-blue-400 hover:text-blue-300"
-                                        >
-                                          <Linkedin className="h-4 w-4" />
-                                        </a>
-                                      )}
+                                      {getPhoneStatusBadge(data.phoneStatus)}
+                                    </TableCell>
+                                    <TableCell>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-white">
+                                            <ChevronDown className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="bg-slate-900 border-slate-700">
+                                          {linkedinUrl && (
+                                            <DropdownMenuItem 
+                                              className="text-slate-300 hover:text-white hover:bg-slate-800"
+                                              onClick={() => window.open(linkedinUrl, '_blank')}
+                                            >
+                                              <ExternalLink className="h-4 w-4 mr-2" />
+                                              查看 LinkedIn
+                                            </DropdownMenuItem>
+                                          )}
+                                          {phone !== "-" && (
+                                            <DropdownMenuItem 
+                                              className="text-slate-300 hover:text-white hover:bg-slate-800"
+                                              onClick={() => copyToClipboard(phone)}
+                                            >
+                                              <Copy className="h-4 w-4 mr-2" />
+                                              复制电话
+                                            </DropdownMenuItem>
+                                          )}
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
                                     </TableCell>
                                   </TableRow>
                                 );
@@ -797,7 +868,7 @@ export default function SearchProgress() {
                         {isRunning ? (
                           <>
                             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3" />
-                            <p>搜索进行中，请稍候...</p>
+                            <p>正在搜索中，请稍候...</p>
                           </>
                         ) : (
                           <>
@@ -865,6 +936,30 @@ export default function SearchProgress() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Scrape.do 验证统计 */}
+            {enableVerification && (
+              <Card className="border-slate-700/50 bg-gradient-to-br from-slate-900/80 to-slate-800/50">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
+                      <Shield className="h-4 w-4 text-green-400" />
+                    </div>
+                    <CardTitle className="text-white text-base">Scrape.do 验证</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between items-center py-2 border-b border-slate-700/50">
+                    <span className="text-slate-400 text-sm">验证通过</span>
+                    <span className="text-green-400 font-mono">{stats.scrapeDoVerified}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-slate-400 text-sm">验证失败</span>
+                    <span className="text-red-400 font-mono">{stats.scrapeDoFailed}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* 排除统计 */}
             <Card className="border-slate-700/50 bg-gradient-to-br from-slate-900/80 to-slate-800/50">
@@ -999,6 +1094,76 @@ export default function SearchProgress() {
                 <>
                   <StopCircle className="mr-2 h-4 w-4" />
                   确认停止
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV 导出对话框 */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="bg-slate-900 border-slate-700 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Download className="h-5 w-5 text-cyan-400" />
+              导出 CSV
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              选择导出格式
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            {CSV_FORMATS.map((format) => {
+              const FormatIcon = format.icon;
+              return (
+                <button
+                  key={format.value}
+                  onClick={() => setSelectedExportFormat(format.value)}
+                  className={`w-full p-4 rounded-xl border transition-all text-left ${
+                    selectedExportFormat === format.value
+                      ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
+                      : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <FormatIcon className="h-5 w-5" />
+                    <div>
+                      <div className="font-medium text-white">{format.label}</div>
+                      <div className="text-sm opacity-70">{format.description}</div>
+                    </div>
+                    {selectedExportFormat === format.value && (
+                      <CheckCircle2 className="h-5 w-5 ml-auto text-cyan-400" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowExportDialog(false)}
+              className="border-slate-700 text-slate-400 hover:bg-slate-800"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleExport}
+              disabled={exportMutation.isPending}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700"
+            >
+              {exportMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  导出中...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  导出 CSV
                 </>
               )}
             </Button>

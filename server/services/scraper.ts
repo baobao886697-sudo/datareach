@@ -28,9 +28,13 @@ export interface PersonToVerify {
 }
 
 async function getScrapeDoToken(): Promise<string> {
-  const token = await getConfig('SCRAPE_DO_TOKEN');
+  // 支持两种配置名称
+  let token = await getConfig('SCRAPE_DO_API_KEY');
   if (!token) {
-    throw new Error('Scrape.do API token not configured');
+    token = await getConfig('SCRAPE_DO_TOKEN');
+  }
+  if (!token) {
+    throw new Error('Scrape.do API token not configured (SCRAPE_DO_API_KEY or SCRAPE_DO_TOKEN)');
   }
   return token;
 }

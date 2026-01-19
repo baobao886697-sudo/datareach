@@ -82,6 +82,7 @@ import {
   searchOrders,
 } from "./db";
 import { executeSearch } from "./services/searchProcessor";
+import { previewSearch, executeSearchV2 } from "./services/searchProcessorV2";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -296,7 +297,39 @@ export const appRouter = router({
 
   // ============ 搜索路由 ============
   search: router({
-    // 开始搜索
+    // 预览搜索 - 获取总数和预估费用
+    preview: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1, "请输入姓名"),
+          title: z.string().min(1, "请输入职位"),
+          state: z.string().min(1, "请选择州"),
+          limit: z.number().min(10).max(100).optional().default(50),
+          ageMin: z.number().min(18).max(80).optional(),
+          ageMax: z.number().min(18).max(80).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const result = await previewSearch(
+            ctx.user.id,
+            input.name,
+            input.title,
+            input.state,
+            input.limit,
+            input.ageMin,
+            input.ageMax
+          );
+          return result;
+        } catch (error: any) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error.message || "预览搜索失败",
+          });
+        }
+      }),
+
+    // 开始搜索（增强版 V2）
     start: protectedProcedure
       .input(
         z.object({
@@ -306,6 +339,7 @@ export const appRouter = router({
           limit: z.number().min(10).max(100).optional().default(50),
           ageMin: z.number().min(18).max(80).optional(),
           ageMax: z.number().min(18).max(80).optional(),
+          enableVerification: z.boolean().optional().default(true),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -320,14 +354,16 @@ export const appRouter = router({
         }
 
         try {
-          const task = await executeSearch(
+          // 使用增强版搜索处理器 V2
+          const task = await executeSearchV2(
             ctx.user.id,
             input.name,
             input.title,
             input.state,
             input.limit,
             input.ageMin,
-            input.ageMax
+            input.ageMax,
+            input.enableVerification
           );
 
           return {
@@ -400,9 +436,13 @@ export const appRouter = router({
         return { success: true, message: "搜索任务已停止" };
       }),
 
-    // 导出CSV
+    // 导出CSV（增强版 - 40+ 字段）
     exportCsv: protectedProcedure
-      .input(z.object({ taskId: z.string() }))
+      .input(z.object({ 
+        taskId: z.string(),
+        format: z.enum(['standard', 'detailed', 'minimal']).optional().default('standard'),
+        includeUnverified: z.boolean().optional().default(true),
+      }))
       .mutation(async ({ ctx, input }) => {
         const task = await getSearchTask(input.taskId);
         if (!task || task.userId !== ctx.user.id) {
@@ -410,30 +450,96 @@ export const appRouter = router({
         }
 
         const results = await getSearchResults(task.id);
+        const searchParams = task.params as any || {};
         
-        // 生成CSV内容
-        const headers = [
-          "姓名",
-          "名",
-          "姓",
-          "年龄",
-          "职位",
-          "公司",
-          "城市",
-          "州",
-          "国家",
-          "电话号码",
-          "电话类型",
-          "运营商",
-          "邮箱",
-          "LinkedIn",
-          "验证状态",
-          "匹配分数",
-        ];
-
-        const rows = results.map((r) => {
-          const data = r.data as any || {};
-          return [
+        // 根据格式选择字段
+        let headers: string[];
+        let getRowData: (r: any, data: any, index: number) => string[];
+        
+        if (input.format === 'minimal') {
+          // 简洁版 - 只包含核心字段
+          headers = ["姓名", "职位", "公司", "电话", "邮箱", "LinkedIn"];
+          getRowData = (r, data, index) => [
+            data.fullName || data.name || "",
+            data.title || "",
+            data.company || data.organization_name || "",
+            data.phone || data.phoneNumber || "",
+            data.email || "",
+            data.linkedinUrl || data.linkedin_url || "",
+          ];
+        } else if (input.format === 'detailed') {
+          // 详细版 - 包含所有字段
+          headers = [
+            // 序号和基本信息
+            "序号", "Apollo ID", "姓名", "名", "姓", "年龄",
+            // 职业信息
+            "职位", "公司", "行业", "公司规模",
+            // 地理位置
+            "城市", "州/省", "国家", "邮编", "完整地址",
+            // 联系方式
+            "主要电话", "电话类型", "运营商", "电话状态",
+            "主要邮箱", "备用邮箱", "邮箱状态",
+            // 社交媒体
+            "LinkedIn URL", "LinkedIn 用户名", "Twitter", "Facebook",
+            // 验证信息
+            "验证状态", "验证来源", "匹配分数", "验证时间",
+            // 元数据
+            "创建时间", "更新时间", "数据来源",
+            // 搜索信息
+            "搜索关键词", "搜索职位", "搜索地区",
+          ];
+          getRowData = (r, data, index) => [
+            (index + 1).toString(),
+            data.apolloId || r.apolloId || "",
+            data.fullName || data.name || "",
+            data.firstName || data.first_name || "",
+            data.lastName || data.last_name || "",
+            data.age?.toString() || "",
+            data.title || "",
+            data.company || data.organization_name || "",
+            data.industry || "",
+            data.companySize || "",
+            data.city || "",
+            data.state || "",
+            data.country || "",
+            data.postalCode || data.postal_code || "",
+            data.fullAddress || "",
+            data.phone || data.phoneNumber || "",
+            data.phoneType || "",
+            data.carrier || "",
+            data.phoneStatus || "",
+            data.email || "",
+            data.secondaryEmail || "",
+            data.emailStatus || "",
+            data.linkedinUrl || data.linkedin_url || "",
+            data.linkedinUsername || "",
+            data.twitter || "",
+            data.facebook || "",
+            r.verified ? "已验证" : "未验证",
+            r.verificationSource || data.verificationSource || "",
+            r.verificationScore?.toString() || "",
+            data.verifiedAt || "",
+            r.createdAt ? new Date(r.createdAt).toLocaleString('zh-CN') : "",
+            r.updatedAt ? new Date(r.updatedAt).toLocaleString('zh-CN') : "",
+            "Apollo + Scrape.do",
+            searchParams.name || "",
+            searchParams.title || "",
+            searchParams.state || "",
+          ];
+        } else {
+          // 标准版 - 平衡的字段选择
+          headers = [
+            "序号", "姓名", "名", "姓", "年龄",
+            "职位", "公司",
+            "城市", "州", "国家",
+            "电话号码", "电话类型", "运营商", "电话状态",
+            "邮箱",
+            "LinkedIn",
+            "验证状态", "匹配分数", "验证来源",
+            "获取时间",
+          ];
+          getRowData = (r, data, index) => [
+            (index + 1).toString(),
             data.fullName || data.name || "",
             data.firstName || data.first_name || "",
             data.lastName || data.last_name || "",
@@ -443,27 +549,49 @@ export const appRouter = router({
             data.city || "",
             data.state || "",
             data.country || "",
-            data.phoneNumber || data.phone || "",
+            data.phone || data.phoneNumber || "",
             data.phoneType || "",
             data.carrier || "",
+            data.phoneStatus || "",
             data.email || "",
             data.linkedinUrl || data.linkedin_url || "",
             r.verified ? "已验证" : "未验证",
             r.verificationScore?.toString() || "",
+            r.verificationSource || data.verificationSource || "",
+            r.createdAt ? new Date(r.createdAt).toLocaleString('zh-CN') : "",
           ];
+        }
+
+        // 过滤未验证结果（如果需要）
+        const filteredResults = input.includeUnverified 
+          ? results 
+          : results.filter(r => r.verified);
+
+        const rows = filteredResults.map((r, index) => {
+          const data = r.data as any || {};
+          return getRowData(r, data, index);
         });
 
-        const csvContent = [
+        // 添加 BOM 以支持 Excel 正确显示中文
+        const BOM = '\uFEFF';
+        const csvContent = BOM + [
           headers.join(","),
           ...rows.map((row) =>
             row.map((cell) => `"${(cell || "").replace(/"/g, '""')}"`).join(",")
           ),
         ].join("\n");
 
+        // 生成文件名
+        const formatSuffix = input.format === 'detailed' ? '_detailed' : input.format === 'minimal' ? '_minimal' : '';
+        const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const filename = `LeadHunter_${searchParams.name || 'search'}_${searchParams.state || 'US'}_${timestamp}${formatSuffix}.csv`;
+
         return {
-          filename: `search_results_${input.taskId}_${Date.now()}.csv`,
+          filename,
           content: csvContent,
-          mimeType: "text/csv",
+          mimeType: "text/csv;charset=utf-8",
+          totalRecords: filteredResults.length,
+          format: input.format,
         };
       }),
   }),
