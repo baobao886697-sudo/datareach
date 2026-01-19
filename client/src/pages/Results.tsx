@@ -233,7 +233,7 @@ export default function Results() {
   const actualCount = task?.actualCount || 0;
   const isRunning = task?.status === 'running' || task?.status === 'pending';
 
-  // 从日志中提取统计信息
+  // 从结果数据中直接统计电话数量（优先），同时也从日志中提取
   const extractStats = () => {
     const stats = {
       phonesFound: 0,
@@ -243,10 +243,31 @@ export default function Results() {
       excludedAgeFilter: 0,
     };
     
+    // 优先从 results 数据中统计电话数量
+    if (results && Array.isArray(results)) {
+      results.forEach(result => {
+        const data = result.data as ResultData;
+        const phone = data?.phone || data?.phoneNumber;
+        if (phone) {
+          stats.phonesFound++;
+          if (result.verified) {
+            stats.phonesVerified++;
+          }
+        }
+      });
+    }
+    
+    // 如果从 results 没有统计到，则从日志中统计（兼容旧版本）
+    if (stats.phonesFound === 0) {
+      logs.forEach(log => {
+        if (log.message.includes('找到电话') || log.message.includes('获取到电话')) stats.phonesFound++;
+        if (log.message.includes('验证通过')) stats.phonesVerified++;
+      });
+    }
+    
+    // 排除统计仍然从日志中获取
     logs.forEach(log => {
-      if (log.message.includes('找到电话')) stats.phonesFound++;
-      if (log.message.includes('验证通过')) stats.phonesVerified++;
-      if (log.message.includes('未找到电话')) stats.excludedNoPhone++;
+      if (log.message.includes('未找到电话') || log.message.includes('无电话')) stats.excludedNoPhone++;
       if (log.message.includes('验证失败')) stats.excludedVerifyFailed++;
       if (log.message.includes('年龄') && log.message.includes('不在')) stats.excludedAgeFilter++;
     });
