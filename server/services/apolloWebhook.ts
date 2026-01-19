@@ -121,16 +121,18 @@ export async function handleApolloWebhook(payload: any): Promise<{ processed: nu
       }
       
       // 获取第一个电话号码（优先使用 mobile）
+      // Apollo 返回的字段名是 type_cd 而不是 type
       let selectedPhone = phoneNumbers[0];
       for (const phone of phoneNumbers) {
-        if (phone.type === 'mobile' || phone.type === 'personal') {
+        const phoneType = phone.type_cd || phone.type;
+        if (phoneType === 'mobile' || phoneType === 'personal') {
           selectedPhone = phone;
           break;
         }
       }
       
       const phoneNumber = selectedPhone.sanitized_number || selectedPhone.raw_number;
-      const phoneType = selectedPhone.type || 'unknown';
+      const phoneType = selectedPhone.type_cd || selectedPhone.type || 'unknown';
       
       console.log(`[Apollo Webhook] Found phone ${phoneNumber} (${phoneType}) for person ${personId}`);
       
