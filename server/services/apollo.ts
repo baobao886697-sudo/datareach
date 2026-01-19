@@ -383,12 +383,12 @@ export async function requestPhoneNumberAsync(
     // 注册待处理请求（包含年龄筛选参数）
     registerPendingPhoneRequest(requestId, taskId, personId, personData, ageFilter);
 
+    // 根据 Apollo API 文档，reveal_phone_number 和 webhook_url 必须作为 Query Parameter 传递
+    const encodedWebhookUrl = encodeURIComponent(webhookUrl);
     const response = await axios.post(
-      `${APOLLO_API_BASE}/people/bulk_match`,
+      `${APOLLO_API_BASE}/people/bulk_match?reveal_phone_number=true&webhook_url=${encodedWebhookUrl}`,
       {
-        details: [{ id: personId }],
-        reveal_phone_number: true,
-        webhook_url: webhookUrl
+        details: [{ id: personId }]
       },
       { 
         headers: { 
