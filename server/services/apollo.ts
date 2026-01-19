@@ -54,7 +54,7 @@ export async function searchPeople(
         api_key: apiKey,
         q_keywords: name,
         person_titles: [title],
-        person_locations: [`United States, ${state}`],
+        person_locations: [state],
         page: 1,
         per_page: Math.min(limit, 100),
       },
