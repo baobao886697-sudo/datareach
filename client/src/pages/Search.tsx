@@ -47,9 +47,7 @@ export default function Search() {
   
   // 搜索条件
   const [name, setName] = useState("");
-  const [searchType, setSearchType] = useState<"title" | "industry">("title"); // 搜索类型：职位或行业
   const [title, setTitle] = useState("");
-  const [industry, setIndustry] = useState(""); // 行业关键词
   const [state, setState] = useState("");
   const [searchLimit, setSearchLimit] = useState(50);
   
@@ -126,28 +124,22 @@ export default function Search() {
     };
   }, [searchLimit, profile?.credits]);
 
-  // 获取当前搜索关键词（根据搜索类型）
-  const getSearchKeyword = () => searchType === "title" ? title.trim() : industry.trim();
-
   // 预览搜索
   const handlePreview = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const keyword = getSearchKeyword();
-    if (!name.trim() || !keyword || !state) {
+    if (!name.trim() || !title.trim() || !state) {
       toast.error("请填写所有必填字段");
       return;
     }
 
     previewMutation.mutate({ 
       name: name.trim(), 
-      title: keyword, // 无论职位还是行业，都作为 title 参数发送给 Apollo API
+      title: title.trim(), 
       state,
       limit: searchLimit,
       ageMin: enableAgeFilter ? ageRange[0] : undefined,
       ageMax: enableAgeFilter ? ageRange[1] : undefined,
-      searchType, // 新增：搜索类型
-      industry: searchType === "industry" ? industry.trim() : undefined, // 新增：行业关键词
     });
   };
 
@@ -155,8 +147,7 @@ export default function Search() {
   const handleDirectSearch = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const keyword = getSearchKeyword();
-    if (!name.trim() || !keyword || !state) {
+    if (!name.trim() || !title.trim() || !state) {
       toast.error("请填写所有必填字段");
       return;
     }
@@ -171,17 +162,14 @@ export default function Search() {
   };
 
   const handleConfirmSearch = () => {
-    const keyword = getSearchKeyword();
     searchMutation.mutate({ 
       name: name.trim(), 
-      title: keyword, // 无论职位还是行业，都作为 title 参数发送给 Apollo API
+      title: title.trim(), 
       state,
       limit: previewResult ? Math.min(searchLimit, previewResult.totalAvailable) : searchLimit,
       ageMin: enableAgeFilter ? ageRange[0] : undefined,
       ageMax: enableAgeFilter ? ageRange[1] : undefined,
       enableVerification,
-      searchType, // 新增：搜索类型
-      industry: searchType === "industry" ? industry.trim() : undefined, // 新增：行业关键词
     });
   };
 
@@ -264,81 +252,20 @@ export default function Search() {
                   />
                 </div>
 
-                {/* 搜索类型选择 */}
-                <div className="space-y-3">
-                  <Label className="text-slate-300 flex items-center gap-2">
+                <div className="space-y-2">
+                  <Label htmlFor="title" className="text-slate-300 flex items-center gap-2">
                     <Briefcase className="h-4 w-4 text-slate-500" />
-                    搜索类型
+                    职位/工作
                   </Label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchType("title");
-                        setIndustry("");
-                      }}
-                      className={`p-3 rounded-xl border transition-all ${
-                        searchType === "title"
-                          ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
-                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="text-sm font-semibold">按职位搜索</div>
-                      <div className="text-xs opacity-70 mt-1">例如：Director, CEO</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchType("industry");
-                        setTitle("");
-                      }}
-                      className={`p-3 rounded-xl border transition-all ${
-                        searchType === "industry"
-                          ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="text-sm font-semibold">按行业搜索</div>
-                      <div className="text-xs opacity-70 mt-1">例如：Healthcare, Finance</div>
-                    </button>
-                  </div>
+                  <Input
+                    id="title"
+                    placeholder="例如：CEO, Software Engineer, Marketing Manager"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="h-12 bg-slate-800/50 border-slate-700 focus:border-cyan-500 text-white placeholder:text-slate-500 rounded-xl"
+                    required
+                  />
                 </div>
-
-                {/* 职位输入框（仅当选择职位搜索时显示） */}
-                {searchType === "title" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="title" className="text-slate-300 flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-cyan-500" />
-                      职位关键词
-                    </Label>
-                    <Input
-                      id="title"
-                      placeholder="例如：CEO, Director, Software Engineer"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="h-12 bg-slate-800/50 border-slate-700 focus:border-cyan-500 text-white placeholder:text-slate-500 rounded-xl"
-                      required
-                    />
-                  </div>
-                )}
-
-                {/* 行业输入框（仅当选择行业搜索时显示） */}
-                {searchType === "industry" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="industry" className="text-slate-300 flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-purple-500" />
-                      行业关键词
-                    </Label>
-                    <Input
-                      id="industry"
-                      placeholder="例如：Healthcare, Finance, Restaurant"
-                      value={industry}
-                      onChange={(e) => setIndustry(e.target.value)}
-                      className="h-12 bg-slate-800/50 border-slate-700 focus:border-purple-500 text-white placeholder:text-slate-500 rounded-xl"
-                      required
-                    />
-                  </div>
-                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="state" className="text-slate-300 flex items-center gap-2">
@@ -446,7 +373,7 @@ export default function Search() {
                     type="button"
                     variant="outline"
                     onClick={handlePreview}
-                    disabled={previewMutation.isPending || !name.trim() || !(searchType === 'title' ? title.trim() : industry.trim()) || !state}
+                    disabled={previewMutation.isPending || !name.trim() || !title.trim() || !state}
                     className="flex-1 h-12 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 rounded-xl"
                   >
                     {previewMutation.isPending ? (
@@ -464,7 +391,7 @@ export default function Search() {
                   <Button
                     type="button"
                     onClick={handleDirectSearch}
-                    disabled={searchMutation.isPending || !creditEstimate.canAfford || !name.trim() || !(searchType === 'title' ? title.trim() : industry.trim()) || !state}
+                    disabled={searchMutation.isPending || !creditEstimate.canAfford || !name.trim() || !title.trim() || !state}
                     className="flex-1 h-12 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white rounded-xl shadow-lg shadow-cyan-500/25"
                   >
                     {searchMutation.isPending ? (
@@ -746,8 +673,8 @@ export default function Search() {
                 <span className="text-white">{name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">{searchType === 'industry' ? '行业' : '职位'}</span>
-                <span className="text-white">{searchType === 'industry' ? industry : title}</span>
+                <span className="text-slate-400">职位</span>
+                <span className="text-white">{title}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">地区</span>

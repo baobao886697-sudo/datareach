@@ -341,8 +341,6 @@ export async function enrichPerson(personId: string, userId?: number): Promise<A
   const apiKey = await getApolloApiKey();
   const startTime = Date.now();
 
-  console.log('[Apollo] enrichPerson called with id:', personId);
-
   try {
     const response = await axios.post(
       `${APOLLO_API_BASE}/people/match`,
@@ -363,13 +361,10 @@ export async function enrichPerson(personId: string, userId?: number): Promise<A
     const responseTime = Date.now() - startTime;
     await logApi('apollo_enrich', '/people/match', { id: personId }, response.status, responseTime, true, undefined, 0, userId);
 
-    console.log('[Apollo] enrichPerson success for id:', personId);
     return response.data.person || null;
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
-    const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message;
-    const statusCode = error.response?.status || 0;
-    console.error('[Apollo] enrichPerson FAILED for id:', personId, 'status:', statusCode, 'error:', errorMessage);
+    const errorMessage = error.response?.data?.error || error.message;
     await logApi('apollo_enrich', '/people/match', { id: personId }, error.response?.status || 0, responseTime, false, errorMessage, 0, userId);
     return null;
   }

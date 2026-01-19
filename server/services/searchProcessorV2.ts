@@ -50,8 +50,6 @@ export interface SearchPreviewResult {
     limit: number;
     ageMin?: number;
     ageMax?: number;
-    searchType?: "title" | "industry"; // 搜索类型
-    industry?: string; // 行业关键词
   };
   cacheHit: boolean;
   message: string;
@@ -184,9 +182,7 @@ export async function previewSearch(
   searchState: string,
   requestedCount: number = 50,
   ageMin?: number,
-  ageMax?: number,
-  searchType: "title" | "industry" = "title",
-  industry?: string
+  ageMax?: number
 ): Promise<SearchPreviewResult> {
   const user = await getUserById(userId);
   if (!user) {
@@ -199,7 +195,7 @@ export async function previewSearch(
       canAfford: false,
       userCredits: 0,
       maxAffordable: 0,
-      searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax, searchType, industry },
+      searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax },
       cacheHit: false,
       message: '用户不存在'
     };
@@ -266,7 +262,7 @@ export async function previewSearch(
     canAfford,
     userCredits: user.credits,
     maxAffordable,
-    searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax, searchType, industry },
+    searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax },
     cacheHit,
     message: smartCacheMessage
   };
@@ -283,8 +279,6 @@ export async function executeSearchV2(
   ageMin?: number,
   ageMax?: number,
   enableVerification: boolean = true,
-  searchType: "title" | "industry" = "title",
-  industry?: string,
   onProgress?: (progress: SearchProgress) => void
 ): Promise<SearchTask | undefined> {
   
@@ -364,9 +358,7 @@ export async function executeSearchV2(
     limit: requestedCount,
     ageMin,
     ageMax,
-    enableVerification,
-    searchType,
-    industry
+    enableVerification
   };
 
   const task = await createSearchTask(userId, searchHash, params, requestedCount);
@@ -456,12 +448,7 @@ export async function executeSearchV2(
     addLog('═══════════════════════════════════════════════════════════', 'info', 'init', '');
     addLog(`搜索条件:`, 'info', 'init', '📋');
     addLog(`  • 姓名关键词: ${searchName}`, 'info', 'init', '   ');
-    // 根据搜索类型显示职位或行业
-    if (searchType === 'industry') {
-      addLog(`  • 行业: ${industry || searchTitle}`, 'info', 'init', '   ');
-    } else {
-      addLog(`  • 职位: ${searchTitle}`, 'info', 'init', '   ');
-    }
+    addLog(`  • 职位: ${searchTitle}`, 'info', 'init', '   ');
     addLog(`  • 地区: ${searchState}`, 'info', 'init', '   ');
     addLog(`  • 请求数量: ${requestedCount} 条`, 'info', 'init', '   ');
     if (ageMin && ageMax) {
