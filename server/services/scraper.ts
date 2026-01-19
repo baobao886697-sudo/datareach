@@ -26,6 +26,8 @@ export interface PersonToVerify {
   city?: string;
   state: string;
   phone: string;
+  minAge?: number;
+  maxAge?: number;
 }
 
 async function getScrapeDoToken(): Promise<string> {
@@ -41,8 +43,22 @@ async function getScrapeDoToken(): Promise<string> {
 }
 
 /**
+ * 格式化电话号码为带连字符的格式（用于 FastPeopleSearch）
+ * 例如：4155480165 -> 415-548-0165
+ */
+function formatPhoneWithDashes(phone: string): string {
+  const cleanPhone = phone.replace(/\D/g, '');
+  if (cleanPhone.length === 10) {
+    return `${cleanPhone.slice(0, 3)}-${cleanPhone.slice(3, 6)}-${cleanPhone.slice(6)}`;
+  } else if (cleanPhone.length === 11 && cleanPhone.startsWith('1')) {
+    return `${cleanPhone.slice(1, 4)}-${cleanPhone.slice(4, 7)}-${cleanPhone.slice(7)}`;
+  }
+  return cleanPhone;
+}
+
+/**
  * 第一阶段验证：使用 TruePeopleSearch 进行电话号码反向搜索
- * 通过电话号码搜索，然后匹配姓名和地区
+ * URL 格式：https://www.truepeoplesearch.com/resultphone?phoneno=4155480165
  */
 export async function verifyWithTruePeopleSearch(person: PersonToVerify, userId?: number): Promise<VerificationResult> {
   const token = await getScrapeDoToken();
@@ -55,20 +71,30 @@ export async function verifyWithTruePeopleSearch(person: PersonToVerify, userId?
   const targetUrl = `https://www.truepeoplesearch.com/resultphone?phoneno=${cleanPhone}`;
 
   console.log(`[Scraper] TruePeopleSearch reverse lookup for phone: ${cleanPhone}`);
+  console.log(`[Scraper] Target URL: ${targetUrl}`);
 
   try {
     const response = await axios.get(SCRAPE_DO_BASE, {
-      params: { token, url: targetUrl, super: true, geoCode: 'us', render: true },
-      timeout: 60000,
+      params: { 
+        token, 
+        url: targetUrl, 
+        super: true, 
+        geoCode: 'us', 
+        render: true 
+      },
+      timeout: 90000,
     });
 
     const responseTime = Date.now() - startTime;
     const html = response.data;
+    
+    console.log(`[Scraper] TruePeopleSearch response received, length: ${html.length}`);
+    
     const result = parseTruePeopleSearchReverseResult(html, person);
 
     await logApi('scrape_tps', targetUrl, { phone: cleanPhone }, response.status, responseTime, true, undefined, 0, userId);
 
-    console.log(`[Scraper] TruePeopleSearch result: verified=${result.verified}, score=${result.matchScore}, age=${result.details?.age}`);
+    console.log(`[Scraper] TruePeopleSearch result: verified=${result.verified}, score=${result.matchScore}, age=${result.details?.age}, name=${result.details?.name}`);
 
     return result;
   } catch (error: any) {
@@ -81,39 +107,49 @@ export async function verifyWithTruePeopleSearch(person: PersonToVerify, userId?
 
 /**
  * 第二阶段验证：使用 FastPeopleSearch 进行电话号码反向搜索
- * 只有当第一阶段验证失败时才执行
+ * URL 格式：https://www.fastpeoplesearch.com/415-548-0165（带连字符）
  */
 export async function verifyWithFastPeopleSearch(person: PersonToVerify, userId?: number): Promise<VerificationResult> {
   const token = await getScrapeDoToken();
   const startTime = Date.now();
 
-  // 清理电话号码，只保留数字
-  const cleanPhone = person.phone.replace(/\D/g, '');
+  // 格式化电话号码为带连字符的格式
+  const formattedPhone = formatPhoneWithDashes(person.phone);
   
   // 使用电话号码反向搜索 URL
-  const targetUrl = `https://www.fastpeoplesearch.com/${cleanPhone}`;
+  const targetUrl = `https://www.fastpeoplesearch.com/${formattedPhone}`;
 
-  console.log(`[Scraper] FastPeopleSearch reverse lookup for phone: ${cleanPhone}`);
+  console.log(`[Scraper] FastPeopleSearch reverse lookup for phone: ${formattedPhone}`);
+  console.log(`[Scraper] Target URL: ${targetUrl}`);
 
   try {
     const response = await axios.get(SCRAPE_DO_BASE, {
-      params: { token, url: targetUrl, super: true, geoCode: 'us', render: true },
-      timeout: 60000,
+      params: { 
+        token, 
+        url: targetUrl, 
+        super: true, 
+        geoCode: 'us', 
+        render: true 
+      },
+      timeout: 90000,
     });
 
     const responseTime = Date.now() - startTime;
     const html = response.data;
+    
+    console.log(`[Scraper] FastPeopleSearch response received, length: ${html.length}`);
+    
     const result = parseFastPeopleSearchReverseResult(html, person);
 
-    await logApi('scrape_fps', targetUrl, { phone: cleanPhone }, response.status, responseTime, true, undefined, 0, userId);
+    await logApi('scrape_fps', targetUrl, { phone: formattedPhone }, response.status, responseTime, true, undefined, 0, userId);
 
-    console.log(`[Scraper] FastPeopleSearch result: verified=${result.verified}, score=${result.matchScore}, age=${result.details?.age}`);
+    console.log(`[Scraper] FastPeopleSearch result: verified=${result.verified}, score=${result.matchScore}, age=${result.details?.age}, name=${result.details?.name}`);
 
     return result;
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
     console.error(`[Scraper] FastPeopleSearch error:`, error.message);
-    await logApi('scrape_fps', targetUrl, { phone: cleanPhone }, error.response?.status || 0, responseTime, false, error.message, 0, userId);
+    await logApi('scrape_fps', targetUrl, { phone: formattedPhone }, error.response?.status || 0, responseTime, false, error.message, 0, userId);
     return { verified: false, source: 'FastPeopleSearch', matchScore: 0 };
   }
 }
@@ -123,18 +159,19 @@ export async function verifyWithFastPeopleSearch(person: PersonToVerify, userId?
  */
 export async function verifyPhoneNumber(person: PersonToVerify, userId?: number): Promise<VerificationResult> {
   console.log(`[Scraper] Starting phone verification for ${person.firstName} ${person.lastName}, phone: ${person.phone}`);
+  console.log(`[Scraper] Age range: ${person.minAge || 'default'} - ${person.maxAge || 'default'}`);
   
   // 第一阶段：TruePeopleSearch 电话号码反向搜索
   const tpsResult = await verifyWithTruePeopleSearch(person, userId);
   
-  // 如果第一阶段验证成功（姓名和地区匹配），直接返回
+  // 如果第一阶段验证成功（姓名匹配且年龄在范围内），直接返回
   if (tpsResult.verified && tpsResult.matchScore >= 70) {
     console.log(`[Scraper] TruePeopleSearch verification passed`);
     return { ...tpsResult, source: 'TruePeopleSearch' };
   }
 
   // 第二阶段：FastPeopleSearch 电话号码反向搜索
-  console.log(`[Scraper] TruePeopleSearch failed, trying FastPeopleSearch`);
+  console.log(`[Scraper] TruePeopleSearch failed (verified=${tpsResult.verified}, score=${tpsResult.matchScore}), trying FastPeopleSearch`);
   const fpsResult = await verifyWithFastPeopleSearch(person, userId);
   
   if (fpsResult.verified && fpsResult.matchScore >= 70) {
@@ -149,7 +186,10 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
 
 /**
  * 解析 TruePeopleSearch 电话号码反向搜索结果
- * 匹配姓名、州/城市，并提取年龄
+ * 页面结构：
+ * - 姓名：<div class="content-header">John Coughlan</div>
+ * - 年龄：<span class="">Age </span><span class="content-value">48</span>
+ * - 地点：<span class="content-value">Redwood City, CA</span>
  */
 function parseTruePeopleSearchReverseResult(html: string, person: PersonToVerify): VerificationResult {
   const result: VerificationResult = { verified: false, source: 'TruePeopleSearch', matchScore: 0, details: {} };
@@ -157,67 +197,94 @@ function parseTruePeopleSearchReverseResult(html: string, person: PersonToVerify
   try {
     let score = 0;
 
-    // 检查姓名匹配（姓和名都需要出现在页面中）
-    const firstNamePattern = new RegExp(`\\b${escapeRegex(person.firstName)}\\b`, 'i');
-    const lastNamePattern = new RegExp(`\\b${escapeRegex(person.lastName)}\\b`, 'i');
+    // 提取页面中的所有姓名（从 content-header）
+    const nameMatches = html.match(/<div[^>]*class="content-header"[^>]*>([^<]+)<\/div>/gi);
+    const foundNames: string[] = [];
+    if (nameMatches) {
+      for (const match of nameMatches) {
+        const nameMatch = match.match(/>([^<]+)</);
+        if (nameMatch) {
+          foundNames.push(nameMatch[1].trim());
+        }
+      }
+    }
     
-    const firstNameMatch = firstNamePattern.test(html);
-    const lastNameMatch = lastNamePattern.test(html);
+    console.log(`[Scraper] TPS found names: ${foundNames.join(', ')}`);
+
+    // 检查是否有姓名匹配
+    let nameMatched = false;
+    let matchedName = '';
+    for (const foundName of foundNames) {
+      const nameLower = foundName.toLowerCase();
+      const firstNameLower = person.firstName.toLowerCase();
+      const lastNameLower = person.lastName.toLowerCase();
+      
+      if (nameLower.includes(firstNameLower) && nameLower.includes(lastNameLower)) {
+        nameMatched = true;
+        matchedName = foundName;
+        score += 40;
+        console.log(`[Scraper] TPS Name matched: ${foundName}`);
+        break;
+      }
+    }
+
+    if (!nameMatched) {
+      console.log(`[Scraper] TPS No name match found for ${person.firstName} ${person.lastName}`);
+      return result;
+    }
+
+    result.details!.name = matchedName;
+
+    // 提取年龄
+    // 格式：<span class="">Age </span><span class="content-value">48</span>
+    const agePattern = /Age\s*<\/span>\s*<span[^>]*class="content-value"[^>]*>\s*(\d+)\s*<\/span>/i;
+    const ageMatch = html.match(agePattern);
     
-    if (firstNameMatch && lastNameMatch) {
-      score += 40; // 姓名完全匹配
-      result.verified = true;
-      console.log(`[Scraper] Name matched: ${person.firstName} ${person.lastName}`);
-    } else if (firstNameMatch || lastNameMatch) {
-      score += 20; // 部分匹配
-      console.log(`[Scraper] Partial name match: first=${firstNameMatch}, last=${lastNameMatch}`);
+    if (!ageMatch) {
+      // 备用模式
+      const agePattern2 = /Age[:\s]*(\d{2,3})/i;
+      const ageMatch2 = html.match(agePattern2);
+      if (ageMatch2) {
+        result.details!.age = parseInt(ageMatch2[1], 10);
+      }
     } else {
-      console.log(`[Scraper] Name not found in results`);
-      return result; // 姓名完全不匹配，直接返回
+      result.details!.age = parseInt(ageMatch[1], 10);
+    }
+
+    if (result.details!.age) {
+      console.log(`[Scraper] TPS Age found: ${result.details!.age}`);
+      
+      // 检查年龄是否在范围内
+      const minAge = person.minAge || 50;
+      const maxAge = person.maxAge || 79;
+      
+      if (result.details!.age >= minAge && result.details!.age <= maxAge) {
+        score += 30;
+        console.log(`[Scraper] TPS Age ${result.details!.age} is within range ${minAge}-${maxAge}`);
+      } else {
+        console.log(`[Scraper] TPS Age ${result.details!.age} is outside range ${minAge}-${maxAge}, excluding`);
+        result.verified = false;
+        result.matchScore = score;
+        return result;
+      }
     }
 
     // 检查州匹配
     const statePattern = new RegExp(`\\b${escapeRegex(person.state)}\\b`, 'i');
     if (statePattern.test(html)) {
-      score += 30;
+      score += 20;
       result.details!.state = person.state;
-      console.log(`[Scraper] State matched: ${person.state}`);
+      console.log(`[Scraper] TPS State matched: ${person.state}`);
     }
 
     // 检查城市匹配
     if (person.city) {
       const cityPattern = new RegExp(`\\b${escapeRegex(person.city)}\\b`, 'i');
       if (cityPattern.test(html)) {
-        score += 20;
+        score += 10;
         result.details!.city = person.city;
-        console.log(`[Scraper] City matched: ${person.city}`);
+        console.log(`[Scraper] TPS City matched: ${person.city}`);
       }
-    }
-
-    // 提取年龄 - 多种格式匹配
-    const agePatterns = [
-      /Age[:\s]*(\d{2,3})/i,
-      /(\d{2,3})\s*years?\s*old/i,
-      /Born[:\s]*\d{4}[^<]*?Age[:\s]*(\d{2,3})/i,
-      /\((\d{2,3})\)/  // 括号中的年龄
-    ];
-    
-    for (const pattern of agePatterns) {
-      const ageMatch = html.match(pattern);
-      if (ageMatch) {
-        const age = parseInt(ageMatch[1], 10);
-        if (age >= 18 && age <= 120) { // 合理的年龄范围
-          result.details!.age = age;
-          console.log(`[Scraper] Age found: ${age}`);
-          break;
-        }
-      }
-    }
-
-    // 提取运营商信息
-    const carrierMatch = html.match(/(?:Carrier|Provider|Network)[:\s]*([A-Za-z\s&]+?)(?:<|,|\n|$)/i);
-    if (carrierMatch) {
-      result.details!.carrier = carrierMatch[1].trim();
     }
 
     // 检测电话类型
@@ -227,9 +294,9 @@ function parseTruePeopleSearchReverseResult(html: string, person: PersonToVerify
 
     result.matchScore = Math.min(score, 100);
     
-    // 只有当姓名匹配且分数足够高时才算验证通过
-    if (score < 70) {
-      result.verified = false;
+    // 姓名匹配且分数足够高时验证通过
+    if (nameMatched && score >= 70) {
+      result.verified = true;
     }
 
   } catch (error) {
@@ -241,7 +308,11 @@ function parseTruePeopleSearchReverseResult(html: string, person: PersonToVerify
 
 /**
  * 解析 FastPeopleSearch 电话号码反向搜索结果
- * 匹配姓名、州/城市，并提取年龄
+ * 页面结构：
+ * - 标题：<title>(415)548-0165 | John Coughlan in Washington, DC | Free Reverse Phone Lookup</title>
+ * - 姓名：<span class="larger">John Coughlan</span>
+ * - 年龄：<h3>Age:</h3> 48<br>
+ * - 地点：<span class="grey">Washington, DC</span>
  */
 function parseFastPeopleSearchReverseResult(html: string, person: PersonToVerify): VerificationResult {
   const result: VerificationResult = { verified: false, source: 'FastPeopleSearch', matchScore: 0, details: {} };
@@ -249,56 +320,112 @@ function parseFastPeopleSearchReverseResult(html: string, person: PersonToVerify
   try {
     let score = 0;
 
-    // 检查姓名匹配
-    const firstNamePattern = new RegExp(`\\b${escapeRegex(person.firstName)}\\b`, 'i');
-    const lastNamePattern = new RegExp(`\\b${escapeRegex(person.lastName)}\\b`, 'i');
+    // 从标题提取信息
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      console.log(`[Scraper] FPS Title: ${titleMatch[1]}`);
+    }
+
+    // 提取姓名（从 span.larger）
+    const nameMatches = html.match(/<span[^>]*class="larger"[^>]*>([^<]+)<\/span>/gi);
+    const foundNames: string[] = [];
+    if (nameMatches) {
+      for (const match of nameMatches) {
+        const nameMatch = match.match(/>([^<]+)</);
+        if (nameMatch) {
+          foundNames.push(nameMatch[1].trim());
+        }
+      }
+    }
     
-    const firstNameMatch = firstNamePattern.test(html);
-    const lastNameMatch = lastNamePattern.test(html);
-    
-    if (firstNameMatch && lastNameMatch) {
-      score += 40;
-      result.verified = true;
-      console.log(`[Scraper] FPS Name matched: ${person.firstName} ${person.lastName}`);
-    } else if (firstNameMatch || lastNameMatch) {
-      score += 20;
-      console.log(`[Scraper] FPS Partial name match`);
-    } else {
-      console.log(`[Scraper] FPS Name not found`);
+    // 备用：从 card-title 提取
+    if (foundNames.length === 0) {
+      const cardTitleMatches = html.match(/<h2[^>]*class="card-title"[^>]*>[\s\S]*?<\/h2>/gi);
+      if (cardTitleMatches) {
+        for (const match of cardTitleMatches) {
+          const nameMatch = match.match(/<span[^>]*>([^<]+)<\/span>/);
+          if (nameMatch) {
+            foundNames.push(nameMatch[1].trim());
+          }
+        }
+      }
+    }
+
+    console.log(`[Scraper] FPS found names: ${foundNames.join(', ')}`);
+
+    // 检查是否有姓名匹配
+    let nameMatched = false;
+    let matchedName = '';
+    for (const foundName of foundNames) {
+      const nameLower = foundName.toLowerCase();
+      const firstNameLower = person.firstName.toLowerCase();
+      const lastNameLower = person.lastName.toLowerCase();
+      
+      if (nameLower.includes(firstNameLower) && nameLower.includes(lastNameLower)) {
+        nameMatched = true;
+        matchedName = foundName;
+        score += 40;
+        console.log(`[Scraper] FPS Name matched: ${foundName}`);
+        break;
+      }
+    }
+
+    if (!nameMatched) {
+      console.log(`[Scraper] FPS No name match found for ${person.firstName} ${person.lastName}`);
       return result;
+    }
+
+    result.details!.name = matchedName;
+
+    // 提取年龄
+    // 格式：<h3>Age:</h3> 48<br>
+    const agePattern = /<h3>Age:<\/h3>\s*(\d+)/i;
+    const ageMatch = html.match(agePattern);
+    
+    if (!ageMatch) {
+      // 备用模式
+      const agePattern2 = /Age[:\s]*(\d{2,3})/i;
+      const ageMatch2 = html.match(agePattern2);
+      if (ageMatch2) {
+        result.details!.age = parseInt(ageMatch2[1], 10);
+      }
+    } else {
+      result.details!.age = parseInt(ageMatch[1], 10);
+    }
+
+    if (result.details!.age) {
+      console.log(`[Scraper] FPS Age found: ${result.details!.age}`);
+      
+      // 检查年龄是否在范围内
+      const minAge = person.minAge || 50;
+      const maxAge = person.maxAge || 79;
+      
+      if (result.details!.age >= minAge && result.details!.age <= maxAge) {
+        score += 30;
+        console.log(`[Scraper] FPS Age ${result.details!.age} is within range ${minAge}-${maxAge}`);
+      } else {
+        console.log(`[Scraper] FPS Age ${result.details!.age} is outside range ${minAge}-${maxAge}, excluding`);
+        result.verified = false;
+        result.matchScore = score;
+        return result;
+      }
     }
 
     // 检查州匹配
     const statePattern = new RegExp(`\\b${escapeRegex(person.state)}\\b`, 'i');
     if (statePattern.test(html)) {
-      score += 30;
+      score += 20;
       result.details!.state = person.state;
+      console.log(`[Scraper] FPS State matched: ${person.state}`);
     }
 
     // 检查城市匹配
     if (person.city) {
       const cityPattern = new RegExp(`\\b${escapeRegex(person.city)}\\b`, 'i');
       if (cityPattern.test(html)) {
-        score += 20;
+        score += 10;
         result.details!.city = person.city;
-      }
-    }
-
-    // 提取年龄
-    const agePatterns = [
-      /(\d{2,3})\s*years?\s*old/i,
-      /Age[:\s]*(\d{2,3})/i,
-      /\((\d{2,3})\)/
-    ];
-    
-    for (const pattern of agePatterns) {
-      const ageMatch = html.match(pattern);
-      if (ageMatch) {
-        const age = parseInt(ageMatch[1], 10);
-        if (age >= 18 && age <= 120) {
-          result.details!.age = age;
-          break;
-        }
+        console.log(`[Scraper] FPS City matched: ${person.city}`);
       }
     }
 
@@ -309,8 +436,9 @@ function parseFastPeopleSearchReverseResult(html: string, person: PersonToVerify
 
     result.matchScore = Math.min(score, 100);
     
-    if (score < 70) {
-      result.verified = false;
+    // 姓名匹配且分数足够高时验证通过
+    if (nameMatched && score >= 70) {
+      result.verified = true;
     }
 
   } catch (error) {
