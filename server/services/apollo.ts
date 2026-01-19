@@ -341,6 +341,8 @@ export async function enrichPerson(personId: string, userId?: number): Promise<A
   const apiKey = await getApolloApiKey();
   const startTime = Date.now();
 
+  console.log(`[enrichPerson] Starting enrich for personId: ${personId}`);
+
   try {
     const response = await axios.post(
       `${APOLLO_API_BASE}/people/match`,
@@ -359,13 +361,17 @@ export async function enrichPerson(personId: string, userId?: number): Promise<A
     );
 
     const responseTime = Date.now() - startTime;
+    console.log(`[enrichPerson] Success for ${personId}, status: ${response.status}, has person: ${!!response.data.person}`);
     await logApi('apollo_enrich', '/people/match', { id: personId }, response.status, responseTime, true, undefined, 0, userId);
 
     return response.data.person || null;
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
-    const errorMessage = error.response?.data?.error || error.message;
-    await logApi('apollo_enrich', '/people/match', { id: personId }, error.response?.status || 0, responseTime, false, errorMessage, 0, userId);
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message;
+    const errorStatus = error.response?.status || 0;
+    const errorData = JSON.stringify(error.response?.data || {});
+    console.error(`[enrichPerson] FAILED for ${personId}: status=${errorStatus}, error=${errorMessage}, data=${errorData}`);
+    await logApi('apollo_enrich', '/people/match', { id: personId }, errorStatus, responseTime, false, errorMessage, 0, userId);
     return null;
   }
 }
