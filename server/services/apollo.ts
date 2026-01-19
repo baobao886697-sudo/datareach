@@ -401,13 +401,13 @@ export async function requestPhoneNumberAsync(
     );
 
     const responseTime = Date.now() - startTime;
-    await logApi('apollo_phone_request', '/people/bulk_match', { id: personId, webhook: webhookUrl }, response.status, responseTime, true, undefined, 0, userId);
+    await logApi('apollo_enrich', '/people/bulk_match', { id: personId, webhook: webhookUrl }, response.status, responseTime, true, undefined, 0, userId);
 
     return true;
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
     const errorMessage = error.response?.data?.error || error.message;
-    await logApi('apollo_phone_request', '/people/bulk_match', { id: personId }, error.response?.status || 0, responseTime, false, errorMessage, 0, userId);
+    await logApi('apollo_enrich', '/people/bulk_match', { id: personId }, error.response?.status || 0, responseTime, false, errorMessage, 0, userId);
     return false;
   }
 }
