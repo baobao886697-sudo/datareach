@@ -1311,7 +1311,7 @@ export async function createFeedback(data: {
     type: data.type,
     title: data.title,
     content: data.content,
-    contactInfo: data.contactInfo
+    contactInfo: data.contactInfo || null
   });
   
   const inserted = await db.select().from(userFeedbacks).where(eq(userFeedbacks.id, Number(result[0].insertId))).limit(1);
