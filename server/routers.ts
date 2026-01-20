@@ -1620,7 +1620,7 @@ export const appRouter = router({
           type: input.type,
           title: input.title,
           content: input.content,
-          contactInfo: input.contactInfo,
+          contactInfo: input.contactInfo || undefined,
         });
         if (!feedback) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "提交反馈失败" });
