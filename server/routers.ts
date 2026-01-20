@@ -82,7 +82,8 @@ import {
   searchOrders,
 } from "./db";
 import { executeSearch } from "./services/searchProcessor";
-import { previewSearch, executeSearchV2 } from "./services/searchProcessorV2";
+import { previewSearch as previewSearchV2, executeSearchV2 } from "./services/searchProcessorV2";
+import { previewSearch, executeSearchV3 } from "./services/searchProcessorV3";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -354,8 +355,8 @@ export const appRouter = router({
         }
 
         try {
-          // 使用增强版搜索处理器 V2
-          const task = await executeSearchV2(
+          // 使用 Apify 搜索处理器 V3（替代 Apollo）
+          const task = await executeSearchV3(
             ctx.user.id,
             input.name,
             input.title,

@@ -507,11 +507,11 @@ export default function Search() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Database className="h-3 w-3 text-blue-400" />
-                      <span>Apollo 数据获取</span>
+                      <span>Apify 数据获取</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <ArrowRight className="h-3 w-3 text-slate-600" />
-                      <span>异步获取电话号码</span>
+                      <span>数据处理与筛选</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Shield className="h-3 w-3 text-green-400" />
@@ -553,7 +553,7 @@ export default function Search() {
                     <Database className="h-4 w-4 text-blue-400" />
                   )}
                   <span className={previewResult.cacheHit ? "text-yellow-400" : "text-blue-400"}>
-                    {previewResult.cacheHit ? "命中缓存" : "Apollo 查询"}
+                    {previewResult.cacheHit ? "命中缓存" : "Apify 查询"}
                   </span>
                 </div>
                 

@@ -84,8 +84,8 @@ interface LogEntry {
 // 搜索阶段定义
 const SEARCH_PHASES = [
   { id: 'init', label: '初始化', icon: Play, color: 'cyan' },
-  { id: 'apollo', label: 'Apollo 数据获取', icon: Database, color: 'blue' },
-  { id: 'phone', label: '电话号码获取', icon: Phone, color: 'purple' },
+  { id: 'apify', label: 'Apify 数据获取', icon: Database, color: 'blue' },
+  { id: 'process', label: '数据处理', icon: Phone, color: 'purple' },
   { id: 'verification', label: 'Scrape.do 验证', icon: Shield, color: 'green' },
   { id: 'done', label: '完成', icon: CheckCircle, color: 'emerald' },
 ];
@@ -239,12 +239,12 @@ export default function SearchProgress() {
     // 根据日志内容推断
     const lastMessages = logs.slice(-5).map(l => l.message).join(' ');
     if (lastMessages.includes('验证') || lastMessages.includes('Scrape')) return 'verification';
-    if (lastMessages.includes('电话')) return 'phone';
-    if (lastMessages.includes('Apollo') || lastMessages.includes('获取')) return 'apollo';
+    if (lastMessages.includes('处理') || lastMessages.includes('电话')) return 'process';
+    if (lastMessages.includes('Apify') || lastMessages.includes('获取')) return 'apify';
     
     switch (task.status) {
       case 'pending': return 'init';
-      case 'running': return 'apollo';
+      case 'running': return 'apify';
       case 'completed':
       case 'stopped':
       case 'failed': return 'done';
@@ -255,7 +255,7 @@ export default function SearchProgress() {
   // 从日志中提取统计信息
   const stats = useMemo(() => {
     const result = {
-      apolloCalls: 0,
+      apifyCalls: 0,
       phonesFound: 0,
       phonesVerified: 0,
       verifyFailed: 0,
@@ -268,7 +268,7 @@ export default function SearchProgress() {
     };
     
     logs.forEach(log => {
-      if (log.message.includes('Apollo') || log.message.includes('获取数据')) result.apolloCalls++;
+      if (log.message.includes('Apify') || log.message.includes('获取数据')) result.apifyCalls++;
       if (log.message.includes('找到电话') || log.message.includes('获取到电话')) result.phonesFound++;
       if (log.message.includes('验证通过') || log.message.includes('验证成功')) result.phonesVerified++;
       if (log.message.includes('验证失败')) result.verifyFailed++;
@@ -340,7 +340,7 @@ export default function SearchProgress() {
 
   const getLogIcon = (level: string, message: string) => {
     // 根据消息内容返回更具体的图标
-    if (message.includes('Apollo')) return <Database className="h-4 w-4 text-blue-400" />;
+    if (message.includes('Apify')) return <Database className="h-4 w-4 text-blue-400" />;
     if (message.includes('Scrape.do') && message.includes('验证通过')) return <ShieldCheck className="h-4 w-4 text-green-400" />;
     if (message.includes('Scrape.do') && message.includes('验证失败')) return <Ban className="h-4 w-4 text-red-400" />;
     if (message.includes('验证通过')) return <ShieldCheck className="h-4 w-4 text-green-400" />;
@@ -900,9 +900,9 @@ export default function SearchProgress() {
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/50">
                   <span className="text-slate-400 text-sm flex items-center gap-2">
                     <Database className="h-4 w-4" />
-                    Apollo 请求
+                    Apify 请求
                   </span>
-                  <span className="text-white font-mono">{stats.apolloCalls}</span>
+                  <span className="text-white font-mono">{stats.apifyCalls}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/50">
                   <span className="text-slate-400 text-sm flex items-center gap-2">

@@ -586,7 +586,7 @@ export async function getCacheStats(): Promise<{ totalEntries: number; searchCac
 
 // ============ 日志相关 ============
 
-export async function logApi(apiType: "apollo_search" | "apollo_enrich" | "scrape_tps" | "scrape_fps", endpoint: string, requestParams: any, responseStatus: number, responseTime: number, success: boolean, errorMessage?: string, creditsUsed: number = 0, userId?: number): Promise<void> {
+export async function logApi(apiType: "apollo_search" | "apollo_enrich" | "apify_search" | "scrape_tps" | "scrape_fps", endpoint: string, requestParams: any, responseStatus: number, responseTime: number, success: boolean, errorMessage?: string, creditsUsed: number = 0, userId?: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.insert(apiLogs).values({ userId, apiType, endpoint, requestParams, responseStatus, responseTime, success, errorMessage, creditsUsed });

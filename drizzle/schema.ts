@@ -172,7 +172,7 @@ export type LoginLog = typeof loginLogs.$inferSelect;
 export const apiLogs = mysqlTable("api_logs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId"),
-  apiType: mysqlEnum("apiType", ["apollo_search", "apollo_enrich", "scrape_tps", "scrape_fps"]).notNull(),
+  apiType: mysqlEnum("apiType", ["apollo_search", "apollo_enrich", "apify_search", "scrape_tps", "scrape_fps"]).notNull(),
   endpoint: varchar("endpoint", { length: 255 }),
   requestParams: json("requestParams"),
   responseStatus: int("responseStatus"),
