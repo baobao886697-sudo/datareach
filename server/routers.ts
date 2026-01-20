@@ -350,14 +350,25 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // 检查积分
+        // 检查积分 - 严格模式：必须足够支付全部预估费用
         const credits = await getUserCredits(ctx.user.id);
         const searchCost = 1;
         const phoneCost = input.limit * 2;
         const totalCost = searchCost + phoneCost;
         
-        if (credits < searchCost) {
-          throw new TRPCError({ code: "PAYMENT_REQUIRED", message: "积分不足，请先充值" });
+        if (credits < totalCost) {
+          // 计算用户积分最多能搜索多少条
+          const maxAffordable = Math.floor((credits - searchCost) / 2);
+          if (maxAffordable <= 0) {
+            throw new TRPCError({ 
+              code: "PAYMENT_REQUIRED", 
+              message: `积分不足，无法开始搜索。当前积分: ${credits}，需要至少 ${searchCost + 2} 积分` 
+            });
+          }
+          throw new TRPCError({ 
+            code: "PAYMENT_REQUIRED", 
+            message: `积分不足。当前积分: ${credits}，搜索 ${input.limit} 条需要 ${totalCost} 积分。您最多可搜索 ${maxAffordable} 条，或请先充值。` 
+          });
         }
 
         try {

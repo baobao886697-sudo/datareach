@@ -718,7 +718,7 @@ export default function Search() {
             {/* 提示 */}
             <div className="flex items-start gap-2 text-sm text-slate-500">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>实际消耗可能因搜索结果数量有所浮动，积分不足时将自动停止</span>
+              <span>实际消耗按搜索返回的数据量计算，如果实际数据量少于请求量，您将节省积分</span>
             </div>
           </div>
 
