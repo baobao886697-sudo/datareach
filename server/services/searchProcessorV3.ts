@@ -131,6 +131,7 @@ export interface SearchProgress {
 const SEARCH_CREDITS = 1;           // 搜索基础费用
 const PHONE_CREDITS_PER_PERSON = 2; // 每条数据费用
 const VERIFY_CREDITS_PER_PHONE = 0; // 验证费用（目前免费）
+const CONCURRENT_VERIFY_LIMIT = 5;  // 并发验证数量（可根据 Scrape.do 账户限制调整）
 
 // ============ 工具函数 ============
 
@@ -186,6 +187,39 @@ function createInitialStats(): SearchStats {
     avgProcessTime: 0,
     verifySuccessRate: 0,
   };
+}
+
+/**
+ * 并发批量处理函数
+ * 将数组分成批次，每批并发执行
+ */
+async function processBatches<T, R>(
+  items: T[],
+  batchSize: number,
+  processor: (item: T, index: number) => Promise<R>,
+  onBatchComplete?: (batchIndex: number, totalBatches: number) => void
+): Promise<R[]> {
+  const results: R[] = [];
+  const totalBatches = Math.ceil(items.length / batchSize);
+  
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    const start = batchIndex * batchSize;
+    const end = Math.min(start + batchSize, items.length);
+    const batch = items.slice(start, end);
+    
+    // 并发执行当前批次
+    const batchResults = await Promise.all(
+      batch.map((item, i) => processor(item, start + i))
+    );
+    
+    results.push(...batchResults);
+    
+    if (onBatchComplete) {
+      onBatchComplete(batchIndex + 1, totalBatches);
+    }
+  }
+  
+  return results;
 }
 
 // ============ 预览搜索 ============
@@ -554,49 +588,46 @@ export async function executeSearchV3(
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
 
     // ═══════════════════════════════════════════════════════════════
-    // 阶段 6: 逐条处理数据
+    // 阶段 6: 并发批量处理数据 (优化版)
     // ═══════════════════════════════════════════════════════════════
     const toProcess = shuffledResults.slice(0, actualCount);
-
-    for (let i = 0; i < toProcess.length; i++) {
-      const person = toProcess[i];
-      currentStep++;
-      stats.recordsProcessed++;
-      
-      const personName = person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown';
-      progress.currentPerson = personName;
-      
-      // 检查任务是否被停止
-      const currentTask = await getSearchTask(task.taskId);
-      if (currentTask?.status === 'stopped') {
-        addLog(`⏹️ 任务已被用户停止`, 'warning', 'complete', '⏹️');
-        progress.status = 'stopped';
-        break;
-      }
-      
-      // 注意：积分已在阶段4一次性扣除，此处不再逐条扣费
-
-      // 显示处理进度
-      const progressPercent = Math.round(((i + 1) / actualCount) * 100);
-      addLog(`🔍 [${i + 1}/${actualCount}] 正在处理: ${personName}`, 'info', 'process', '', i + 1, actualCount);
-      await updateProgress(`处理 ${personName}`, 'processing', 'process', progressPercent);
-
-      // 获取电话号码
+    const CONCURRENT_BATCH_SIZE = 5; // 并发数量，可根据需要调整
+    
+    addLog(`🚀 启用并发处理模式，并发数: ${CONCURRENT_BATCH_SIZE}`, 'info', 'process', '');
+    
+    // 先分离有电话和无电话的记录
+    const recordsWithPhone: typeof toProcess = [];
+    const recordsWithoutPhone: typeof toProcess = [];
+    
+    for (const person of toProcess) {
       const phoneNumbers = person.phone_numbers || [];
       let selectedPhone = phoneNumbers[0];
-      
-      // 优先选择手机号
       for (const phone of phoneNumbers) {
         if (phone.type === 'mobile') {
           selectedPhone = phone;
           break;
         }
       }
-
       const phoneNumber = selectedPhone?.sanitized_number || selectedPhone?.raw_number || null;
-      const phoneType = selectedPhone?.type || 'unknown';
-
-      // 构建结果数据
+      
+      if (phoneNumber) {
+        recordsWithPhone.push(person);
+      } else {
+        recordsWithoutPhone.push(person);
+      }
+    }
+    
+    addLog(`📊 数据分类: ${recordsWithPhone.length} 条有电话, ${recordsWithoutPhone.length} 条无电话`, 'info', 'process', '');
+    
+    // 快速处理无电话的记录（不需要验证，可以直接保存）
+    let processedCount = 0;
+    for (const person of recordsWithoutPhone) {
+      processedCount++;
+      stats.recordsProcessed++;
+      stats.excludedNoPhone++;
+      
+      const personName = person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown';
+      
       const resultData = {
         apifyId: person.id,
         apolloId: person.id,
@@ -609,9 +640,9 @@ export async function executeSearchV3(
         state: person.state,
         country: person.country,
         email: person.email,
-        phone: phoneNumber,
-        phoneStatus: phoneNumber ? 'received' : 'no_phone' as 'pending' | 'received' | 'verified' | 'no_phone' | 'failed',
-        phoneType: phoneType === 'mobile' ? '手机' : phoneType === 'work' ? '座机' : '其他',
+        phone: null,
+        phoneStatus: 'no_phone' as 'pending' | 'received' | 'verified' | 'no_phone' | 'failed',
+        phoneType: '其他',
         linkedinUrl: person.linkedin_url,
         age: null as number | null,
         carrier: null as string | null,
@@ -621,104 +652,180 @@ export async function executeSearchV3(
         industry: person.organization?.industry || null,
         dataSource: 'apify',
       };
-
-      // 处理无电话号码的情况
-      if (!phoneNumber) {
-        stats.excludedNoPhone++;
-        
-        if (person.email) {
-          // 有邮箱，保存结果
-          await saveSearchResult(task.id, person.id, resultData, false, 0, null);
-          stats.totalResults++;
-          stats.resultsWithEmail++;
-          addLog(`📧 [${i + 1}/${actualCount}] ${personName} - 无电话，已保存邮箱`, 'info', 'process', '', i + 1, actualCount);
-        } else {
-          // 无任何联系方式
-          stats.excludedNoContact++;
-          addLog(`📵 [${i + 1}/${actualCount}] ${personName} - 无联系方式，已跳过`, 'warning', 'process', '', i + 1, actualCount);
-        }
-        continue;
-      }
-
-      // 有电话号码
-      stats.resultsWithPhone++;
-
-      // 二次电话验证
-      if (enableVerification) {
-        addLog(`   🔍 正在验证电话号码...`, 'info', 'verify', '');
-        
-        const personToVerify: PersonToVerify = {
-          firstName: person.first_name || '',
-          lastName: person.last_name || '',
-          city: person.city || '',
-          state: person.state || '',
-          phone: phoneNumber
-        };
-
-        stats.verifyApiCalls++;
-        const verifyResult = await verifyPhoneNumber(personToVerify, userId);
-
-        if (verifyResult) {
-          resultData.verificationScore = verifyResult.matchScore;
-          resultData.verificationSource = verifyResult.source;
-          resultData.age = verifyResult.details?.age || null;
-          resultData.carrier = verifyResult.details?.carrier || null;
-          
-          if (verifyResult.verified) {
-            resultData.phoneStatus = 'verified';
-            resultData.verifiedAt = new Date();
-            stats.resultsVerified++;
-            
-            const maskedPhone = phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-            addLog(`   ✅ 验证通过 (匹配度: ${verifyResult.matchScore}%)`, 'success', 'verify', '');
-            if (resultData.age) {
-              addLog(`   👤 年龄: ${resultData.age} 岁`, 'info', 'verify', '');
-            }
-          } else {
-            addLog(`   ⚠️ 验证未通过 (匹配度: ${verifyResult.matchScore}%)`, 'warning', 'verify', '');
-          }
-
-          // 年龄筛选（积分不退还）
-          if (ageMin && ageMax && verifyResult.details?.age) {
-            const age = verifyResult.details.age;
-            if (age < ageMin || age > ageMax) {
-              stats.excludedAgeFilter++;
-              addLog(`   🚫 年龄 ${age} 不在 ${ageMin}-${ageMax} 范围内，已排除`, 'warning', 'verify', '');
-              // 注意：积分已扣除，不退还
-              continue;
-            }
-          }
-        }
-      }
-
-      // 保存结果到数据库
-      const savedResult = await saveSearchResult(task.id, person.id, resultData, resultData.phoneStatus === 'verified', resultData.verificationScore || 0, null);
       
-      if (savedResult) {
+      if (person.email) {
+        await saveSearchResult(task.id, person.id, resultData, false, 0, null);
         stats.totalResults++;
-        if (person.email) stats.resultsWithEmail++;
+        stats.resultsWithEmail++;
+      } else {
+        stats.excludedNoContact++;
+      }
+    }
+    
+    if (recordsWithoutPhone.length > 0) {
+      addLog(`✅ 已快速处理 ${recordsWithoutPhone.length} 条无电话记录`, 'info', 'process', '');
+    }
+    
+    // 检查是否需要停止
+    let taskStopped = false;
+    const currentTaskCheck = await getSearchTask(task.taskId);
+    if (currentTaskCheck?.status === 'stopped') {
+      addLog(`⏹️ 任务已被用户停止`, 'warning', 'complete', '⏹️');
+      progress.status = 'stopped';
+      taskStopped = true;
+    }
+    
+    // 并发处理有电话的记录
+    if (!taskStopped && recordsWithPhone.length > 0) {
+      addLog(`🔄 开始并发验证 ${recordsWithPhone.length} 条有电话记录...`, 'info', 'verify', '');
+      addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
+      
+      const totalBatches = Math.ceil(recordsWithPhone.length / CONCURRENT_BATCH_SIZE);
+      
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        // 检查任务是否被停止
+        const currentTask = await getSearchTask(task.taskId);
+        if (currentTask?.status === 'stopped') {
+          addLog(`⏹️ 任务已被用户停止`, 'warning', 'complete', '⏹️');
+          progress.status = 'stopped';
+          break;
+        }
         
-        // 显示保存的结果信息
-        const maskedPhone = phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-        addLog(`   📱 电话: ${maskedPhone}`, 'info', 'process', '');
-        if (person.email) {
-          addLog(`   📧 邮箱: ${person.email}`, 'info', 'process', '');
+        const start = batchIndex * CONCURRENT_BATCH_SIZE;
+        const end = Math.min(start + CONCURRENT_BATCH_SIZE, recordsWithPhone.length);
+        const batch = recordsWithPhone.slice(start, end);
+        
+        const batchStartTime = Date.now();
+        addLog(`📦 批次 ${batchIndex + 1}/${totalBatches}: 并发处理 ${batch.length} 条记录...`, 'info', 'process', '');
+        
+        // 并发处理当前批次
+        const batchPromises = batch.map(async (person, indexInBatch) => {
+          const globalIndex = processedCount + indexInBatch + 1;
+          stats.recordsProcessed++;
+          
+          const personName = person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown';
+          
+          // 获取电话号码
+          const phoneNumbers = person.phone_numbers || [];
+          let selectedPhone = phoneNumbers[0];
+          for (const phone of phoneNumbers) {
+            if (phone.type === 'mobile') {
+              selectedPhone = phone;
+              break;
+            }
+          }
+          const phoneNumber = selectedPhone?.sanitized_number || selectedPhone?.raw_number || '';
+          const phoneType = selectedPhone?.type || 'unknown';
+          
+          // 构建结果数据
+          const resultData = {
+            apifyId: person.id,
+            apolloId: person.id,
+            firstName: person.first_name,
+            lastName: person.last_name,
+            fullName: personName,
+            title: person.title,
+            company: person.organization_name || person.organization?.name,
+            city: person.city,
+            state: person.state,
+            country: person.country,
+            email: person.email,
+            phone: phoneNumber,
+            phoneStatus: 'received' as 'pending' | 'received' | 'verified' | 'no_phone' | 'failed',
+            phoneType: phoneType === 'mobile' ? '手机' : phoneType === 'work' ? '座机' : '其他',
+            linkedinUrl: person.linkedin_url,
+            age: null as number | null,
+            carrier: null as string | null,
+            verificationSource: null as string | null,
+            verificationScore: null as number | null,
+            verifiedAt: null as Date | null,
+            industry: person.organization?.industry || null,
+            dataSource: 'apify',
+          };
+          
+          stats.resultsWithPhone++;
+          
+          // 二次电话验证
+          if (enableVerification) {
+            const personToVerify: PersonToVerify = {
+              firstName: person.first_name || '',
+              lastName: person.last_name || '',
+              city: person.city || '',
+              state: person.state || '',
+              phone: phoneNumber
+            };
+            
+            stats.verifyApiCalls++;
+            const verifyResult = await verifyPhoneNumber(personToVerify, userId);
+            
+            if (verifyResult) {
+              resultData.verificationScore = verifyResult.matchScore;
+              resultData.verificationSource = verifyResult.source;
+              resultData.age = verifyResult.details?.age || null;
+              resultData.carrier = verifyResult.details?.carrier || null;
+              
+              if (verifyResult.verified) {
+                resultData.phoneStatus = 'verified';
+                resultData.verifiedAt = new Date();
+                stats.resultsVerified++;
+              }
+              
+              // 年龄筛选
+              if (ageMin && ageMax && verifyResult.details?.age) {
+                const age = verifyResult.details.age;
+                if (age < ageMin || age > ageMax) {
+                  stats.excludedAgeFilter++;
+                  return { person, resultData, excluded: true, reason: 'age' };
+                }
+              }
+            }
+          }
+          
+          return { person, resultData, excluded: false, reason: null };
+        });
+        
+        // 等待当前批次完成
+        const batchResults = await Promise.all(batchPromises);
+        
+        // 保存结果到数据库
+        for (const result of batchResults) {
+          if (!result.excluded) {
+            const savedResult = await saveSearchResult(
+              task.id, 
+              result.person.id, 
+              result.resultData, 
+              result.resultData.phoneStatus === 'verified', 
+              result.resultData.verificationScore || 0, 
+              null
+            );
+            
+            if (savedResult) {
+              stats.totalResults++;
+              if (result.person.email) stats.resultsWithEmail++;
+            }
+            
+            // 缓存个人数据
+            const personCacheKey = `person:${result.person.id}`;
+            await setCache(personCacheKey, 'person', result.resultData, 180);
+          }
         }
-        if (person.organization_name) {
-          addLog(`   🏢 公司: ${person.organization_name}`, 'info', 'process', '');
+        
+        const batchDuration = Date.now() - batchStartTime;
+        processedCount += batch.length;
+        
+        // 更新进度
+        const progressPercent = Math.round((processedCount / actualCount) * 100);
+        const verified = batchResults.filter(r => r.resultData.phoneStatus === 'verified').length;
+        const excluded = batchResults.filter(r => r.excluded).length;
+        
+        addLog(`   ✅ 批次完成: ${verified} 验证通过, ${excluded} 被排除, 耗时 ${formatDuration(batchDuration)}`, 'success', 'process', '');
+        await updateProgress(`已处理 ${processedCount}/${actualCount}`, 'processing', 'process', progressPercent);
+        
+        // 每5个批次添加分隔线
+        if ((batchIndex + 1) % 5 === 0 && (batchIndex + 1) < totalBatches) {
+          addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
         }
       }
-
-      // 缓存个人数据
-      const personCacheKey = `person:${person.id}`;
-      await setCache(personCacheKey, 'person', resultData, 180);
-
-      // 添加分隔线（每5条）
-      if ((i + 1) % 5 === 0 && (i + 1) < actualCount) {
-        addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
-      }
-
-      await updateProgress();
     }
 
     // ═══════════════════════════════════════════════════════════════
