@@ -57,22 +57,41 @@ interface SearchParams {
 // 定义日志类型
 interface LogEntry {
   timestamp: string;
-  level: 'info' | 'success' | 'warning' | 'error';
+  time: string;
+  level: 'info' | 'success' | 'warning' | 'error' | 'debug';
+  phase: 'init' | 'apify' | 'process' | 'verify' | 'complete';
   step?: number;
   total?: number;
   message: string;
-  details?: {
-    name?: string;
-    phone?: string;
-    matchScore?: number;
-    reason?: string;
-  };
+  icon?: string;
+  details?: any;
+}
+
+// 定义统计数据类型（与后端一致）
+interface SearchStats {
+  apifyApiCalls: number;
+  verifyApiCalls: number;
+  apifyReturned: number;
+  recordsProcessed: number;
+  totalResults: number;
+  resultsWithPhone: number;
+  resultsWithEmail: number;
+  resultsVerified: number;
+  excludedNoPhone: number;
+  excludedNoContact: number;
+  excludedAgeFilter: number;
+  excludedError: number;
+  creditsUsed: number;
+  totalDuration: number;
+  avgProcessTime: number;
+  verifySuccessRate: number;
 }
 
 export default function Results() {
   const { taskId } = useParams<{ taskId: string }>();
   const { user } = useAuth();
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [stats, setStats] = useState<SearchStats | null>(null);
   const [activeTab, setActiveTab] = useState("progress");
   const [filterVerified, setFilterVerified] = useState<'all' | 'verified' | 'unverified'>('all');
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -91,11 +110,10 @@ export default function Results() {
     { 
       enabled: !!user && !!taskId,
       refetchInterval: (data) => {
-        // 任务完成或失败后停止轮询
         if (data?.status === 'completed' || data?.status === 'failed') {
           return false;
         }
-        return 2000; // 2秒轮询
+        return 2000;
       }
     }
   );
@@ -123,16 +141,25 @@ export default function Results() {
     },
   });
 
-  // 解析任务日志
+  // 解析任务日志和统计数据
   useEffect(() => {
     if (task?.logs) {
       try {
         const logData = task.logs as LogEntry[];
         if (Array.isArray(logData)) {
-          setLogs(logData);
+          // 过滤掉统计数据日志，单独提取
+          const displayLogs = logData.filter(log => log.message !== '__STATS__');
+          const statsLog = logData.find(log => log.message === '__STATS__');
+          
+          setLogs(displayLogs);
+          
+          if (statsLog?.details) {
+            setStats(statsLog.details as SearchStats);
+          }
         }
       } catch {
         setLogs([]);
+        setStats(null);
       }
     }
   }, [task?.logs]);
@@ -218,6 +245,21 @@ export default function Results() {
     }
   };
 
+  // 格式化日志时间显示
+  const formatLogTime = (log: LogEntry) => {
+    // 优先使用 time 字段（本地时间格式）
+    if (log.time) return log.time;
+    // 否则从 timestamp 解析
+    if (log.timestamp) {
+      try {
+        return new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  };
+
   // 解析搜索参数
   const searchParams = task?.params as SearchParams | undefined;
   const searchName = searchParams?.name || "";
@@ -227,55 +269,41 @@ export default function Results() {
   const ageMin = searchParams?.ageMin;
   const ageMax = searchParams?.ageMax;
 
-  // 计算进度和统计
+  // 使用后端统计数据，如果没有则从 results 计算
+  const displayStats = stats || {
+    apifyApiCalls: 1,
+    verifyApiCalls: 0,
+    apifyReturned: 0,
+    recordsProcessed: task?.requestedCount || 0,
+    totalResults: results?.length || task?.actualCount || 0,
+    resultsWithPhone: results?.filter(r => {
+      const data = r.data as ResultData;
+      return data?.phone || data?.phoneNumber;
+    }).length || 0,
+    resultsWithEmail: results?.filter(r => {
+      const data = r.data as ResultData;
+      return data?.email;
+    }).length || 0,
+    resultsVerified: results?.filter(r => r.verified).length || 0,
+    excludedNoPhone: 0,
+    excludedNoContact: 0,
+    excludedAgeFilter: 0,
+    excludedError: 0,
+    creditsUsed: task?.creditsUsed || 0,
+    totalDuration: 0,
+    avgProcessTime: 0,
+    verifySuccessRate: 0,
+  };
+
+  // 计算验证成功率
+  const verifySuccessRate = displayStats.resultsWithPhone > 0 
+    ? Math.round((displayStats.resultsVerified / displayStats.resultsWithPhone) * 100) 
+    : 0;
+
   const progress = task?.progress || 0;
   const creditsUsed = task?.creditsUsed || 0;
   const actualCount = task?.actualCount || 0;
   const isRunning = task?.status === 'running' || task?.status === 'pending';
-
-  // 从结果数据中直接统计电话数量（优先），同时也从日志中提取
-  const extractStats = () => {
-    const stats = {
-      phonesFound: 0,
-      phonesVerified: 0,
-      excludedNoPhone: 0,
-      excludedVerifyFailed: 0,
-      excludedAgeFilter: 0,
-    };
-    
-    // 优先从 results 数据中统计电话数量
-    if (results && Array.isArray(results)) {
-      results.forEach(result => {
-        const data = result.data as ResultData;
-        const phone = data?.phone || data?.phoneNumber;
-        if (phone) {
-          stats.phonesFound++;
-          if (result.verified) {
-            stats.phonesVerified++;
-          }
-        }
-      });
-    }
-    
-    // 如果从 results 没有统计到，则从日志中统计（兼容旧版本）
-    if (stats.phonesFound === 0) {
-      logs.forEach(log => {
-        if (log.message.includes('找到电话') || log.message.includes('获取到电话')) stats.phonesFound++;
-        if (log.message.includes('验证通过')) stats.phonesVerified++;
-      });
-    }
-    
-    // 排除统计仍然从日志中获取
-    logs.forEach(log => {
-      if (log.message.includes('未找到电话') || log.message.includes('无电话')) stats.excludedNoPhone++;
-      if (log.message.includes('验证失败')) stats.excludedVerifyFailed++;
-      if (log.message.includes('年龄') && log.message.includes('不在')) stats.excludedAgeFilter++;
-    });
-    
-    return stats;
-  };
-
-  const stats = extractStats();
 
   if (isLoading) {
     return (
@@ -396,12 +424,12 @@ export default function Results() {
                     <div className="text-xs text-slate-500 mt-1">请求数量</div>
                   </div>
                   <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-center">
-                    <div className="text-2xl font-bold text-green-400 font-mono">{actualCount}</div>
+                    <div className="text-2xl font-bold text-green-400 font-mono">{displayStats.totalResults}</div>
                     <div className="text-xs text-slate-500 mt-1">有效结果</div>
                   </div>
                   <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-center">
-                    <div className="text-2xl font-bold text-cyan-400 font-mono">{stats.phonesFound}</div>
-                    <div className="text-xs text-slate-500 mt-1">找到电话</div>
+                    <div className="text-2xl font-bold text-cyan-400 font-mono">{displayStats.resultsWithPhone}</div>
+                    <div className="text-xs text-slate-500 mt-1">有电话</div>
                   </div>
                   <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-center">
                     <div className="text-2xl font-bold text-yellow-400 font-mono">{creditsUsed}</div>
@@ -433,30 +461,32 @@ export default function Results() {
                 <Card className="border-slate-700/50 bg-slate-900/50">
                   <CardHeader className="pb-2 flex flex-row items-center justify-between">
                     <CardTitle className="text-white text-base">搜索日志</CardTitle>
-                    <Button variant="ghost" size="sm" className="text-slate-400 hover:text-white">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </CardHeader>
                   <CardContent>
                     <ScrollArea className="h-[400px] rounded-lg bg-slate-950/50 border border-slate-800">
                       <div className="p-4 space-y-1 font-mono text-sm">
                         {logs.length > 0 ? (
-                          logs.map((log, i) => (
-                            <div 
-                              key={i} 
-                              className={`flex items-start gap-3 py-1.5 px-2 rounded hover:bg-slate-800/50 transition-colors ${
-                                log.message.includes('───') ? 'opacity-30' : ''
-                              }`}
-                            >
-                              <span className="text-slate-600 shrink-0">[{log.timestamp}]</span>
-                              {!log.message.includes('───') && (
-                                <span className="shrink-0">{getLogIcon(log.level)}</span>
-                              )}
-                              <span className={getLogColor(log.level)}>
-                                {log.message}
-                              </span>
-                            </div>
-                          ))
+                          logs.map((log, i) => {
+                            // 跳过分隔线的图标显示
+                            const isSeparator = log.message.includes('───') || log.message.includes('═══');
+                            
+                            return (
+                              <div 
+                                key={i} 
+                                className={`flex items-start gap-3 py-1 px-2 rounded hover:bg-slate-800/50 transition-colors ${
+                                  isSeparator ? 'opacity-30' : ''
+                                }`}
+                              >
+                                <span className="text-slate-600 shrink-0 text-xs">[{formatLogTime(log)}]</span>
+                                {!isSeparator && (
+                                  <span className="shrink-0">{getLogIcon(log.level)}</span>
+                                )}
+                                <span className={`${getLogColor(log.level)} ${isSeparator ? 'text-slate-600' : ''}`}>
+                                  {log.message}
+                                </span>
+                              </div>
+                            );
+                          })
                         ) : (
                           <div className="text-slate-500 text-center py-8">
                             <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
@@ -508,10 +538,11 @@ export default function Results() {
                         </div>
                       </div>
                       <span className="text-sm text-slate-400">
-                        共 {results?.filter(r => 
-                          filterVerified === 'all' ? true : 
-                          filterVerified === 'verified' ? r.verified : !r.verified
-                        ).length || 0} 条记录
+                        共 {results?.filter(r => {
+                          if (filterVerified === 'verified') return r.verified;
+                          if (filterVerified === 'unverified') return !r.verified;
+                          return true;
+                        }).length || 0} 条记录
                       </span>
                     </div>
                   </CardHeader>
@@ -533,121 +564,127 @@ export default function Results() {
                           </TableHeader>
                           <TableBody>
                             {results
-                              .filter(r => 
-                                filterVerified === 'all' ? true : 
-                                filterVerified === 'verified' ? r.verified : !r.verified
-                              )
+                              .filter(r => {
+                                if (filterVerified === 'verified') return r.verified;
+                                if (filterVerified === 'unverified') return !r.verified;
+                                return true;
+                              })
                               .map((result, index) => {
-                              const data = result.data as ResultData || {};
-                              const fullName = data.fullName || data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || "-";
-                              const title = data.title || "-";
-                              const company = data.company || data.organization_name || "-";
-                              const phone = data.phone || data.phoneNumber || "-";
-                              const email = data.email || "-";
-                              const linkedinUrl = data.linkedinUrl || data.linkedin_url;
-                              
-                              return (
-                                <TableRow key={result.id} className="hover:bg-slate-800/30 border-slate-700/30">
-                                  <TableCell className="text-slate-500 font-mono">{index + 1}</TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <User className="h-4 w-4 text-slate-500" />
-                                      <span className="font-medium text-white">{fullName}</span>
-                                      {data.age && (
-                                        <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
-                                          {data.age}岁
+                                const data = result.data as ResultData;
+                                const fullName = data?.fullName || data?.name || 
+                                  `${data?.firstName || data?.first_name || ''} ${data?.lastName || data?.last_name || ''}`.trim() || '-';
+                                const title = data?.title || '-';
+                                const company = data?.company || data?.organization_name || '-';
+                                const phone = data?.phone || data?.phoneNumber || '';
+                                const email = data?.email || '';
+                                const linkedinUrl = data?.linkedinUrl || data?.linkedin_url || '';
+                                const age = data?.age;
+                                const city = data?.city;
+                                const state = data?.state;
+
+                                return (
+                                  <TableRow key={result.id} className="hover:bg-slate-800/30">
+                                    <TableCell className="text-slate-500 font-mono">{index + 1}</TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <User className="h-4 w-4 text-slate-500" />
+                                        <div>
+                                          <div className="text-white font-medium flex items-center gap-2">
+                                            {fullName}
+                                            {age && (
+                                              <span className="text-xs text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded">
+                                                {age}岁
+                                              </span>
+                                            )}
+                                          </div>
+                                          {(city || state) && (
+                                            <div className="text-xs text-slate-500 flex items-center gap-1">
+                                              <MapPin className="h-3 w-3" />
+                                              {[city, state].filter(Boolean).join(', ')}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-slate-300">{title}</TableCell>
+                                    <TableCell className="text-slate-300">{company}</TableCell>
+                                    <TableCell>
+                                      {phone ? (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-cyan-400 font-mono">{phone}</span>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0"
+                                            onClick={() => copyToClipboard(phone, '电话')}
+                                          >
+                                            <Copy className="h-3 w-3 text-slate-400 hover:text-cyan-400" />
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-500">-</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {email ? (
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-purple-400 text-sm truncate max-w-[150px]">{email}</span>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0"
+                                            onClick={() => copyToClipboard(email, '邮箱')}
+                                          >
+                                            <Copy className="h-3 w-3 text-slate-400 hover:text-purple-400" />
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-500">-</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {result.verified ? (
+                                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
+                                          <CheckCircle className="h-3 w-3" />
+                                          {result.matchScore ? `${result.matchScore}%` : '已验证'}
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="secondary" className="gap-1">
+                                          <XCircle className="h-3 w-3" />
+                                          未验证
                                         </Badge>
                                       )}
-                                    </div>
-                                    {data.city && data.state && (
-                                      <div className="flex items-center gap-1 mt-1 text-xs text-slate-500">
-                                        <MapPin className="h-3 w-3" />
-                                        {data.city}, {data.state}
-                                      </div>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-slate-400">{title}</TableCell>
-                                  <TableCell className="text-slate-400 max-w-[150px] truncate" title={company}>{company}</TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <Phone className="h-4 w-4 text-slate-500" />
-                                      <span className="text-cyan-400 font-mono text-sm">{phone}</span>
-                                      {phone !== '-' && (
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-1">
+                                        {linkedinUrl && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 w-7 p-0 hover:bg-blue-500/20"
+                                            onClick={() => window.open(linkedinUrl, '_blank')}
+                                            title="打开 LinkedIn"
+                                          >
+                                            <ExternalLink className="h-4 w-4 text-blue-400" />
+                                          </Button>
+                                        )}
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          className="h-6 w-6 p-0 hover:bg-cyan-500/20"
-                                          onClick={() => copyToClipboard(phone, '电话号码')}
+                                          className="h-7 w-7 p-0 hover:bg-slate-700"
+                                          onClick={() => {
+                                            const copyText = `${fullName}\n${title}\n${company}\n${phone}\n${email}`;
+                                            copyToClipboard(copyText, '联系人信息');
+                                          }}
+                                          title="复制全部信息"
                                         >
-                                          <Copy className="h-3 w-3 text-slate-400 hover:text-cyan-400" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                    {data.carrier && (
-                                      <div className="text-xs text-slate-500 mt-1">运营商: {data.carrier}</div>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {email !== '-' ? (
-                                      <div className="flex items-center gap-2">
-                                        <Mail className="h-4 w-4 text-slate-500" />
-                                        <span className="text-slate-400 text-sm truncate max-w-[120px]" title={email}>{email}</span>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-6 w-6 p-0 hover:bg-purple-500/20"
-                                          onClick={() => copyToClipboard(email, '邮箱')}
-                                        >
-                                          <Copy className="h-3 w-3 text-slate-400 hover:text-purple-400" />
+                                          <Copy className="h-4 w-4 text-slate-400" />
                                         </Button>
                                       </div>
-                                    ) : (
-                                      <span className="text-slate-500">-</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {result.verified ? (
-                                      <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
-                                        <CheckCircle className="h-3 w-3" />
-                                        {result.matchScore ? `${result.matchScore}%` : '已验证'}
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="secondary" className="gap-1">
-                                        <XCircle className="h-3 w-3" />
-                                        未验证
-                                      </Badge>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-1">
-                                      {linkedinUrl && (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-7 w-7 p-0 hover:bg-blue-500/20"
-                                          onClick={() => window.open(linkedinUrl, '_blank')}
-                                          title="打开 LinkedIn"
-                                        >
-                                          <ExternalLink className="h-4 w-4 text-blue-400" />
-                                        </Button>
-                                      )}
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 w-7 p-0 hover:bg-slate-700"
-                                        onClick={() => {
-                                          const copyText = `${fullName}\n${title}\n${company}\n${phone}\n${email}`;
-                                          copyToClipboard(copyText, '联系人信息');
-                                        }}
-                                        title="复制全部信息"
-                                      >
-                                        <Copy className="h-4 w-4 text-slate-400" />
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
                           </TableBody>
                         </Table>
                       </div>
@@ -687,15 +724,15 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
                   <span className="text-slate-400 text-sm">Apify API</span>
-                  <span className="text-white font-mono">1</span>
+                  <span className="text-white font-mono">{displayStats.apifyApiCalls}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
-                  <span className="text-slate-400 text-sm">电话获取</span>
-                  <span className="text-white font-mono">{stats.phonesFound + stats.excludedNoPhone}</span>
+                  <span className="text-slate-400 text-sm">处理记录</span>
+                  <span className="text-white font-mono">{displayStats.recordsProcessed}</span>
                 </div>
                 <div className="flex justify-between items-center py-2">
-                  <span className="text-slate-400 text-sm">电话验证</span>
-                  <span className="text-white font-mono">{stats.phonesFound}</span>
+                  <span className="text-slate-400 text-sm">验证请求</span>
+                  <span className="text-white font-mono">{displayStats.verifyApiCalls}</span>
                 </div>
               </CardContent>
             </Card>
@@ -716,12 +753,15 @@ export default function Results() {
                   <span className="text-white font-mono">1</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
-                  <span className="text-slate-400 text-sm">电话获取</span>
-                  <span className="text-white font-mono">{creditsUsed - 1}</span>
+                  <span className="text-slate-400 text-sm">数据获取</span>
+                  <span className="text-white font-mono">{Math.max(0, creditsUsed - 1)}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 bg-yellow-500/10 rounded-lg px-3 -mx-3">
                   <span className="text-yellow-400 font-medium">总消耗</span>
                   <span className="text-yellow-400 font-mono font-bold">{creditsUsed}</span>
+                </div>
+                <div className="text-xs text-slate-500 text-center pt-2">
+                  积分一经扣除，不予退还
                 </div>
               </CardContent>
             </Card>
@@ -738,24 +778,30 @@ export default function Results() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
-                  <span className="text-slate-400 text-sm">找到电话</span>
-                  <span className="text-cyan-400 font-mono">{stats.phonesFound}</span>
+                  <span className="text-slate-400 text-sm">有效结果</span>
+                  <span className="text-green-400 font-mono">{displayStats.totalResults}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
+                  <span className="text-slate-400 text-sm">有电话</span>
+                  <span className="text-cyan-400 font-mono">{displayStats.resultsWithPhone}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
+                  <span className="text-slate-400 text-sm">有邮箱</span>
+                  <span className="text-purple-400 font-mono">{displayStats.resultsWithEmail}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
                   <span className="text-slate-400 text-sm">验证通过</span>
-                  <span className="text-green-400 font-mono">{stats.phonesVerified}</span>
+                  <span className="text-green-400 font-mono">{displayStats.resultsVerified}</span>
                 </div>
                 <div className="flex justify-between items-center py-2">
                   <span className="text-slate-400 text-sm">验证成功率</span>
-                  <span className="text-green-400 font-mono">
-                    {stats.phonesFound > 0 ? Math.round((stats.phonesVerified / stats.phonesFound) * 100) : 0}%
-                  </span>
+                  <span className="text-green-400 font-mono">{verifySuccessRate}%</span>
                 </div>
               </CardContent>
             </Card>
 
             {/* 排除统计 */}
-            {(stats.excludedNoPhone > 0 || stats.excludedVerifyFailed > 0 || stats.excludedAgeFilter > 0) && (
+            {(displayStats.excludedNoPhone > 0 || displayStats.excludedNoContact > 0 || displayStats.excludedAgeFilter > 0 || displayStats.excludedError > 0) && (
               <Card className="border-slate-700/50 bg-gradient-to-br from-slate-900/80 to-slate-800/50">
                 <CardHeader className="pb-2">
                   <div className="flex items-center gap-3">
@@ -766,22 +812,28 @@ export default function Results() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {stats.excludedNoPhone > 0 && (
+                  {displayStats.excludedNoPhone > 0 && (
                     <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
                       <span className="text-slate-400 text-sm">无电话号码</span>
-                      <span className="text-red-400 font-mono">{stats.excludedNoPhone}</span>
+                      <span className="text-red-400 font-mono">{displayStats.excludedNoPhone}</span>
                     </div>
                   )}
-                  {stats.excludedVerifyFailed > 0 && (
+                  {displayStats.excludedNoContact > 0 && (
                     <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
-                      <span className="text-slate-400 text-sm">验证失败</span>
-                      <span className="text-red-400 font-mono">{stats.excludedVerifyFailed}</span>
+                      <span className="text-slate-400 text-sm">无联系方式</span>
+                      <span className="text-red-400 font-mono">{displayStats.excludedNoContact}</span>
                     </div>
                   )}
-                  {stats.excludedAgeFilter > 0 && (
-                    <div className="flex justify-between items-center py-2">
+                  {displayStats.excludedAgeFilter > 0 && (
+                    <div className="flex justify-between items-center py-2 border-b border-slate-700/30">
                       <span className="text-slate-400 text-sm">年龄不符</span>
-                      <span className="text-red-400 font-mono">{stats.excludedAgeFilter}</span>
+                      <span className="text-red-400 font-mono">{displayStats.excludedAgeFilter}</span>
+                    </div>
+                  )}
+                  {displayStats.excludedError > 0 && (
+                    <div className="flex justify-between items-center py-2">
+                      <span className="text-slate-400 text-sm">处理失败</span>
+                      <span className="text-red-400 font-mono">{displayStats.excludedError}</span>
                     </div>
                   )}
                 </CardContent>
