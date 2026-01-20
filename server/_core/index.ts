@@ -408,6 +408,27 @@ async function ensureTables() {
     `);
     console.log("[Database] Error logs table ready");
     
+    // 17. 用户反馈表
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_feedbacks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        userId INT NOT NULL,
+        type ENUM('question', 'suggestion', 'business', 'custom_dev', 'other') NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
+        contactInfo VARCHAR(200) DEFAULT NULL,
+        status ENUM('pending', 'processing', 'resolved', 'closed') NOT NULL DEFAULT 'pending',
+        adminReply TEXT,
+        repliedBy VARCHAR(50),
+        repliedAt TIMESTAMP NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_userId (userId),
+        INDEX idx_status (status)
+      )
+    `);
+    console.log("[Database] User feedbacks table ready");
+    
     // ========== 初始化默认数据 ==========
     
     // 插入默认系统配置（如果不存在）
