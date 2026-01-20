@@ -241,6 +241,63 @@ function convertToLeadPerson(raw: ApifyLeadRaw): LeadPerson {
 }
 
 /**
+ * 美国州名到 Apify 位置格式的映射
+ * Apify 需要格式如 "california, us" 而不是 "California"
+ */
+const STATE_TO_APIFY_LOCATION: Record<string, string> = {
+  'Alabama': 'alabama, us',
+  'Alaska': 'alaska, us',
+  'Arizona': 'arizona, us',
+  'Arkansas': 'arkansas, us',
+  'California': 'california, us',
+  'Colorado': 'colorado, us',
+  'Connecticut': 'connecticut, us',
+  'Delaware': 'delaware, us',
+  'Florida': 'florida, us',
+  'Georgia': 'georgia, us',
+  'Hawaii': 'hawaii, us',
+  'Idaho': 'idaho, us',
+  'Illinois': 'illinois, us',
+  'Indiana': 'indiana, us',
+  'Iowa': 'iowa, us',
+  'Kansas': 'kansas, us',
+  'Kentucky': 'kentucky, us',
+  'Louisiana': 'louisiana, us',
+  'Maine': 'maine, us',
+  'Maryland': 'maryland, us',
+  'Massachusetts': 'massachusetts, us',
+  'Michigan': 'michigan, us',
+  'Minnesota': 'minnesota, us',
+  'Mississippi': 'mississippi, us',
+  'Missouri': 'missouri, us',
+  'Montana': 'montana, us',
+  'Nebraska': 'nebraska, us',
+  'Nevada': 'nevada, us',
+  'New Hampshire': 'new hampshire, us',
+  'New Jersey': 'new jersey, us',
+  'New Mexico': 'new mexico, us',
+  'New York': 'new york, us',
+  'North Carolina': 'north carolina, us',
+  'North Dakota': 'north dakota, us',
+  'Ohio': 'ohio, us',
+  'Oklahoma': 'oklahoma, us',
+  'Oregon': 'oregon, us',
+  'Pennsylvania': 'pennsylvania, us',
+  'Rhode Island': 'rhode island, us',
+  'South Carolina': 'south carolina, us',
+  'South Dakota': 'south dakota, us',
+  'Tennessee': 'tennessee, us',
+  'Texas': 'texas, us',
+  'Utah': 'utah, us',
+  'Vermont': 'vermont, us',
+  'Virginia': 'virginia, us',
+  'Washington': 'washington, us',
+  'West Virginia': 'west virginia, us',
+  'Wisconsin': 'wisconsin, us',
+  'Wyoming': 'wyoming, us',
+};
+
+/**
  * 将搜索参数转换为 Apify Actor 输入格式
  * 
  * 参数参考: https://apify.com/code_crafter/leads-finder/input-schema
@@ -271,9 +328,12 @@ function buildActorInput(
     input.contact_job_title = [searchTitle.trim()];
   }
   
-  // 地区筛选 - 使用美国州名
+  // 地区筛选 - 转换为 Apify 接受的格式
   if (searchState && searchState.trim()) {
-    input.contact_location = [searchState.trim()];
+    // 查找映射，如果没有则尝试转换为小写 + ", us" 格式
+    const apifyLocation = STATE_TO_APIFY_LOCATION[searchState.trim()] 
+      || `${searchState.trim().toLowerCase()}, us`;
+    input.contact_location = [apifyLocation];
   }
   
   // 关键词搜索（用于公司名称匹配，不是人名）
