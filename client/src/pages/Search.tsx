@@ -327,11 +327,25 @@ export default function Search() {
                         placeholder="输入数量 (100-10000)"
                         value={customLimit}
                         onChange={(e) => {
-                          const value = e.target.value;
-                          setCustomLimit(value);
-                          const num = parseInt(value);
-                          if (!isNaN(num) && num >= 100 && num <= 10000) {
-                            setSearchLimit(num);
+                          let value = e.target.value;
+                          let num = parseInt(value);
+                          
+                          // 自动限制范围
+                          if (!isNaN(num)) {
+                            if (num > 10000) {
+                              num = 10000;
+                              value = '10000';
+                            } else if (num < 100 && value.length >= 3) {
+                              // 只有当输入完成时才限制最小值，避免输入过程中被打断
+                              num = 100;
+                              value = '100';
+                            }
+                            setCustomLimit(value);
+                            if (num >= 100) {
+                              setSearchLimit(num);
+                            }
+                          } else {
+                            setCustomLimit(value);
                           }
                         }}
                         className={`bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 pr-12 ${
@@ -343,8 +357,8 @@ export default function Search() {
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">条</span>
                     </div>
                   </div>
-                  {customLimit && (parseInt(customLimit) < 100 || parseInt(customLimit) > 10000) && (
-                    <p className="text-xs text-red-400 mt-1">请输入 100-10000 之间的数字</p>
+                  {customLimit && parseInt(customLimit) < 100 && customLimit.length >= 3 && (
+                    <p className="text-xs text-amber-400 mt-1">最小搜索数量为 100 条</p>
                   )}
                 </div>
 
