@@ -14,7 +14,7 @@ export const ENV = {
   adminJwtSecret: process.env.ADMIN_JWT_SECRET ?? process.env.JWT_SECRET ?? "admin-secret-key",
   
   // 外部API密钥
-  apolloApiKey: process.env.APOLLO_API_KEY ?? "",
+  apifyApiToken: process.env.APIFY_API_TOKEN ?? "",
   scrapeDoApiKey: process.env.SCRAPEDO_API_KEY ?? "",
   trongridApiKey: process.env.TRONGRID_API_KEY ?? "",
 };

@@ -81,8 +81,7 @@ import {
   refundOrder,
   searchOrders,
 } from "./db";
-import { executeSearch } from "./services/searchProcessor";
-import { previewSearch as previewSearchV2, executeSearchV2 } from "./services/searchProcessorV2";
+// Apollo 相关处理器已移除
 import { previewSearch, executeSearchV3 } from "./services/searchProcessorV3";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;

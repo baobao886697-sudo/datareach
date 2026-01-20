@@ -8,7 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startUsdtMonitor } from "../services/usdtMonitor";
-import { handleApolloWebhook } from "../services/apolloWebhook";
+// Apollo Webhook 已移除，使用 Apify 同步获取数据
 import { startOrderExpirationChecker } from "../services/orderExpiration";
 import { getDbSync } from "../db";
 import { sql } from "drizzle-orm";
@@ -298,7 +298,7 @@ async function ensureTables() {
       CREATE TABLE IF NOT EXISTS api_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
         userId INT,
-        apiType ENUM('apollo_search', 'apollo_enrich', 'scrape_tps', 'scrape_fps') NOT NULL,
+        apiType ENUM('apollo_search', 'apollo_enrich', 'apify_search', 'scrape_tps', 'scrape_fps') NOT NULL,
         endpoint VARCHAR(255),
         requestParams JSON,
         responseStatus INT,
@@ -444,17 +444,7 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   
-  // Apollo Webhook endpoint
-  app.post('/api/apollo-webhook', async (req, res) => {
-    try {
-      console.log('[Apollo Webhook] Received request');
-      await handleApolloWebhook(req.body);
-      res.status(200).json({ success: true });
-    } catch (error: any) {
-      console.error('[Apollo Webhook] Error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  // Apollo Webhook 已移除 - 现在使用 Apify 同步获取数据
   // tRPC API
   app.use(
     "/api/trpc",
