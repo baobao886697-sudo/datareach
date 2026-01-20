@@ -19,6 +19,9 @@ const RETRY_CONFIG = {
   ],
 };
 
+// API 错误类型
+export type ApiErrorType = 'INSUFFICIENT_CREDITS' | 'RATE_LIMITED' | 'NETWORK_ERROR' | 'UNKNOWN_ERROR' | null;
+
 export interface VerificationResult {
   verified: boolean;
   source: 'TruePeopleSearch' | 'FastPeopleSearch' | 'none';
@@ -34,6 +37,7 @@ export interface VerificationResult {
     name?: string;
   };
   rawData?: any;
+  apiError?: ApiErrorType; // 新增：API 错误类型
 }
 
 export interface PersonToVerify {
@@ -71,6 +75,11 @@ function delay(ms: number): Promise<void> {
 function isRetryableError(error: any): boolean {
   if (!error) return false;
   
+  // 401 积分耗尽不可重试
+  if (error.response?.status === 401) {
+    return false;
+  }
+  
   // 检查错误代码
   if (error.code && RETRY_CONFIG.retryableErrors.includes(error.code)) {
     return true;
@@ -96,6 +105,34 @@ function isRetryableError(error: any): boolean {
   }
   
   return false;
+}
+
+/**
+ * 判断是否是 API 积分耗尽错误
+ * Scrape.do 返回 401 表示积分耗尽或订阅已暂停
+ */
+function isInsufficientCreditsError(error: any): boolean {
+  if (!error) return false;
+  return error.response?.status === 401;
+}
+
+/**
+ * 获取 API 错误类型
+ */
+function getApiErrorType(error: any): ApiErrorType {
+  if (!error) return null;
+  
+  if (error.response?.status === 401) {
+    return 'INSUFFICIENT_CREDITS';
+  }
+  if (error.response?.status === 429) {
+    return 'RATE_LIMITED';
+  }
+  if (error.code && RETRY_CONFIG.retryableErrors.includes(error.code)) {
+    return 'NETWORK_ERROR';
+  }
+  
+  return 'UNKNOWN_ERROR';
 }
 
 /**
@@ -171,9 +208,17 @@ export async function verifyWithTruePeopleSearch(person: PersonToVerify, userId?
         continue;
       }
       
+      // 检查是否是积分耗尽错误
+      const apiError = getApiErrorType(error);
+      if (apiError === 'INSUFFICIENT_CREDITS') {
+        console.error(`[Scraper] TruePeopleSearch API credits exhausted!`);
+        await logApi('scrape_tps', targetUrl, { phone: cleanPhone, attempt, apiError }, 401, responseTime, false, 'API credits exhausted', 0, userId);
+        return { verified: false, source: 'TruePeopleSearch', matchScore: 0, apiError: 'INSUFFICIENT_CREDITS' };
+      }
+      
       // 不可重试或已用完重试次数
       await logApi('scrape_tps', targetUrl, { phone: cleanPhone, attempt, retried: attempt > 0 }, error.response?.status || 0, responseTime, false, error.message, 0, userId);
-      return { verified: false, source: 'TruePeopleSearch', matchScore: 0 };
+      return { verified: false, source: 'TruePeopleSearch', matchScore: 0, apiError };
     }
   }
   
@@ -240,9 +285,17 @@ export async function verifyWithFastPeopleSearch(person: PersonToVerify, userId?
         continue;
       }
       
+      // 检查是否是积分耗尽错误
+      const apiError = getApiErrorType(error);
+      if (apiError === 'INSUFFICIENT_CREDITS') {
+        console.error(`[Scraper] FastPeopleSearch API credits exhausted!`);
+        await logApi('scrape_fps', targetUrl, { phone: formattedPhone, attempt, apiError }, 401, responseTime, false, 'API credits exhausted', 0, userId);
+        return { verified: false, source: 'FastPeopleSearch', matchScore: 0, apiError: 'INSUFFICIENT_CREDITS' };
+      }
+      
       // 不可重试或已用完重试次数
       await logApi('scrape_fps', targetUrl, { phone: formattedPhone, attempt, retried: attempt > 0 }, error.response?.status || 0, responseTime, false, error.message, 0, userId);
-      return { verified: false, source: 'FastPeopleSearch', matchScore: 0 };
+      return { verified: false, source: 'FastPeopleSearch', matchScore: 0, apiError };
     }
   }
   
@@ -266,6 +319,12 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
   // 第一阶段：TruePeopleSearch 电话号码反向搜索
   const tpsResult = await verifyWithTruePeopleSearch(person, userId);
   
+  // 如果 API 积分耗尽，立即返回错误
+  if (tpsResult.apiError === 'INSUFFICIENT_CREDITS') {
+    console.error(`[Scraper] API credits exhausted during TruePeopleSearch, stopping verification`);
+    return tpsResult;
+  }
+  
   // 如果第一阶段验证成功（姓名匹配且年龄在范围内），直接返回
   if (tpsResult.verified && tpsResult.matchScore >= 60) {
     console.log(`[Scraper] TruePeopleSearch verification passed`);
@@ -275,6 +334,12 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
   // 第二阶段：FastPeopleSearch 电话号码反向搜索
   console.log(`[Scraper] TruePeopleSearch failed (verified=${tpsResult.verified}, score=${tpsResult.matchScore}), trying FastPeopleSearch`);
   const fpsResult = await verifyWithFastPeopleSearch(person, userId);
+  
+  // 如果 API 积分耗尽，立即返回错误
+  if (fpsResult.apiError === 'INSUFFICIENT_CREDITS') {
+    console.error(`[Scraper] API credits exhausted during FastPeopleSearch, stopping verification`);
+    return fpsResult;
+  }
   
   if (fpsResult.verified && fpsResult.matchScore >= 60) {
     console.log(`[Scraper] FastPeopleSearch verification passed`);

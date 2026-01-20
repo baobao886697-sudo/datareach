@@ -440,22 +440,62 @@ export default function Search() {
                     搜索数量
                   </Label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {SEARCH_LIMITS.map((limit) => (
+                    {SEARCH_LIMITS.map((option) => (
                       <button
-                        key={limit.value}
+                        key={option.value}
                         type="button"
-                        onClick={() => setSearchLimit(limit.value)}
-                        className={`p-3 rounded-xl border transition-all ${
-                          searchLimit === limit.value
-                            ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-400"
-                            : "bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600"
+                        onClick={() => {
+                          setSearchLimit(option.value);
+                          setCustomLimit("");
+                        }}
+                        className={`relative p-3 rounded-xl border transition-all ${
+                          searchLimit === option.value && !customLimit
+                            ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
+                            : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
                         }`}
                       >
-                        <div className="text-lg font-bold">{limit.value}</div>
-                        <div className="text-xs opacity-70">{limit.description}</div>
+                        <div className="text-lg font-bold">{option.value}</div>
+                        <div className="text-xs opacity-70">{option.description}</div>
                       </button>
                     ))}
                   </div>
+                  {/* 自定义数量输入框 */}
+                  <div className="flex items-center gap-3 mt-3">
+                    <span className="text-sm text-slate-400">或自定义:</span>
+                    <div className="relative flex-1">
+                      <Input
+                        type="number"
+                        placeholder="输入数量 (100-10000)"
+                        value={customLimit}
+                        onChange={(e) => {
+                          let value = e.target.value;
+                          let num = parseInt(value);
+                          
+                          // 自动限制范围
+                          if (num > 10000) {
+                            value = '10000';
+                            num = 10000;
+                          }
+                          
+                          setCustomLimit(value);
+                          
+                          // 如果是有效数字，更新 searchLimit
+                          if (!isNaN(num) && num >= 100 && num <= 10000) {
+                            setSearchLimit(num);
+                          }
+                        }}
+                        className={`bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 pr-12 ${
+                          customLimit ? 'border-cyan-500 ring-1 ring-cyan-500/30' : ''
+                        }`}
+                        min={100}
+                        max={10000}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">条</span>
+                    </div>
+                  </div>
+                  {customLimit && parseInt(customLimit) < 100 && customLimit.length >= 3 && (
+                    <p className="text-xs text-amber-400 mt-1">最小搜索数量为 100 条</p>
+                  )}
                 </div>
 
                 {/* 年龄筛选 */}

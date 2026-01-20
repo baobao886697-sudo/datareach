@@ -108,6 +108,7 @@ export interface ApifySearchResult {
   errorMessage?: string;
   runId?: string;
   datasetId?: string;
+  apiError?: 'INSUFFICIENT_CREDITS' | 'RATE_LIMITED' | 'NETWORK_ERROR' | 'UNKNOWN';  // API 错误类型
 }
 
 // ============ 工具函数 ============
@@ -450,6 +451,37 @@ export async function searchPeople(
     
     // 截断错误信息，避免数据库插入失败
     const truncatedErrorMessage = error.message ? error.message.substring(0, 500) : 'Unknown error';
+    const errorMessageLower = (error.message || '').toLowerCase();
+    
+    // 检测 API 错误类型
+    let apiError: 'INSUFFICIENT_CREDITS' | 'RATE_LIMITED' | 'NETWORK_ERROR' | 'UNKNOWN' = 'UNKNOWN';
+    
+    // 检测积分不足
+    if (errorMessageLower.includes('insufficient') || 
+        errorMessageLower.includes('credits') ||
+        errorMessageLower.includes('payment') ||
+        errorMessageLower.includes('billing') ||
+        errorMessageLower.includes('subscription') ||
+        error.statusCode === 402) {
+      apiError = 'INSUFFICIENT_CREDITS';
+      console.error(`[Apify] ⚠️ API 积分不足或订阅问题`);
+    }
+    // 检测速率限制
+    else if (errorMessageLower.includes('rate') || 
+             errorMessageLower.includes('limit') ||
+             errorMessageLower.includes('too many') ||
+             error.statusCode === 429) {
+      apiError = 'RATE_LIMITED';
+      console.error(`[Apify] ⚠️ API 速率限制`);
+    }
+    // 检测网络错误
+    else if (errorMessageLower.includes('network') ||
+             errorMessageLower.includes('timeout') ||
+             errorMessageLower.includes('econnreset') ||
+             errorMessageLower.includes('enotfound')) {
+      apiError = 'NETWORK_ERROR';
+      console.error(`[Apify] ⚠️ 网络错误`);
+    }
     
     // 记录错误日志（使用 try-catch 避免日志记录失败影响主流程）
     try {
@@ -457,7 +489,7 @@ export async function searchPeople(
         'apify_search',
         '/actor/code_crafter/leads-finder',
         { searchName, searchTitle, searchState, limit },
-        500,
+        error.statusCode || 500,
         duration,
         false,
         truncatedErrorMessage,
@@ -472,7 +504,8 @@ export async function searchPeople(
       success: false,
       people: [],
       totalCount: 0,
-      errorMessage: error.message
+      errorMessage: error.message,
+      apiError
     };
   }
 }

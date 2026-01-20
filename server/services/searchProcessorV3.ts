@@ -95,6 +95,7 @@ export interface SearchStats {
   excludedNoContact: number;       // 无任何联系方式被排除
   excludedAgeFilter: number;       // 年龄不符被排除
   excludedError: number;           // 处理错误被排除
+  excludedApiError: number;        // API 错误被排除（新增）
   
   // === 积分统计 ===
   creditsUsed: number;             // 已消耗积分
@@ -107,6 +108,10 @@ export interface SearchStats {
   
   // === 验证统计 ===
   verifySuccessRate: number;       // 验证成功率（百分比）
+  
+  // === API 错误统计（新增） ===
+  apiCreditsExhausted: boolean;    // API 积分是否耗尽
+  unprocessedCount: number;        // 未处理的记录数（因 API 错误）
 }
 
 export interface SearchProgress {
@@ -180,12 +185,15 @@ function createInitialStats(): SearchStats {
     excludedNoContact: 0,
     excludedAgeFilter: 0,
     excludedError: 0,
+    excludedApiError: 0,
     creditsUsed: 0,
     creditsRefunded: 0,
     creditsFinal: 0,
     totalDuration: 0,
     avgProcessTime: 0,
     verifySuccessRate: 0,
+    apiCreditsExhausted: false,
+    unprocessedCount: 0,
   };
 }
 
@@ -699,6 +707,8 @@ export async function executeSearchV3(
         addLog(`📦 批次 ${batchIndex + 1}/${totalBatches}: 并发处理 ${batch.length} 条记录...`, 'info', 'process', '');
         
         // 并发处理当前批次
+        let apiCreditsExhausted = false; // 标记 API 积分是否耗尽
+        
         const batchPromises = batch.map(async (person, indexInBatch) => {
           const globalIndex = processedCount + indexInBatch + 1;
           stats.recordsProcessed++;
@@ -759,6 +769,13 @@ export async function executeSearchV3(
             const verifyResult = await verifyPhoneNumber(personToVerify, userId);
             
             if (verifyResult) {
+              // 检查 API 积分是否耗尽
+              if (verifyResult.apiError === 'INSUFFICIENT_CREDITS') {
+                apiCreditsExhausted = true;
+                stats.excludedApiError++;
+                return { person, resultData, excluded: true, reason: 'api_credits_exhausted', apiError: true };
+              }
+              
               resultData.verificationScore = verifyResult.matchScore;
               resultData.verificationSource = verifyResult.source;
               resultData.age = verifyResult.details?.age || null;
@@ -775,13 +792,13 @@ export async function executeSearchV3(
                 const age = verifyResult.details.age;
                 if (age < ageMin || age > ageMax) {
                   stats.excludedAgeFilter++;
-                  return { person, resultData, excluded: true, reason: 'age' };
+                  return { person, resultData, excluded: true, reason: 'age', apiError: false };
                 }
               }
             }
           }
           
-          return { person, resultData, excluded: false, reason: null };
+          return { person, resultData, excluded: false, reason: null, apiError: false };
         });
         
         // 等待当前批次完成
