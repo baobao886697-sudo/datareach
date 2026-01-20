@@ -147,14 +147,14 @@ export async function deductCredits(userId: number, amount: number, type: "searc
   return true;
 }
 
-export async function addCredits(userId: number, amount: number, type: "recharge" | "admin_add" | "refund", description: string, relatedOrderId?: string): Promise<{ success: boolean; newBalance?: number }> {
+export async function addCredits(userId: number, amount: number, type: "recharge" | "admin_add" | "refund", description: string, relatedOrderId?: string, relatedTaskId?: string): Promise<{ success: boolean; newBalance?: number }> {
   const db = await getDb();
   if (!db) return { success: false };
   const user = await getUserById(userId);
   if (!user) return { success: false };
   const newBalance = user.credits + amount;
   await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
-  await db.insert(creditLogs).values({ userId, amount, balanceAfter: newBalance, type, description, relatedOrderId });
+  await db.insert(creditLogs).values({ userId, amount, balanceAfter: newBalance, type, description, relatedOrderId, relatedTaskId });
   return { success: true, newBalance };
 }
 

@@ -3,14 +3,15 @@
  * 
  * 核心改进：
  * 1. 结构化统计数据 - 后端直接返回 stats 对象
- * 2. 积分不退还 - 扣除的积分一律不退还
+ * 2. 智能积分退还 - 如果实际结果数少于请求数量，自动退还多扣积分
  * 3. 清晰的日志系统 - 让用户知道系统在做什么
  * 4. 统一的统计口径 - 前后端数据一致
  */
 
 import {
   getUserById, 
-  deductCredits, 
+  deductCredits,
+  addCredits,
   createSearchTask, 
   updateSearchTask, 
   getSearchTask,
@@ -96,7 +97,9 @@ export interface SearchStats {
   excludedError: number;           // 处理错误被排除
   
   // === 积分统计 ===
-  creditsUsed: number;             // 已消耗积分（不退还）
+  creditsUsed: number;             // 已消耗积分
+  creditsRefunded: number;         // 退还积分
+  creditsFinal: number;            // 最终消耗积分 (creditsUsed - creditsRefunded)
   
   // === 性能统计 ===
   totalDuration: number;           // 总耗时（毫秒）
@@ -177,6 +180,8 @@ function createInitialStats(): SearchStats {
     excludedAgeFilter: 0,
     excludedError: 0,
     creditsUsed: 0,
+    creditsRefunded: 0,
+    creditsFinal: 0,
     totalDuration: 0,
     avgProcessTime: 0,
     verifySuccessRate: 0,
@@ -487,19 +492,71 @@ export async function executeSearchV3(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 阶段 4: 打乱顺序并准备处理
+    // 阶段 4: 计算实际数量并一次性扣除数据费用
     // ═══════════════════════════════════════════════════════════════
     currentStep++;
-    const shuffledResults = shuffleArray(apifyResults);
+    const actualCount = Math.min(apifyResults.length, requestedCount);
+    const dataCreditsNeeded = actualCount * PHONE_CREDITS_PER_PERSON;
+    
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
+    addLog(`📊 数据量计算:`, 'info', 'process', '');
+    addLog(`   用户请求: ${requestedCount} 条`, 'info', 'process', '');
+    addLog(`   实际返回: ${apifyResults.length} 条`, 'info', 'process', '');
+    addLog(`   可处理数量: ${actualCount} 条`, 'info', 'process', '');
+    
+    // 检查用户积分是否足够
+    const currentUserForDataFee = await getUserById(userId);
+    if (!currentUserForDataFee || currentUserForDataFee.credits < dataCreditsNeeded) {
+      addLog(`⚠️ 积分不足，无法处理数据`, 'warning', 'complete', '⚠️');
+      addLog(`   需要 ${dataCreditsNeeded} 积分，当前余额 ${currentUserForDataFee?.credits || 0}`, 'info', 'complete', '');
+      progress.status = 'insufficient_credits';
+      await updateProgress('积分不足', 'insufficient_credits', 'complete', 100);
+      return getSearchTask(task.taskId);
+    }
+    
+    // 一次性扣除数据费用
+    addLog(`💳 正在扣除数据费用...`, 'info', 'process', '');
+    const dataDeducted = await deductCredits(
+      userId, 
+      dataCreditsNeeded, 
+      'search', 
+      `数据费用: ${actualCount} 条 × ${PHONE_CREDITS_PER_PERSON} 积分`, 
+      task.taskId
+    );
+    
+    if (!dataDeducted) {
+      addLog(`❌ 扣除数据费用失败`, 'error', 'complete', '❌');
+      throw new Error('扣除数据费用失败');
+    }
+    
+    stats.creditsUsed += dataCreditsNeeded;
+    addLog(`✅ 已扣除数据费用: ${dataCreditsNeeded} 积分 (${actualCount} 条 × ${PHONE_CREDITS_PER_PERSON})`, 'success', 'process', '✅');
+    
+    // 如果实际数量少于请求数量，通知用户节省了积分
+    if (actualCount < requestedCount) {
+      const savedCredits = (requestedCount - actualCount) * PHONE_CREDITS_PER_PERSON;
+      stats.creditsRefunded = savedCredits;  // 记录节省的积分（虽然没有实际退还，但用户少付了）
+      addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
+      addLog(`💰 积分节省通知:`, 'success', 'process', '💰');
+      addLog(`   由于实际数据量 (${actualCount}) 少于请求数量 (${requestedCount})`, 'info', 'process', '');
+      addLog(`   您节省了 ${savedCredits} 积分！`, 'success', 'process', '');
+      addLog(`   (原预估: ${requestedCount * PHONE_CREDITS_PER_PERSON} 积分，实际扣除: ${dataCreditsNeeded} 积分)`, 'info', 'process', '');
+    }
+    
+    addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 阶段 5: 打乱顺序并准备处理
+    // ═══════════════════════════════════════════════════════════════
+    const shuffledResults = shuffleArray(apifyResults);
     addLog(`🔀 已打乱数据顺序，采用随机提取策略`, 'info', 'process', '');
     addLog(`📊 开始逐条处理数据...`, 'info', 'process', '');
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
 
     // ═══════════════════════════════════════════════════════════════
-    // 阶段 5: 逐条处理数据
+    // 阶段 6: 逐条处理数据
     // ═══════════════════════════════════════════════════════════════
-    const toProcess = shuffledResults.slice(0, requestedCount);
+    const toProcess = shuffledResults.slice(0, actualCount);
 
     for (let i = 0; i < toProcess.length; i++) {
       const person = toProcess[i];
@@ -517,27 +574,11 @@ export async function executeSearchV3(
         break;
       }
       
-      // 检查积分
-      const currentUser = await getUserById(userId);
-      if (!currentUser || currentUser.credits < PHONE_CREDITS_PER_PERSON) {
-        addLog(`⚠️ 积分不足，搜索提前结束`, 'warning', 'complete', '⚠️');
-        addLog(`   需要 ${PHONE_CREDITS_PER_PERSON} 积分，当前余额 ${currentUser?.credits || 0}`, 'info', 'complete', '');
-        progress.status = 'insufficient_credits';
-        break;
-      }
-
-      // 扣除积分（不退还）
-      const deducted = await deductCredits(userId, PHONE_CREDITS_PER_PERSON, 'search', `获取数据: ${personName}`, task.taskId);
-      if (!deducted) {
-        addLog(`❌ [${i + 1}/${requestedCount}] ${personName} - 扣除积分失败`, 'error', 'process', '❌');
-        stats.excludedError++;
-        continue;
-      }
-      stats.creditsUsed += PHONE_CREDITS_PER_PERSON;
+      // 注意：积分已在阶段4一次性扣除，此处不再逐条扣费
 
       // 显示处理进度
-      const progressPercent = Math.round(((i + 1) / requestedCount) * 100);
-      addLog(`🔍 [${i + 1}/${requestedCount}] 正在处理: ${personName}`, 'info', 'process', '', i + 1, requestedCount);
+      const progressPercent = Math.round(((i + 1) / actualCount) * 100);
+      addLog(`🔍 [${i + 1}/${actualCount}] 正在处理: ${personName}`, 'info', 'process', '', i + 1, actualCount);
       await updateProgress(`处理 ${personName}`, 'processing', 'process', progressPercent);
 
       // 获取电话号码
@@ -590,11 +631,11 @@ export async function executeSearchV3(
           await saveSearchResult(task.id, person.id, resultData, false, 0, null);
           stats.totalResults++;
           stats.resultsWithEmail++;
-          addLog(`📧 [${i + 1}/${requestedCount}] ${personName} - 无电话，已保存邮箱`, 'info', 'process', '', i + 1, requestedCount);
+          addLog(`📧 [${i + 1}/${actualCount}] ${personName} - 无电话，已保存邮箱`, 'info', 'process', '', i + 1, actualCount);
         } else {
           // 无任何联系方式
           stats.excludedNoContact++;
-          addLog(`📵 [${i + 1}/${requestedCount}] ${personName} - 无联系方式，已跳过`, 'warning', 'process', '', i + 1, requestedCount);
+          addLog(`📵 [${i + 1}/${actualCount}] ${personName} - 无联系方式，已跳过`, 'warning', 'process', '', i + 1, actualCount);
         }
         continue;
       }
@@ -673,7 +714,7 @@ export async function executeSearchV3(
       await setCache(personCacheKey, 'person', resultData, 180);
 
       // 添加分隔线（每5条）
-      if ((i + 1) % 5 === 0 && (i + 1) < requestedCount) {
+      if ((i + 1) % 5 === 0 && (i + 1) < actualCount) {
         addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
       }
 
@@ -681,7 +722,7 @@ export async function executeSearchV3(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 阶段 6: 完成统计
+    // 阶段 7: 完成统计
     // ═══════════════════════════════════════════════════════════════
     stats.totalDuration = Date.now() - startTime;
     if (stats.recordsProcessed > 0) {
@@ -723,7 +764,12 @@ export async function executeSearchV3(
     }
     
     addLog('───────────────────────────────────────────────────────────', 'info', 'complete', '');
-    addLog(`💰 积分消耗: ${stats.creditsUsed} (不退还)`, 'info', 'complete', '');
+    // 计算最终积分消耗
+    stats.creditsFinal = stats.creditsUsed - stats.creditsRefunded;
+    addLog(`💰 积分消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
+    if (stats.creditsRefunded > 0) {
+      addLog(`💰 积分节省: ${stats.creditsRefunded} 积分 (因实际数据量少于请求量)`, 'success', 'complete', '');  
+    }
     addLog(`⏱️ 总耗时: ${formatDuration(stats.totalDuration)}`, 'info', 'complete', '');
     if (stats.resultsWithPhone > 0) {
       addLog(`📈 验证成功率: ${stats.verifySuccessRate}%`, 'info', 'complete', '');
