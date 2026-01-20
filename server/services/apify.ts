@@ -416,18 +416,22 @@ export async function searchPeople(
     
     const duration = Date.now() - startTime;
     
-    // 记录 API 日志
-    await logApi(
-      'apify_search',
-      '/actor/code_crafter/leads-finder',
-      actorInput,
-      200,
-      duration,
-      true,
-      undefined,
-      0,
-      userId
-    );
+    // 记录 API 日志（使用 try-catch 避免日志记录失败影响主流程）
+    try {
+      await logApi(
+        'apify_search',
+        '/actor/code_crafter/leads-finder',
+        actorInput,
+        200,
+        duration,
+        true,
+        undefined,
+        0,
+        userId
+      );
+    } catch (logError) {
+      console.error(`[Apify] Failed to log API success:`, logError);
+    }
     
     console.log(`[Apify] Search completed: ${people.length} people found in ${duration}ms`);
     
@@ -444,18 +448,25 @@ export async function searchPeople(
     
     console.error(`[Apify] Search error:`, error);
     
-    // 记录错误日志
-    await logApi(
-      'apify_search',
-      '/actor/code_crafter/leads-finder',
-      { searchName, searchTitle, searchState, limit },
-      500,
-      duration,
-      false,
-      error.message,
-      0,
-      userId
-    );
+    // 截断错误信息，避免数据库插入失败
+    const truncatedErrorMessage = error.message ? error.message.substring(0, 500) : 'Unknown error';
+    
+    // 记录错误日志（使用 try-catch 避免日志记录失败影响主流程）
+    try {
+      await logApi(
+        'apify_search',
+        '/actor/code_crafter/leads-finder',
+        { searchName, searchTitle, searchState, limit },
+        500,
+        duration,
+        false,
+        truncatedErrorMessage,
+        0,
+        userId
+      );
+    } catch (logError) {
+      console.error(`[Apify] Failed to log API error:`, logError);
+    }
     
     return {
       success: false,
