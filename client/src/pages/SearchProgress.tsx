@@ -250,7 +250,7 @@ export default function SearchProgress() {
     }
   }, [task?.status, logs]);
 
-  // 从日志中提取统计信息
+  // 从搜索结果和日志中提取统计信息
   const stats = useMemo(() => {
     const result = {
       apifyCalls: 0,
@@ -265,21 +265,42 @@ export default function SearchProgress() {
       scrapeDoFailed: 0,
     };
     
+    // 从日志中提取部分统计信息
     logs.forEach(log => {
       if (log.message.includes('数据获取') || log.message.includes('获取数据')) result.apifyCalls++;
-      if (log.message.includes('找到电话') || log.message.includes('获取到电话')) result.phonesFound++;
-      if (log.message.includes('验证通过') || log.message.includes('验证成功') || log.message.includes('verification passed')) result.phonesVerified++;
-      if (log.message.includes('验证失败')) result.verifyFailed++;
-      if (log.message.includes('未找到电话') || log.message.includes('无电话')) result.excludedNoPhone++;
-      if (log.message.includes('年龄') && log.message.includes('不在')) result.excludedAgeFilter++;
       if (log.message.includes('缓存命中') || log.message.includes('缓存')) result.cacheHits++;
-      if (log.message.includes('二次验证') && log.message.includes('通过') || log.message.includes('verification passed')) result.scrapeDoVerified++;
-      if (log.message.includes('二次验证') && log.message.includes('失败')) result.scrapeDoFailed++;
       if (log.step) result.processedCount = Math.max(result.processedCount, log.step);
     });
     
+    // 从搜索结果中直接统计验证状态（更准确）
+    if (results && Array.isArray(results)) {
+      results.forEach((r: any) => {
+        const d = r.data as ResultData;
+        if (d) {
+          // 统计有电话的记录
+          if (d.phoneNumber || d.phone) {
+            result.phonesFound++;
+          }
+          // 统计已验证的记录
+          if (d.phoneStatus === 'verified') {
+            result.phonesVerified++;
+            result.scrapeDoVerified++;
+          }
+          // 统计验证失败的记录（有电话但未验证通过）
+          if ((d.phoneNumber || d.phone) && d.phoneStatus === 'received') {
+            result.verifyFailed++;
+            result.scrapeDoFailed++;
+          }
+          // 统计无电话的记录
+          if (d.phoneStatus === 'no_phone' || (!d.phoneNumber && !d.phone)) {
+            result.excludedNoPhone++;
+          }
+        }
+      });
+    }
+    
     return result;
-  }, [logs]);
+  }, [logs, results]);
 
   // 验证成功率
   const verifySuccessRate = stats.phonesFound > 0 
