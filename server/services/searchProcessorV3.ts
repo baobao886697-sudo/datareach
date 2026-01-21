@@ -133,17 +133,40 @@ export interface SearchProgress {
   lastUpdateTime: number;
 }
 
+/**
+ * 缓存数据结构
+ * 存储搜索结果和元数据，用于精确的缓存命中判断
+ */
+export interface SearchCacheData {
+  data: LeadPerson[];           // 实际数据
+  totalAvailable: number;       // Apify 返回的总量（数据库中符合条件的估计值）
+  requestedCount: number;       // 用户请求的数量
+  searchParams: {               // 搜索参数（用于验证）
+    name: string;
+    title: string;
+    state: string;
+    limit: number;
+  };
+  createdAt: string;            // 缓存创建时间
+}
+
 // ============ 常量定义 ============
 
 const SEARCH_CREDITS = 1;           // 搜索基础费用
 const PHONE_CREDITS_PER_PERSON = 2; // 每条数据费用
 const VERIFY_CREDITS_PER_PHONE = 0; // 验证费用（目前免费）
 const CONCURRENT_VERIFY_LIMIT = 5;  // 并发验证数量（可根据 Scrape.do 账户限制调整）
+const CACHE_FULFILLMENT_THRESHOLD = 0.8; // 缓存数据充足率阈值（80%）
 
 // ============ 工具函数 ============
 
-function generateSearchHash(name: string, title: string, state: string): string {
-  const normalized = `${name.toLowerCase().trim()}|${title.toLowerCase().trim()}|${state.toLowerCase().trim()}`;
+/**
+ * 生成搜索哈希（精确一对一匹配）
+ * 缓存键 = name + title + state + limit 的精确组合
+ * 每个搜索组合完全独立，不会交叉命中
+ */
+function generateSearchHash(name: string, title: string, state: string, limit: number): string {
+  const normalized = `${name.toLowerCase().trim()}|${title.toLowerCase().trim()}|${state.toLowerCase().trim()}|${limit}`;
   return crypto.createHash('md5').update(normalized).digest('hex');
 }
 
@@ -260,20 +283,51 @@ export async function previewSearch(
     };
   }
 
-  // 检查缓存
-  const searchHash = generateSearchHash(searchName, searchTitle, searchState);
+  // 检查缓存（包含搜索数量）
+  const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);
   const cacheKey = `apify:${searchHash}`;
   const cached = await getCacheByKey(cacheKey);
   
   let totalAvailable = 0;
   let cacheHit = false;
+  let cacheMessage = '';
 
   if (cached) {
-    cacheHit = true;
-    const cachedData = cached.data as LeadPerson[];
-    totalAvailable = cachedData.length;
+    // 解析缓存数据（支持新旧格式）
+    let cachedSearchData: SearchCacheData;
+    
+    // 检查是否是新格式的缓存数据
+    if (cached.data && typeof cached.data === 'object' && 'totalAvailable' in cached.data) {
+      cachedSearchData = cached.data as SearchCacheData;
+    } else {
+      // 旧格式缓存，转换为新格式
+      const oldData = cached.data as LeadPerson[];
+      cachedSearchData = {
+        data: oldData,
+        totalAvailable: oldData.length,
+        requestedCount: requestedCount,
+        searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount },
+        createdAt: new Date().toISOString()
+      };
+    }
+    
+    // 计算缓存数据充足率（缓存数据量 / Apify 数据库总量）
+    const fulfillmentRate = cachedSearchData.data.length / cachedSearchData.totalAvailable;
+    
+    if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
+      // 缓存数据充足（>= 80%），可以使用
+      cacheHit = true;
+      totalAvailable = Math.min(cachedSearchData.data.length, requestedCount);
+      cacheMessage = `✨ 命中缓存！找到 ${cachedSearchData.data.length} 条记录（充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%）`;
+    } else {
+      // 缓存数据不足（< 80%），需要重新获取
+      cacheHit = false;
+      totalAvailable = requestedCount;
+      cacheMessage = `🔍 缓存数据不足（${cachedSearchData.data.length}/${cachedSearchData.totalAvailable}，${Math.round(fulfillmentRate * 100)}% < 80%），将重新获取`;
+    }
   } else {
     totalAvailable = requestedCount;
+    cacheMessage = `🔍 无缓存，预估可获取 ${totalAvailable} 条记录`;
   }
 
   const actualCount = Math.min(requestedCount, totalAvailable);
@@ -292,9 +346,7 @@ export async function previewSearch(
     maxAffordable,
     searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax },
     cacheHit,
-    message: cacheHit 
-      ? `✨ 命中缓存！找到 ${totalAvailable} 条记录` 
-      : `🔍 预估可获取 ${totalAvailable} 条记录`
+    message: cacheMessage
   };
 }
 
@@ -353,8 +405,8 @@ export async function executeSearchV3(
     throw new Error(`积分不足，搜索需要至少 ${SEARCH_CREDITS} 积分，当前余额 ${user.credits}`);
   }
 
-  // 创建搜索任务
-  const searchHash = generateSearchHash(searchName, searchTitle, searchState);
+  // 创建搜索任务（缓存键包含搜索数量，精确一对一匹配）
+  const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);
   const params = { 
     name: searchName, 
     title: searchTitle, 
@@ -495,11 +547,85 @@ export async function executeSearchV3(
     let apifyResults: LeadPerson[] = [];
     
     if (cached) {
-      addLog(`✨ 命中全局缓存！`, 'success', 'apify', '✨');
-      apifyResults = cached.data as LeadPerson[];
-      stats.apifyReturned = apifyResults.length;
-      addLog(`📦 缓存中有 ${apifyResults.length} 条记录可用`, 'info', 'apify', '');
-      addLog(`⏭️ 跳过 Apify API 调用，节省时间和成本`, 'info', 'apify', '');
+      // 解析缓存数据（支持新旧格式）
+      let cachedSearchData: SearchCacheData;
+      
+      // 检查是否是新格式的缓存数据
+      if (cached.data && typeof cached.data === 'object' && 'totalAvailable' in cached.data) {
+        cachedSearchData = cached.data as SearchCacheData;
+      } else {
+        // 旧格式缓存，转换为新格式
+        const oldData = cached.data as LeadPerson[];
+        cachedSearchData = {
+          data: oldData,
+          totalAvailable: oldData.length,
+          requestedCount: requestedCount,
+          searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount },
+          createdAt: new Date().toISOString()
+        };
+      }
+      
+      // 计算缓存数据充足率
+      const fulfillmentRate = cachedSearchData.data.length / cachedSearchData.totalAvailable;
+      
+      addLog(`📊 检查缓存: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
+      addLog(`   缓存数据量: ${cachedSearchData.data.length} 条`, 'info', 'apify', '');
+      addLog(`   Apify 数据库估计: ${cachedSearchData.totalAvailable} 条`, 'info', 'apify', '');
+      addLog(`   数据充足率: ${Math.round(fulfillmentRate * 100)}%`, 'info', 'apify', '');
+      
+      if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
+        // 缓存数据充足（>= 80%），使用缓存并随机提取
+        addLog(`✨ 缓存命中！数据充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%`, 'success', 'apify', '✨');
+        
+        // 随机打乱缓存数据并提取用户请求的数量
+        const shuffledCache = shuffleArray([...cachedSearchData.data]);
+        apifyResults = shuffledCache.slice(0, Math.min(requestedCount, shuffledCache.length));
+        stats.apifyReturned = apifyResults.length;
+        
+        addLog(`🎲 已随机提取 ${apifyResults.length} 条记录`, 'info', 'apify', '');
+        addLog(`⏭️ 跳过 Apify API 调用，节省时间和成本`, 'info', 'apify', '');
+      } else {
+        // 缓存数据不足（< 80%），需要重新调用 Apify API
+        addLog(`⚠️ 缓存数据不足！充足率 ${Math.round(fulfillmentRate * 100)}% < 80%`, 'warning', 'apify', '⚠️');
+        addLog(`🔄 需要重新调用 Apify API 获取最新数据...`, 'info', 'apify', '');
+        
+        // 调用 Apify API
+        stats.apifyApiCalls++;
+        addLog(`🔍 正在调用 Apify Leads Finder...`, 'info', 'apify', '');
+        addLog(`⏳ Apify Actor 运行中，请耐心等待...`, 'info', 'apify', '');
+        addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
+        await updateProgress('调用 Apify API', 'searching', 'apify', 30);
+        
+        const apiStartTime = Date.now();
+        const searchResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount * 2, userId);
+        const apiDuration = Date.now() - apiStartTime;
+
+        if (!searchResult.success || !searchResult.people) {
+          throw new Error(searchResult.errorMessage || 'Apify 搜索失败');
+        }
+
+        apifyResults = searchResult.people;
+        stats.apifyReturned = apifyResults.length;
+        addLog(`✅ Apify 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
+        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
+
+        // 更新缓存（使用新的缓存数据结构）
+        const newCacheData: SearchCacheData = {
+          data: apifyResults,
+          totalAvailable: apifyResults.length,
+          requestedCount: requestedCount,
+          searchParams: {
+            name: searchName,
+            title: searchTitle,
+            state: searchState,
+            limit: requestedCount
+          },
+          createdAt: new Date().toISOString()
+        };
+        await setCache(cacheKey, 'search', newCacheData, 180);
+        addLog(`💾 已更新缓存 (180天有效)`, 'info', 'apify', '');
+        addLog(`   缓存键: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
+      }
     } else {
       stats.apifyApiCalls++;
       addLog(`🔍 正在调用 Apify Leads Finder...`, 'info', 'apify', '');
@@ -520,9 +646,22 @@ export async function executeSearchV3(
       addLog(`✅ Apify 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
       addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
 
-      // 缓存搜索结果 180天
-      await setCache(cacheKey, 'search', apifyResults, 180);
+      // 缓存搜索结果 180天（使用新的缓存数据结构）
+      const cacheData: SearchCacheData = {
+        data: apifyResults,
+        totalAvailable: apifyResults.length,  // Apify 返回的总量作为数据库估计值
+        requestedCount: requestedCount,
+        searchParams: {
+          name: searchName,
+          title: searchTitle,
+          state: searchState,
+          limit: requestedCount
+        },
+        createdAt: new Date().toISOString()
+      };
+      await setCache(cacheKey, 'search', cacheData, 180);
       addLog(`💾 已缓存搜索结果 (180天有效)`, 'info', 'apify', '');
+      addLog(`   缓存键: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
     }
 
     await updateProgress('处理搜索结果', undefined, 'apify', 50);
