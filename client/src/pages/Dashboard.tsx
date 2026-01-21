@@ -19,6 +19,11 @@ export default function Dashboard() {
   const { data: profile, isLoading: profileLoading } = trpc.user.profile.useQuery(undefined, {
     enabled: !!user,
   });
+  
+  // 获取充值配置（积分价格等）
+  const { data: rechargeConfig } = trpc.recharge.config.useQuery();
+  // 积分兑换比例（默认 1 USDT = 100 积分）
+  const creditsPerUsdt = rechargeConfig?.creditsPerUsdt || 100;
   const { data: tasksData, isLoading: tasksLoading } = trpc.search.tasks.useQuery(
     { limit: 5 },
     { enabled: !!user }
@@ -91,7 +96,7 @@ export default function Dashboard() {
                   {profile?.credits?.toLocaleString() || 0}
                 </div>
                 <p className="text-xs text-slate-500">
-                  1 USDT = 100 积分
+                  1 USDT = {creditsPerUsdt} 积分
                 </p>
               </>
             )}

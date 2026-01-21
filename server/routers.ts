@@ -629,8 +629,12 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // 1 USDT = 100 积分
-        const baseAmount = input.credits / 100;
+        // 从数据库获取积分兑换比例配置（默认 1 USDT = 100 积分）
+        const creditsPerUsdtStr = await getConfig('CREDITS_PER_USDT');
+        const creditsPerUsdt = creditsPerUsdtStr ? parseInt(creditsPerUsdtStr, 10) : 100;
+        
+        // 计算需要支付的 USDT 金额
+        const baseAmount = input.credits / creditsPerUsdt;
 
         // 获取收款地址
         const walletAddress = await getConfig(`USDT_WALLET_${input.network || "TRC20"}`);
@@ -677,6 +681,20 @@ export const appRouter = router({
         }
         return order;
       }),
+
+    // 获取充值配置（公开接口，用于前端显示积分价格）
+    config: publicProcedure.query(async () => {
+      // 从数据库获取充值相关配置
+      const creditsPerUsdtStr = await getConfig('CREDITS_PER_USDT');
+      const minRechargeCreditsStr = await getConfig('MIN_RECHARGE_CREDITS');
+      
+      return {
+        // 1 USDT 兑换的积分数（默认 100）
+        creditsPerUsdt: creditsPerUsdtStr ? parseInt(creditsPerUsdtStr, 10) : 100,
+        // 最低充值积分数（默认 100）
+        minRechargeCredits: minRechargeCreditsStr ? parseInt(minRechargeCreditsStr, 10) : 100,
+      };
+    }),
 
     // 获取充值记录
     history: protectedProcedure

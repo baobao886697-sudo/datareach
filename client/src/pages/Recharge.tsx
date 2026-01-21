@@ -75,6 +75,16 @@ export default function Recharge() {
     enabled: !!user,
     refetchOnWindowFocus: false,
   });
+
+  // 获取充值配置（积分价格等）
+  const { data: rechargeConfig } = trpc.recharge.config.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+  
+  // 积分兑换比例（默认 1 USDT = 100 积分）
+  const creditsPerUsdt = rechargeConfig?.creditsPerUsdt || 100;
+  // 最低充值积分数
+  const minRechargeCredits = rechargeConfig?.minRechargeCredits || 100;
   
   const { data: ordersData, isLoading: ordersLoading, refetch: refetchOrders } = trpc.recharge.history.useQuery(
     { limit: 10 },
@@ -122,11 +132,13 @@ export default function Recharge() {
 
   const countdown = useCountdown(orderDetail?.expiresAt ? new Date(orderDetail.expiresAt) : null);
 
-  const usdtAmount = credits / 100;
+  // 根据配置计算 USDT 金额
+  const usdtAmount = credits / creditsPerUsdt;
 
   const handleCreateOrder = useCallback(async () => {
-    if (credits < 100) {
-      toast.error("最低充值100积分");
+    // 使用动态配置的最低充值积分数
+    if (credits < minRechargeCredits) {
+      toast.error(`最低充值${minRechargeCredits}积分`);
       return;
     }
     
@@ -225,7 +237,7 @@ export default function Recharge() {
             积分充值
           </h1>
           <p className="text-slate-400 mt-2">
-            使用USDT充值积分，1 USDT = 100 积分
+            使用USDT充值积分，1 USDT = {creditsPerUsdt} 积分
           </p>
         </div>
 
@@ -267,8 +279,8 @@ export default function Recharge() {
                 <Input
                   type="number"
                   value={credits}
-                  onChange={(e) => setCredits(Math.max(100, parseInt(e.target.value) || 100))}
-                  min={100}
+                  onChange={(e) => setCredits(Math.max(minRechargeCredits, parseInt(e.target.value) || minRechargeCredits))}
+                  min={minRechargeCredits}
                   step={100}
                   className="bg-slate-800/50 border-slate-700 text-white h-12"
                 />
@@ -282,7 +294,7 @@ export default function Recharge() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">兑换比例</span>
-                  <span className="text-white">1 USDT = 100 积分</span>
+                  <span className="text-white">1 USDT = {creditsPerUsdt} 积分</span>
                 </div>
                 <div className="border-t border-slate-700 pt-3 flex justify-between">
                   <span className="text-slate-400">应付金额</span>
@@ -294,7 +306,7 @@ export default function Recharge() {
               {/* 创建订单按钮 */}
               <Button
                 onClick={handleCreateOrder}
-                disabled={createOrderMutation.isPending || credits < 100}
+                disabled={createOrderMutation.isPending || credits < minRechargeCredits}
                 className="w-full h-14 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-black font-bold text-lg"
               >
                 {createOrderMutation.isPending ? (
