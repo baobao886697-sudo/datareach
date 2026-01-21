@@ -3,11 +3,11 @@ import { getConfig, logApi } from '../db';
 
 const SCRAPE_DO_BASE = 'https://api.scrape.do';
 
-// Scrape.do 极致速度配置
+// Scrape.do 优化配置
 const SCRAPE_DO_CONFIG = {
-  timeout: 15000,       // Scrape.do 请求超时 15 秒（极速模式）
+  timeout: 15000,       // Scrape.do 请求超时 15 秒
   noRetry: true,        // 禁用 Scrape.do 内置重试，失败立即返回
-  render: false,        // 关闭无头浏览器渲染，提升速度
+  render: true,         // 启用无头浏览器渲染，确保获取完整页面内容
 };
 
 // 代码层重试配置（禁用，依赖 Scrape.do 内置重试）
