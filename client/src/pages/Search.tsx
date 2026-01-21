@@ -15,7 +15,7 @@ import {
   Search as SearchIcon, Loader2, AlertCircle, Info, Zap, Target, MapPin, 
   Briefcase, User, Sparkles, Users, Calendar, ChevronRight, Coins,
   CheckCircle2, AlertTriangle, Eye, Database, Shield, TrendingUp,
-  ArrowRight, RefreshCw, Rocket
+  ArrowRight, RefreshCw, Rocket, ArrowLeft, Clock, History
 } from "lucide-react";
 
 const US_STATES = [
@@ -236,8 +236,45 @@ export default function Search() {
     <DashboardLayout>
       {/* 全屏加载遮罩 */}
       {isSearching && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-sm">
-          <div className="max-w-md w-full mx-4 text-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-sm overflow-hidden">
+          {/* 动态背景效果 */}
+          <div className="absolute inset-0 pointer-events-none">
+            {/* 渐变光晕 */}
+            <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[120px] animate-pulse" />
+            <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }} />
+            
+            {/* 浮动粒子 */}
+            <div className="absolute top-1/4 left-1/4 w-2 h-2 bg-cyan-400/40 rounded-full animate-float-slow" />
+            <div className="absolute top-1/3 right-1/4 w-3 h-3 bg-blue-400/30 rounded-full animate-float-medium" />
+            <div className="absolute bottom-1/4 left-1/3 w-2 h-2 bg-purple-400/35 rounded-full animate-float-fast" />
+            <div className="absolute top-1/2 right-1/3 w-1.5 h-1.5 bg-cyan-300/40 rounded-full animate-float-slow" style={{ animationDelay: '1s' }} />
+            <div className="absolute bottom-1/3 right-1/4 w-2.5 h-2.5 bg-blue-300/30 rounded-full animate-float-medium" style={{ animationDelay: '0.5s' }} />
+            <div className="absolute top-2/3 left-1/4 w-1.5 h-1.5 bg-purple-300/35 rounded-full animate-float-fast" style={{ animationDelay: '1.5s' }} />
+            <div className="absolute top-1/5 left-1/2 w-2 h-2 bg-cyan-400/30 rounded-full animate-float-medium" style={{ animationDelay: '0.8s' }} />
+            <div className="absolute bottom-1/5 right-1/2 w-2.5 h-2.5 bg-purple-400/25 rounded-full animate-float-slow" style={{ animationDelay: '1.2s' }} />
+            
+            {/* 连接线效果 */}
+            <svg className="absolute inset-0 w-full h-full opacity-20">
+              <defs>
+                <linearGradient id="loading-line-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#06b6d4" />
+                  <stop offset="100%" stopColor="#8b5cf6" />
+                </linearGradient>
+              </defs>
+              <line x1="15%" y1="25%" x2="35%" y2="45%" stroke="url(#loading-line-gradient)" strokeWidth="1" className="animate-pulse" />
+              <line x1="65%" y1="15%" x2="85%" y2="35%" stroke="url(#loading-line-gradient)" strokeWidth="1" className="animate-pulse" style={{ animationDelay: '0.5s' }} />
+              <line x1="25%" y1="55%" x2="45%" y2="75%" stroke="url(#loading-line-gradient)" strokeWidth="1" className="animate-pulse" style={{ animationDelay: '1s' }} />
+              <line x1="75%" y1="55%" x2="90%" y2="75%" stroke="url(#loading-line-gradient)" strokeWidth="1" className="animate-pulse" style={{ animationDelay: '1.5s' }} />
+            </svg>
+            
+            {/* 脉冲光环 */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+              <div className="w-[500px] h-[500px] rounded-full border border-cyan-500/10 animate-ping-slow" />
+              <div className="absolute inset-0 w-[500px] h-[500px] rounded-full border border-purple-500/10 animate-ping-slow" style={{ animationDelay: '1.5s' }} />
+            </div>
+          </div>
+          
+          <div className="max-w-md w-full mx-4 text-center relative z-10">
             {/* 动画图标 */}
             <div className="relative mb-8">
               <div className="w-24 h-24 mx-auto relative">
@@ -257,12 +294,22 @@ export default function Search() {
             <h2 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'Orbitron, sans-serif' }}>
               {loadingMessage}
             </h2>
-            <p className="text-slate-400 mb-6">
-              请稍候，这可能需要几秒钟
+            
+            {/* 二次验证提示 */}
+            <p className="text-yellow-400 text-sm mb-2">
+              正在进行二次验证，请耐心等待
             </p>
+            
+            {/* 预估时间 */}
+            <div className="flex items-center justify-center gap-2 text-slate-400 mb-4">
+              <Clock className="w-4 h-4" />
+              <span>
+                预计需要约 {searchLimit >= 60 ? `${Math.ceil(searchLimit * 0.8 / 60)} 分 ${Math.round((searchLimit * 0.8) % 60)} 秒` : `${Math.round(searchLimit * 0.8)} 秒`}
+              </span>
+            </div>
 
             {/* 进度条 */}
-            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-6">
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-4">
               <div 
                 className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300 ease-out"
                 style={{ width: `${loadingProgress}%` }}
@@ -270,7 +317,7 @@ export default function Search() {
             </div>
 
             {/* 搜索条件摘要 */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 text-left">
+            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 text-left mb-4">
               <h3 className="text-sm text-slate-400 mb-3 flex items-center gap-2">
                 <SearchIcon className="w-4 h-4" />
                 搜索条件
@@ -302,9 +349,21 @@ export default function Search() {
             </div>
 
             {/* 提示信息 */}
-            <p className="text-xs text-slate-500 mt-4">
-              搜索开始后，您可以在进度页面实时查看处理状态
+            <p className="text-xs text-slate-500 mb-4">
+              💡 提示：您可以点击返回查看其他任务，搜索会在后台继续进行
             </p>
+            
+            {/* 返回按钮 */}
+            <button
+              onClick={() => {
+                setIsSearching(false);
+                setLocation('/history');
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all"
+            >
+              <History className="w-4 h-4" />
+              返回搜索历史
+            </button>
           </div>
         </div>
       )}
