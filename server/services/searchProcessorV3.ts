@@ -83,7 +83,7 @@ export interface SearchStats {
   verifyApiCalls: number;          // 验证 API 调用次数
   
   // === 数据统计 ===
-  apifyReturned: number;           // Apify 返回的原始记录数
+  apifyReturned: number;           // LinkedIn 返回的原始记录数
   recordsProcessed: number;        // 实际处理的记录数
   
   // === 结果统计（最终保存的） ===
@@ -139,7 +139,7 @@ export interface SearchProgress {
  */
 export interface SearchCacheData {
   data: LeadPerson[];           // 实际数据
-  totalAvailable: number;       // Apify 返回的总量（数据库中符合条件的估计值）
+  totalAvailable: number;       // LinkedIn 返回的总量（数据库中符合条件的估计值）
   requestedCount: number;       // 用户请求的数量
   searchParams: {               // 搜索参数（用于验证）
     name: string;
@@ -537,7 +537,7 @@ export async function executeSearchV3(
     await updateProgress('扣除搜索积分', undefined, undefined, 20);
 
     // ═══════════════════════════════════════════════════════════════
-    // 阶段 3: 检查缓存 / 调用 Apify API
+    // 阶段 3: 检查缓存 / 调用 LinkedIn API
     // ═══════════════════════════════════════════════════════════════
     currentStep++;
     addLog('───────────────────────────────────────────────────────────', 'info', 'apify', '');
@@ -570,7 +570,7 @@ export async function executeSearchV3(
       
       addLog(`📊 检查缓存: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
       addLog(`   缓存数据量: ${cachedSearchData.data.length} 条`, 'info', 'apify', '');
-      addLog(`   Apify 数据库估计: ${cachedSearchData.totalAvailable} 条`, 'info', 'apify', '');
+      addLog(`   LinkedIn 数据库估计: ${cachedSearchData.totalAvailable} 条`, 'info', 'apify', '');
       addLog(`   数据充足率: ${Math.round(fulfillmentRate * 100)}%`, 'info', 'apify', '');
       
       if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
@@ -583,30 +583,30 @@ export async function executeSearchV3(
         stats.apifyReturned = apifyResults.length;
         
         addLog(`🎲 已随机提取 ${apifyResults.length} 条记录`, 'info', 'apify', '');
-        addLog(`⏭️ 跳过 Apify API 调用，节省时间和成本`, 'info', 'apify', '');
+        addLog(`⏭️ 跳过 LinkedIn API 调用，节省时间和成本`, 'info', 'apify', '');
       } else {
-        // 缓存数据不足（< 80%），需要重新调用 Apify API
+        // 缓存数据不足（< 80%），需要重新调用 LinkedIn API
         addLog(`⚠️ 缓存数据不足！充足率 ${Math.round(fulfillmentRate * 100)}% < 80%`, 'warning', 'apify', '⚠️');
-        addLog(`🔄 需要重新调用 Apify API 获取最新数据...`, 'info', 'apify', '');
+        addLog(`🔄 需要重新调用 LinkedIn API 获取最新数据...`, 'info', 'apify', '');
         
-        // 调用 Apify API
+        // 调用 LinkedIn API
         stats.apifyApiCalls++;
-        addLog(`🔍 正在调用 Apify Leads Finder...`, 'info', 'apify', '');
-        addLog(`⏳ Apify Actor 运行中，请耐心等待...`, 'info', 'apify', '');
+        addLog(`🔍 正在调用 LinkedIn Leads Finder...`, 'info', 'apify', '');
+        addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'apify', '');
         addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
-        await updateProgress('调用 Apify API', 'searching', 'apify', 30);
+        await updateProgress('调用 LinkedIn API', 'searching', 'apify', 30);
         
         const apiStartTime = Date.now();
         const searchResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
         const apiDuration = Date.now() - apiStartTime;
 
         if (!searchResult.success || !searchResult.people) {
-          throw new Error(searchResult.errorMessage || 'Apify 搜索失败');
+          throw new Error(searchResult.errorMessage || 'LinkedIn 搜索失败');
         }
 
         apifyResults = searchResult.people;
         stats.apifyReturned = apifyResults.length;
-        addLog(`✅ Apify 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
+        addLog(`✅ LinkedIn 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
         addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
 
         // 更新缓存（使用新的缓存数据结构）
@@ -628,28 +628,28 @@ export async function executeSearchV3(
       }
     } else {
       stats.apifyApiCalls++;
-      addLog(`🔍 正在调用 Apify Leads Finder...`, 'info', 'apify', '');
-      addLog(`⏳ Apify Actor 运行中，请耐心等待...`, 'info', 'apify', '');
+      addLog(`🔍 正在调用 LinkedIn Leads Finder...`, 'info', 'apify', '');
+      addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'apify', '');
       addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
-      await updateProgress('调用 Apify API', 'searching', 'apify', 30);
+      await updateProgress('调用 LinkedIn API', 'searching', 'apify', 30);
       
       const apiStartTime = Date.now();
       const searchResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
       const apiDuration = Date.now() - apiStartTime;
 
       if (!searchResult.success || !searchResult.people) {
-        throw new Error(searchResult.errorMessage || 'Apify 搜索失败');
+        throw new Error(searchResult.errorMessage || 'LinkedIn 搜索失败');
       }
 
       apifyResults = searchResult.people;
       stats.apifyReturned = apifyResults.length;
-      addLog(`✅ Apify 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
+      addLog(`✅ LinkedIn 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
       addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
 
       // 缓存搜索结果 180天（使用新的缓存数据结构）
       const cacheData: SearchCacheData = {
         data: apifyResults,
-        totalAvailable: apifyResults.length,  // Apify 返回的总量作为数据库估计值
+        totalAvailable: apifyResults.length,  // LinkedIn 返回的总量作为数据库估计值
         requestedCount: requestedCount,
         searchParams: {
           name: searchName,
@@ -1050,7 +1050,7 @@ export async function executeSearchV3(
     
     addLog('───────────────────────────────────────────────────────────', 'info', 'complete', '');
     addLog(`📊 搜索结果统计:`, 'info', 'complete', '');
-    addLog(`   Apify 返回: ${stats.apifyReturned} 条`, 'info', 'complete', '');
+    addLog(`   LinkedIn 返回: ${stats.apifyReturned} 条`, 'info', 'complete', '');
     addLog(`   处理记录: ${stats.recordsProcessed} 条`, 'info', 'complete', '');
     addLog(`   有效结果: ${stats.totalResults} 条`, 'info', 'complete', '');
     addLog(`   ├─ 有电话: ${stats.resultsWithPhone} 条`, 'info', 'complete', '');
