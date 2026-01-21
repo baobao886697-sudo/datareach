@@ -3,11 +3,11 @@ import { getConfig, logApi } from '../db';
 
 const SCRAPE_DO_BASE = 'https://api.scrape.do';
 
-// Scrape.do 优化配置
+// Scrape.do 极致速度配置
 const SCRAPE_DO_CONFIG = {
-  timeout: 30000,       // Scrape.do 请求超时 30 秒（默认 60 秒太长）
-  retryTimeout: 10000,  // Scrape.do 重试超时 10 秒（默认 15 秒）
-  // 注意：Scrape.do 内置自动重试机制，会用不同 IP 重试 502/503 错误
+  timeout: 15000,       // Scrape.do 请求超时 15 秒（极速模式）
+  noRetry: true,        // 禁用 Scrape.do 内置重试，失败立即返回
+  render: false,        // 关闭无头浏览器渲染，提升速度
 };
 
 // 代码层重试配置（禁用，依赖 Scrape.do 内置重试）
@@ -182,9 +182,11 @@ export async function verifyWithTruePeopleSearch(person: PersonToVerify, userId?
           url: targetUrl, 
           super: true,                              // 使用住宅/移动代理
           geoCode: 'us',                            // 美国地区
-          render: true,                             // 启用无头浏览器渲染
+          render: SCRAPE_DO_CONFIG.render,          // 关闭渲染提升速度
+          timeout: SCRAPE_DO_CONFIG.timeout,        // 15秒超时
+          noRetry: SCRAPE_DO_CONFIG.noRetry,        // 禁用重试
         },
-        timeout: 45000,  // axios 超时 45 秒
+        timeout: 20000,  // axios 超时 20 秒
       });
 
       const responseTime = Date.now() - startTime;
@@ -259,9 +261,11 @@ export async function verifyWithFastPeopleSearch(person: PersonToVerify, userId?
           url: targetUrl, 
           super: true,                              // 使用住宅/移动代理
           geoCode: 'us',                            // 美国地区
-          render: true,                             // 启用无头浏览器渲染
+          render: SCRAPE_DO_CONFIG.render,          // 关闭渲染提升速度
+          timeout: SCRAPE_DO_CONFIG.timeout,        // 15秒超时
+          noRetry: SCRAPE_DO_CONFIG.noRetry,        // 禁用重试
         },
-        timeout: 45000,  // axios 超时 45 秒
+        timeout: 20000,  // axios 超时 20 秒
       });
 
       const responseTime = Date.now() - startTime;
@@ -307,19 +311,16 @@ export async function verifyWithFastPeopleSearch(person: PersonToVerify, userId?
 }
 
 /**
- * 主验证函数：先尝试 TruePeopleSearch，失败后尝试 FastPeopleSearch
+ * 主验证函数：极速模式 - 仅使用 TruePeopleSearch 单阶段验证
  * 验证逻辑：
- * 1. 先调用 TruePeopleSearch
- * 2. 如果 TPS 验证成功（verified=true 且 matchScore>=60），直接返回
- * 3. 如果 TPS 失败，再调用 FastPeopleSearch
- * 4. 如果 FPS 验证成功，返回 FPS 结果
- * 5. 如果都失败，返回分数较高的结果
+ * 1. 调用 TruePeopleSearch
+ * 2. 直接返回结果（不再调用 FastPeopleSearch）
  */
 export async function verifyPhoneNumber(person: PersonToVerify, userId?: number): Promise<VerificationResult> {
   console.log(`[Scraper] Starting phone verification for ${person.firstName} ${person.lastName}, phone: ${person.phone}`);
   console.log(`[Scraper] Age range: ${person.minAge || 'default'} - ${person.maxAge || 'default'}`);
   
-  // 第一阶段：TruePeopleSearch 电话号码反向搜索
+  // 极速模式：仅使用 TruePeopleSearch 单阶段验证
   const tpsResult = await verifyWithTruePeopleSearch(person, userId);
   
   // 如果 API 积分耗尽，立即返回错误
@@ -328,30 +329,14 @@ export async function verifyPhoneNumber(person: PersonToVerify, userId?: number)
     return tpsResult;
   }
   
-  // 如果第一阶段验证成功（姓名匹配且年龄在范围内），直接返回
+  // 直接返回 TruePeopleSearch 结果
   if (tpsResult.verified && tpsResult.matchScore >= 60) {
     console.log(`[Scraper] TruePeopleSearch verification passed`);
-    return { ...tpsResult, source: 'TruePeopleSearch' };
-  }
-
-  // 第二阶段：FastPeopleSearch 电话号码反向搜索
-  console.log(`[Scraper] TruePeopleSearch failed (verified=${tpsResult.verified}, score=${tpsResult.matchScore}), trying FastPeopleSearch`);
-  const fpsResult = await verifyWithFastPeopleSearch(person, userId);
-  
-  // 如果 API 积分耗尽，立即返回错误
-  if (fpsResult.apiError === 'INSUFFICIENT_CREDITS') {
-    console.error(`[Scraper] API credits exhausted during FastPeopleSearch, stopping verification`);
-    return fpsResult;
+  } else {
+    console.log(`[Scraper] TruePeopleSearch verification failed (verified=${tpsResult.verified}, score=${tpsResult.matchScore})`);
   }
   
-  if (fpsResult.verified && fpsResult.matchScore >= 60) {
-    console.log(`[Scraper] FastPeopleSearch verification passed`);
-    return { ...fpsResult, source: 'FastPeopleSearch' };
-  }
-
-  // 返回分数较高的结果
-  console.log(`[Scraper] Both verifications failed, returning best result`);
-  return tpsResult.matchScore > fpsResult.matchScore ? tpsResult : fpsResult;
+  return { ...tpsResult, source: 'TruePeopleSearch' };
 }
 
 /**
