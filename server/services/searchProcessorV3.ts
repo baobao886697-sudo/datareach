@@ -1,13 +1,7 @@
-/**
- * 搜索处理器 V3 - Apify 版本 (重构版)
- * 
- * 核心改进：
- * 1. 结构化统计数据 - 后端直接返回 stats 对象
- * 2. 智能积分退还 - 如果实际结果数少于请求数量，自动退还多扣积分
- * 3. 清晰的日志系统 - 让用户知道系统在做什么
- * 4. 统一的统计口径 - 前后端数据一致
- */
 
+/**
+ * 搜索处理器 V3 - 双模式版
+ */
 import {
   getUserById, 
   deductCredits,
@@ -24,6 +18,7 @@ import {
   getConfig
 } from '../db';
 import { searchPeople as apifySearchPeople, LeadPerson } from './apify';
+import { brightdataSearchPeople } from './brightdata';
 import { verifyPhoneNumber, PersonToVerify, VerificationResult } from './scraper';
 import { SearchTask, users } from '../../drizzle/schema';
 import { getDb } from '../db';
@@ -48,6 +43,7 @@ export interface SearchPreviewResult {
     limit: number;
     ageMin?: number;
     ageMax?: number;
+    mode?: 'fuzzy' | 'exact';
   };
   cacheHit: boolean;
   message: string;
@@ -74,46 +70,28 @@ export interface SearchLogEntry {
   };
 }
 
-/**
- * 搜索统计数据 - 结构化存储，前端直接使用
- */
 export interface SearchStats {
-  // === 请求统计 ===
-  apifyApiCalls: number;           // Apify API 调用次数
-  verifyApiCalls: number;          // 验证 API 调用次数
-  
-  // === 数据统计 ===
-  apifyReturned: number;           // LinkedIn 返回的原始记录数
-  recordsProcessed: number;        // 实际处理的记录数
-  
-  // === 结果统计（最终保存的） ===
-  totalResults: number;            // 总结果数（保存到数据库的）
-  resultsWithPhone: number;        // 有电话的结果数
-  resultsWithEmail: number;        // 有邮箱的结果数
-  resultsVerified: number;         // 验证通过的结果数
-  
-  // === 排除统计（处理过程中被排除的） ===
-  excludedNoPhone: number;         // 无电话被排除（但有邮箱仍保存）
-  excludedNoContact: number;       // 无任何联系方式被排除
-  excludedAgeFilter: number;       // 年龄不符被排除
-  excludedError: number;           // 处理错误被排除
-  excludedApiError: number;        // API 错误被排除（新增）
-  
-  // === 积分统计 ===
-  creditsUsed: number;             // 已消耗积分
-  creditsRefunded: number;         // 退还积分
-  creditsFinal: number;            // 最终消耗积分 (creditsUsed - creditsRefunded)
-  
-  // === 性能统计 ===
-  totalDuration: number;           // 总耗时（毫秒）
-  avgProcessTime: number;          // 平均每条处理时间
-  
-  // === 验证统计 ===
-  verifySuccessRate: number;       // 验证成功率（百分比）
-  
-  // === API 错误统计（新增） ===
-  apiCreditsExhausted: boolean;    // API 积分是否耗尽
-  unprocessedCount: number;        // 未处理的记录数（因 API 错误）
+  apifyApiCalls: number;
+  verifyApiCalls: number;
+  apifyReturned: number;
+  recordsProcessed: number;
+  totalResults: number;
+  resultsWithPhone: number;
+  resultsWithEmail: number;
+  resultsVerified: number;
+  excludedNoPhone: number;
+  excludedNoContact: number;
+  excludedAgeFilter: number;
+  excludedError: number;
+  excludedApiError: number;
+  creditsUsed: number;
+  creditsRefunded: number;
+  creditsFinal: number;
+  totalDuration: number;
+  avgProcessTime: number;
+  verifySuccessRate: number;
+  apiCreditsExhausted: boolean;
+  unprocessedCount: number;
 }
 
 export interface SearchProgress {
@@ -133,38 +111,31 @@ export interface SearchProgress {
   lastUpdateTime: number;
 }
 
-/**
- * 缓存数据结构
- * 存储搜索结果和元数据，用于精确的缓存命中判断
- */
 export interface SearchCacheData {
-  data: LeadPerson[];           // 实际数据
-  totalAvailable: number;       // LinkedIn 返回的总量（数据库中符合条件的估计值）
-  requestedCount: number;       // 用户请求的数量
-  searchParams: {               // 搜索参数（用于验证）
+  data: LeadPerson[];
+  totalAvailable: number;
+  requestedCount: number;
+  searchParams: {
     name: string;
     title: string;
     state: string;
     limit: number;
   };
-  createdAt: string;            // 缓存创建时间
+  createdAt: string;
 }
 
 // ============ 常量定义 ============
 
-const SEARCH_CREDITS = 1;           // 搜索基础费用
-const PHONE_CREDITS_PER_PERSON = 2; // 每条数据费用
-const VERIFY_CREDITS_PER_PHONE = 0; // 验证费用（目前免费）
-const CONCURRENT_VERIFY_LIMIT = 5;  // 并发验证数量（可根据 Scrape.do 账户限制调整）
-const CACHE_FULFILLMENT_THRESHOLD = 0.8; // 缓存数据充足率阈值（80%）
+const FUZZY_SEARCH_CREDITS = 1;
+const FUZZY_PHONE_CREDITS_PER_PERSON = 2;
+const EXACT_SEARCH_CREDITS = 5;
+const EXACT_PHONE_CREDITS_PER_PERSON = 10;
+const VERIFY_CREDITS_PER_PHONE = 0;
+const CONCURRENT_VERIFY_LIMIT = 5;
+const CACHE_FULFILLMENT_THRESHOLD = 0.8;
 
 // ============ 工具函数 ============
 
-/**
- * 生成搜索哈希（精确一对一匹配）
- * 缓存键 = name + title + state + limit 的精确组合
- * 每个搜索组合完全独立，不会交叉命中
- */
 function generateSearchHash(name: string, title: string, state: string, limit: number): string {
   const normalized = `${name.toLowerCase().trim()}|${title.toLowerCase().trim()}|${state.toLowerCase().trim()}|${limit}`;
   return crypto.createHash('md5').update(normalized).digest('hex');
@@ -193,9 +164,6 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-/**
- * 创建初始统计对象
- */
 function createInitialStats(): SearchStats {
   return {
     apifyApiCalls: 0,
@@ -222,10 +190,6 @@ function createInitialStats(): SearchStats {
   };
 }
 
-/**
- * 并发批量处理函数
- * 将数组分成批次，每批并发执行
- */
 async function processBatches<T, R>(
   items: T[],
   batchSize: number,
@@ -240,7 +204,6 @@ async function processBatches<T, R>(
     const end = Math.min(start + batchSize, items.length);
     const batch = items.slice(start, end);
     
-    // 并发执行当前批次
     const batchResults = await Promise.all(
       batch.map((item, i) => processor(item, start + i))
     );
@@ -264,43 +227,41 @@ export async function previewSearch(
   searchState: string,
   requestedCount: number = 100,
   ageMin?: number,
-  ageMax?: number
+  ageMax?: number,
+  mode: 'fuzzy' | 'exact' = 'fuzzy'
 ): Promise<SearchPreviewResult> {
+  const searchCredits = mode === 'fuzzy' ? FUZZY_SEARCH_CREDITS : EXACT_SEARCH_CREDITS;
+  const phoneCreditsPerPerson = mode === 'fuzzy' ? FUZZY_PHONE_CREDITS_PER_PERSON : EXACT_PHONE_CREDITS_PER_PERSON;
   const user = await getUserById(userId);
   if (!user) {
     return {
       success: false,
       totalAvailable: 0,
       estimatedCredits: 0,
-      searchCredits: SEARCH_CREDITS,
-      phoneCreditsPerPerson: PHONE_CREDITS_PER_PERSON,
+      searchCredits: searchCredits,
+      phoneCreditsPerPerson: phoneCreditsPerPerson,
       canAfford: false,
       userCredits: 0,
       maxAffordable: 0,
-      searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax },
+      searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax, mode },
       cacheHit: false,
       message: '用户不存在'
     };
   }
 
-  // 检查缓存（包含搜索数量）
   const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);
   const cacheKey = `apify:${searchHash}`;
-  const cached = await getCacheByKey(cacheKey);
+  const cached = mode === 'fuzzy' ? await getCacheByKey(cacheKey) : null;
   
   let totalAvailable = 0;
   let cacheHit = false;
   let cacheMessage = '';
 
   if (cached) {
-    // 解析缓存数据（支持新旧格式）
     let cachedSearchData: SearchCacheData;
-    
-    // 检查是否是新格式的缓存数据
     if (cached.data && typeof cached.data === 'object' && 'totalAvailable' in cached.data) {
       cachedSearchData = cached.data as SearchCacheData;
     } else {
-      // 旧格式缓存，转换为新格式
       const oldData = cached.data as LeadPerson[];
       cachedSearchData = {
         data: oldData,
@@ -311,42 +272,38 @@ export async function previewSearch(
       };
     }
     
-    // 计算缓存数据充足率（缓存数据量 / Apify 数据库总量）
     const fulfillmentRate = cachedSearchData.data.length / cachedSearchData.totalAvailable;
     
     if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
-      // 缓存数据充足（>= 80%），可以使用
       cacheHit = true;
       totalAvailable = Math.min(cachedSearchData.data.length, requestedCount);
       cacheMessage = `✨ 命中缓存！找到 ${cachedSearchData.data.length} 条记录（充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%）`;
     } else {
-      // 缓存数据不足（< 80%），需要重新获取
       cacheHit = false;
       totalAvailable = requestedCount;
       cacheMessage = `🔍 缓存数据不足（${cachedSearchData.data.length}/${cachedSearchData.totalAvailable}，${Math.round(fulfillmentRate * 100)}% < 80%），将重新获取`;
     }
   } else {
     totalAvailable = requestedCount;
-    cacheMessage = `🔍 无缓存，预估可获取 ${totalAvailable} 条记录`;
+    cacheMessage = mode === 'fuzzy' ? `🔍 无缓存，预估可获取 ${totalAvailable} 条记录` : `🎯 精准搜索模式，将实时获取 ${totalAvailable} 条记录`;
   }
 
-  const actualCount = Math.min(requestedCount, totalAvailable);
-  const estimatedCredits = SEARCH_CREDITS + actualCount * PHONE_CREDITS_PER_PERSON;
+  const estimatedCredits = searchCredits + totalAvailable * phoneCreditsPerPerson;
   const canAfford = user.credits >= estimatedCredits;
-  const maxAffordable = Math.max(0, Math.floor((user.credits - SEARCH_CREDITS) / PHONE_CREDITS_PER_PERSON));
+  const maxAffordable = Math.floor((user.credits - searchCredits) / phoneCreditsPerPerson);
 
   return {
     success: true,
     totalAvailable,
     estimatedCredits,
-    searchCredits: SEARCH_CREDITS,
-    phoneCreditsPerPerson: PHONE_CREDITS_PER_PERSON,
+    searchCredits,
+    phoneCreditsPerPerson,
     canAfford,
     userCredits: user.credits,
-    maxAffordable,
-    searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax },
+    maxAffordable: Math.max(0, maxAffordable),
+    searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax, mode },
     cacheHit,
-    message: cacheMessage
+    message: cacheMessage,
   };
 }
 
@@ -361,8 +318,11 @@ export async function executeSearchV3(
   ageMin?: number,
   ageMax?: number,
   enableVerification: boolean = true,
+  mode: 'fuzzy' | 'exact' = 'fuzzy',
   onProgress?: (progress: SearchProgress) => void
 ): Promise<SearchTask | undefined> {
+  const currentSearchCredits = mode === 'fuzzy' ? FUZZY_SEARCH_CREDITS : EXACT_SEARCH_CREDITS;
+  const currentPhoneCreditsPerPerson = mode === 'fuzzy' ? FUZZY_PHONE_CREDITS_PER_PERSON : EXACT_PHONE_CREDITS_PER_PERSON;
   
   const startTime = Date.now();
   const logs: SearchLogEntry[] = [];
@@ -371,7 +331,6 @@ export async function executeSearchV3(
   let currentStep = 0;
   const totalSteps = requestedCount + 10;
   
-  // 添加日志的辅助函数
   const addLog = (
     message: string, 
     level: SearchLogEntry['level'] = 'info',
@@ -396,16 +355,13 @@ export async function executeSearchV3(
     console.log(`[${entry.time}] [${phase.toUpperCase()}] ${icon || ''} ${message}`);
   };
 
-  // 获取用户
   const user = await getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
-  // 检查积分
-  if (user.credits < SEARCH_CREDITS) {
-    throw new Error(`积分不足，搜索需要至少 ${SEARCH_CREDITS} 积分，当前余额 ${user.credits}`);
+  if (user.credits < currentSearchCredits) {
+    throw new Error(`积分不足，搜索需要至少 ${currentSearchCredits} 积分，当前余额 ${user.credits}`);
   }
 
-  // 创建搜索任务（缓存键包含搜索数量，精确一对一匹配）
   const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);
   const params = { 
     name: searchName, 
@@ -415,13 +371,13 @@ export async function executeSearchV3(
     ageMin,
     ageMax,
     enableVerification,
-    dataSource: 'apify'
+    dataSource: mode === 'fuzzy' ? 'apify' : 'brightdata',
+    mode
   };
 
   const task = await createSearchTask(userId, searchHash, params, requestedCount);
   if (!task) throw new Error('创建搜索任务失败');
 
-  // 初始化进度对象
   const progress: SearchProgress = {
     taskId: task.taskId,
     status: 'initializing',
@@ -429,80 +385,45 @@ export async function executeSearchV3(
     phaseProgress: 0,
     overallProgress: 0,
     step: 0,
-    totalSteps,
-    currentAction: '初始化搜索任务',
-    stats,
-    logs,
-    startTime,
-    lastUpdateTime: Date.now()
+    totalSteps: 7,
+    currentAction: '初始化',
+    stats: stats,
+    logs: logs,
+    startTime: startTime,
+    lastUpdateTime: startTime,
   };
 
-  // 将内部状态映射到数据库允许的状态
-  const mapStatusToDbStatus = (status: SearchProgress['status']): string => {
-    switch (status) {
-      case 'initializing':
-      case 'searching':
-      case 'processing':
-      case 'verifying':
-        return 'running';
-      case 'completed':
-        return 'completed';
-      case 'stopped':
-        return 'stopped';
-      case 'failed':
-        return 'failed';
-      case 'insufficient_credits':
-        return 'insufficient_credits';
-      default:
-        return 'running';
-    }
+  const mapStatusToDbStatus = (status: SearchProgress['status']) => {
+    if (status === 'completed') return 'completed';
+    if (status === 'failed') return 'failed';
+    if (status === 'stopped') return 'stopped';
+    return 'running';
   };
 
-  const updateProgress = async (
-    action?: string, 
-    status?: SearchProgress['status'],
-    phase?: SearchProgress['phase'],
-    phaseProgress?: number
-  ) => {
-    if (action) progress.currentAction = action;
+  const updateProgress = async (action: string, status?: SearchProgress['status'], phase?: SearchProgress['phase'], overall?: number) => {
+    progress.currentAction = action;
     if (status) progress.status = status;
     if (phase) progress.phase = phase;
-    if (phaseProgress !== undefined) progress.phaseProgress = phaseProgress;
-    
-    progress.step = currentStep;
-    progress.overallProgress = Math.round((currentStep / totalSteps) * 100);
+    if (overall) progress.overallProgress = overall;
     progress.lastUpdateTime = Date.now();
+    
     stats.totalDuration = Date.now() - startTime;
-    
-    // 计算验证成功率
-    if (stats.resultsWithPhone > 0) {
-      stats.verifySuccessRate = Math.round((stats.resultsVerified / stats.resultsWithPhone) * 100);
-    }
-    
-    // 计算平均处理时间
     if (stats.recordsProcessed > 0) {
       stats.avgProcessTime = Math.round(stats.totalDuration / stats.recordsProcessed);
     }
     
-    // 更新数据库（包含 stats）
     const dbStatus = mapStatusToDbStatus(progress.status);
     await updateSearchTask(task.taskId, { 
       logs, 
       status: dbStatus as any, 
       creditsUsed: stats.creditsUsed,
       progress: progress.overallProgress,
-      // 将 stats 存储在 params 中（因为没有单独的 stats 字段）
-      // 或者可以通过 logs 的最后一条传递
     });
     
-    // 回调通知
     onProgress?.(progress);
   };
 
   try {
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 1: 初始化
-    // ═══════════════════════════════════════════════════════════════
     currentStep++;
     addLog('═══════════════════════════════════════════════════════════', 'info', 'init', '');
     addLog(`🚀 搜索任务启动`, 'success', 'init', '🚀');
@@ -517,44 +438,35 @@ export async function executeSearchV3(
       addLog(`   年龄筛选: ${ageMin} - ${ageMax} 岁`, 'info', 'init', '');
     }
     addLog(`   电话验证: ${enableVerification ? '✅ 已启用' : '❌ 已禁用'}`, 'info', 'init', '');
+    addLog(`   搜索模式: ${mode === 'fuzzy' ? '模糊搜索' : '精准搜索'}`, 'info', 'init', '');
     addLog('───────────────────────────────────────────────────────────', 'info', 'init', '');
     addLog(`💰 积分信息:`, 'info', 'init', '');
     addLog(`   当前余额: ${user.credits} 积分`, 'info', 'init', '');
-    addLog(`   预估消耗: ${SEARCH_CREDITS + requestedCount * PHONE_CREDITS_PER_PERSON} 积分`, 'info', 'init', '');
-    addLog(`   (搜索费 ${SEARCH_CREDITS} + 数据费 ${requestedCount} × ${PHONE_CREDITS_PER_PERSON})`, 'info', 'init', '');
+    addLog(`   预估消耗: ${currentSearchCredits + requestedCount * currentPhoneCreditsPerPerson} 积分`, 'info', 'init', '');
+    addLog(`   (搜索费 ${currentSearchCredits} + 数据费 ${requestedCount} × ${currentPhoneCreditsPerPerson})`, 'info', 'init', '');
     addLog('═══════════════════════════════════════════════════════════', 'info', 'init', '');
     await updateProgress('初始化搜索任务', 'searching', 'init', 10);
 
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 2: 扣除搜索积分
-    // ═══════════════════════════════════════════════════════════════
     currentStep++;
     addLog(`💳 正在扣除搜索基础费用...`, 'info', 'init', '');
-    const searchDeducted = await deductCredits(userId, SEARCH_CREDITS, 'search', `搜索: ${searchName} | ${searchTitle} | ${searchState}`, task.taskId);
+    const searchDeducted = await deductCredits(userId, currentSearchCredits, 'search', `搜索: ${searchName} | ${searchTitle} | ${searchState}`, task.taskId);
     if (!searchDeducted) throw new Error('扣除搜索积分失败');
-    stats.creditsUsed += SEARCH_CREDITS;
-    addLog(`✅ 已扣除搜索费用: ${SEARCH_CREDITS} 积分`, 'success', 'init', '✅');
+    stats.creditsUsed += currentSearchCredits;
+    addLog(`✅ 已扣除搜索费用: ${currentSearchCredits} 积分`, 'success', 'init', '✅');
     await updateProgress('扣除搜索积分', undefined, undefined, 20);
 
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 3: 检查缓存 / 调用 LinkedIn API
-    // ═══════════════════════════════════════════════════════════════
     currentStep++;
     addLog('───────────────────────────────────────────────────────────', 'info', 'apify', '');
     const cacheKey = `apify:${searchHash}`;
-    const cached = await getCacheByKey(cacheKey);
+    const cached = mode === 'fuzzy' ? await getCacheByKey(cacheKey) : null;
     
-    let apifyResults: LeadPerson[] = [];
+    let searchResults: LeadPerson[] = [];
     
     if (cached) {
-      // 解析缓存数据（支持新旧格式）
       let cachedSearchData: SearchCacheData;
-      
-      // 检查是否是新格式的缓存数据
       if (cached.data && typeof cached.data === 'object' && 'totalAvailable' in cached.data) {
         cachedSearchData = cached.data as SearchCacheData;
       } else {
-        // 旧格式缓存，转换为新格式
         const oldData = cached.data as LeadPerson[];
         cachedSearchData = {
           data: oldData,
@@ -565,7 +477,6 @@ export async function executeSearchV3(
         };
       }
       
-      // 计算缓存数据充足率
       const fulfillmentRate = cachedSearchData.data.length / cachedSearchData.totalAvailable;
       
       addLog(`📊 检查缓存: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
@@ -574,99 +485,66 @@ export async function executeSearchV3(
       addLog(`   数据充足率: ${Math.round(fulfillmentRate * 100)}%`, 'info', 'apify', '');
       
       if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
-        // 缓存数据充足（>= 80%），使用缓存并随机提取
         addLog(`✨ 缓存命中！数据充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%`, 'success', 'apify', '✨');
-        
-        // 随机打乱缓存数据并提取用户请求的数量
         const shuffledCache = shuffleArray([...cachedSearchData.data]);
-        apifyResults = shuffledCache.slice(0, Math.min(requestedCount, shuffledCache.length));
-        stats.apifyReturned = apifyResults.length;
-        
-        addLog(`🎲 已随机提取 ${apifyResults.length} 条记录`, 'info', 'apify', '');
+        searchResults = shuffledCache.slice(0, Math.min(requestedCount, shuffledCache.length));
+        stats.apifyReturned = searchResults.length;
+        addLog(`🎲 已随机提取 ${searchResults.length} 条记录`, 'info', 'apify', '');
         addLog(`⏭️ 跳过 LinkedIn API 调用，节省时间和成本`, 'info', 'apify', '');
       } else {
-        // 缓存数据不足（< 80%），需要重新调用 LinkedIn API
         addLog(`⚠️ 缓存数据不足！充足率 ${Math.round(fulfillmentRate * 100)}% < 80%`, 'warning', 'apify', '⚠️');
         addLog(`🔄 需要重新调用 LinkedIn API 获取最新数据...`, 'info', 'apify', '');
-        
-        // 调用 LinkedIn API
+        // Fall through to API call
+      }
+    }
+
+    if (searchResults.length === 0) {
+      if (mode === 'fuzzy') {
         stats.apifyApiCalls++;
-        addLog(`🔍 正在调用 LinkedIn Leads Finder...`, 'info', 'apify', '');
+        addLog(`🔍 正在调用 LinkedIn Leads Finder (Apify)...`, 'info', 'apify', '');
         addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'apify', '');
         addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
         await updateProgress('调用 LinkedIn API', 'searching', 'apify', 30);
         
         const apiStartTime = Date.now();
-        const searchResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
+        const apifyResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
         const apiDuration = Date.now() - apiStartTime;
 
-        if (!searchResult.success || !searchResult.people) {
-          throw new Error(searchResult.errorMessage || 'LinkedIn 搜索失败');
+        if (!apifyResult.success || !apifyResult.people) {
+          throw new Error(apifyResult.errorMessage || 'LinkedIn 搜索失败');
         }
 
-        apifyResults = searchResult.people;
-        stats.apifyReturned = apifyResults.length;
-        addLog(`✅ LinkedIn 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
+        searchResults = apifyResult.people;
+        stats.apifyReturned = searchResults.length;
+        addLog(`✅ LinkedIn 返回 ${searchResults.length} 条数据`, 'success', 'apify', '✅');
         addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
 
-        // 更新缓存（使用新的缓存数据结构）
         const newCacheData: SearchCacheData = {
-          data: apifyResults,
-          totalAvailable: apifyResults.length,
+          data: searchResults,
+          totalAvailable: searchResults.length,
           requestedCount: requestedCount,
-          searchParams: {
-            name: searchName,
-            title: searchTitle,
-            state: searchState,
-            limit: requestedCount
-          },
+          searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount },
           createdAt: new Date().toISOString()
         };
         await setCache(cacheKey, 'search', newCacheData, 180);
         addLog(`💾 已更新缓存 (180天有效)`, 'info', 'apify', '');
-        addLog(`   缓存键: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
+      } else {
+        addLog(`🎯 正在执行精准搜索 (Bright Data + PDL)...`, 'info', 'apify', '');
+        await updateProgress('调用精准搜索 API', 'searching', 'apify', 30);
+
+        const apiStartTime = Date.now();
+        searchResults = await brightdataSearchPeople(searchName, searchTitle, searchState, requestedCount);
+        const apiDuration = Date.now() - apiStartTime;
+
+        stats.apifyReturned = searchResults.length;
+        addLog(`✅ 精准搜索返回 ${searchResults.length} 条数据`, 'success', 'apify', '✅');
+        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
       }
-    } else {
-      stats.apifyApiCalls++;
-      addLog(`🔍 正在调用 LinkedIn Leads Finder...`, 'info', 'apify', '');
-      addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'apify', '');
-      addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
-      await updateProgress('调用 LinkedIn API', 'searching', 'apify', 30);
-      
-      const apiStartTime = Date.now();
-      const searchResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
-      const apiDuration = Date.now() - apiStartTime;
-
-      if (!searchResult.success || !searchResult.people) {
-        throw new Error(searchResult.errorMessage || 'LinkedIn 搜索失败');
-      }
-
-      apifyResults = searchResult.people;
-      stats.apifyReturned = apifyResults.length;
-      addLog(`✅ LinkedIn 返回 ${apifyResults.length} 条数据`, 'success', 'apify', '✅');
-      addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
-
-      // 缓存搜索结果 180天（使用新的缓存数据结构）
-      const cacheData: SearchCacheData = {
-        data: apifyResults,
-        totalAvailable: apifyResults.length,  // LinkedIn 返回的总量作为数据库估计值
-        requestedCount: requestedCount,
-        searchParams: {
-          name: searchName,
-          title: searchTitle,
-          state: searchState,
-          limit: requestedCount
-        },
-        createdAt: new Date().toISOString()
-      };
-      await setCache(cacheKey, 'search', cacheData, 180);
-      addLog(`💾 已缓存搜索结果 (180天有效)`, 'info', 'apify', '');
-      addLog(`   缓存键: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
     }
 
     await updateProgress('处理搜索结果', undefined, 'apify', 50);
 
-    if (apifyResults.length === 0) {
+    if (searchResults.length === 0) {
       addLog(`⚠️ 未找到匹配的结果`, 'warning', 'complete', '⚠️');
       addLog(`   请尝试调整搜索条件后重试`, 'info', 'complete', '');
       progress.status = 'completed';
@@ -674,20 +552,16 @@ export async function executeSearchV3(
       return getSearchTask(task.taskId);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 4: 计算实际数量并一次性扣除数据费用
-    // ═══════════════════════════════════════════════════════════════
     currentStep++;
-    const actualCount = Math.min(apifyResults.length, requestedCount);
-    const dataCreditsNeeded = actualCount * PHONE_CREDITS_PER_PERSON;
+    const actualCount = Math.min(searchResults.length, requestedCount);
+    const dataCreditsNeeded = actualCount * currentPhoneCreditsPerPerson;
     
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
     addLog(`📊 数据量计算:`, 'info', 'process', '');
     addLog(`   用户请求: ${requestedCount} 条`, 'info', 'process', '');
-    addLog(`   实际返回: ${apifyResults.length} 条`, 'info', 'process', '');
+    addLog(`   实际返回: ${searchResults.length} 条`, 'info', 'process', '');
     addLog(`   可处理数量: ${actualCount} 条`, 'info', 'process', '');
     
-    // 检查用户积分是否足够
     const currentUserForDataFee = await getUserById(userId);
     if (!currentUserForDataFee || currentUserForDataFee.credits < dataCreditsNeeded) {
       addLog(`⚠️ 积分不足，无法处理数据`, 'warning', 'complete', '⚠️');
@@ -697,13 +571,12 @@ export async function executeSearchV3(
       return getSearchTask(task.taskId);
     }
     
-    // 一次性扣除数据费用
     addLog(`💳 正在扣除数据费用...`, 'info', 'process', '');
     const dataDeducted = await deductCredits(
       userId, 
       dataCreditsNeeded, 
       'search', 
-      `数据费用: ${actualCount} 条 × ${PHONE_CREDITS_PER_PERSON} 积分`, 
+      `数据费用: ${actualCount} 条 × ${currentPhoneCreditsPerPerson} 积分`, 
       task.taskId
     );
     
@@ -713,38 +586,30 @@ export async function executeSearchV3(
     }
     
     stats.creditsUsed += dataCreditsNeeded;
-    addLog(`✅ 已扣除数据费用: ${dataCreditsNeeded} 积分 (${actualCount} 条 × ${PHONE_CREDITS_PER_PERSON})`, 'success', 'process', '✅');
+    addLog(`✅ 已扣除数据费用: ${dataCreditsNeeded} 积分 (${actualCount} 条 × ${currentPhoneCreditsPerPerson})`, 'success', 'process', '✅');
     
-    // 如果实际数量少于请求数量，通知用户节省了积分
     if (actualCount < requestedCount) {
-      const savedCredits = (requestedCount - actualCount) * PHONE_CREDITS_PER_PERSON;
-      stats.creditsRefunded = savedCredits;  // 记录节省的积分（虽然没有实际退还，但用户少付了）
+      const savedCredits = (requestedCount - actualCount) * currentPhoneCreditsPerPerson;
+      stats.creditsRefunded = savedCredits;
       addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
       addLog(`💰 积分节省通知:`, 'success', 'process', '💰');
       addLog(`   由于实际数据量 (${actualCount}) 少于请求数量 (${requestedCount})`, 'info', 'process', '');
       addLog(`   您节省了 ${savedCredits} 积分！`, 'success', 'process', '');
-      addLog(`   (原预估: ${requestedCount * PHONE_CREDITS_PER_PERSON} 积分，实际扣除: ${dataCreditsNeeded} 积分)`, 'info', 'process', '');
+      addLog(`   (原预估: ${requestedCount * currentPhoneCreditsPerPerson} 积分，实际扣除: ${dataCreditsNeeded} 积分)`, 'info', 'process', '');
     }
     
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
     
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 5: 打乱顺序并准备处理
-    // ═══════════════════════════════════════════════════════════════
-    const shuffledResults = shuffleArray(apifyResults);
+    const shuffledResults = shuffleArray(searchResults);
     addLog(`🔀 已打乱数据顺序，采用随机提取策略`, 'info', 'process', '');
     addLog(`📊 开始逐条处理数据...`, 'info', 'process', '');
     addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
 
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 6: 并发批量处理数据 (优化版)
-    // ═══════════════════════════════════════════════════════════════
     const toProcess = shuffledResults.slice(0, actualCount);
-    const CONCURRENT_BATCH_SIZE = 16; // 并发数量，Scrape.do render=true 每请求消耗5并发槽位，80/5=16 为实际上限
+    const CONCURRENT_BATCH_SIZE = 16;
     
     addLog(`🚀 启用并发处理模式，并发数: ${CONCURRENT_BATCH_SIZE}`, 'info', 'process', '');
     
-    // 先分离有电话和无电话的记录
     const recordsWithPhone: typeof toProcess = [];
     const recordsWithoutPhone: typeof toProcess = [];
     
@@ -768,7 +633,6 @@ export async function executeSearchV3(
     
     addLog(`📊 数据分类: ${recordsWithPhone.length} 条有电话, ${recordsWithoutPhone.length} 条无电话`, 'info', 'process', '');
     
-    // 快速处理无电话的记录（不需要验证，可以直接保存）
     let processedCount = 0;
     for (const person of recordsWithoutPhone) {
       processedCount++;
@@ -799,7 +663,7 @@ export async function executeSearchV3(
         verificationScore: null as number | null,
         verifiedAt: null as Date | null,
         industry: person.organization?.industry || null,
-        dataSource: 'apify',
+        dataSource: mode === 'fuzzy' ? 'apify' : 'brightdata',
       };
       
       if (person.email) {
@@ -815,7 +679,6 @@ export async function executeSearchV3(
       addLog(`✅ 已快速处理 ${recordsWithoutPhone.length} 条无电话记录`, 'info', 'process', '');
     }
     
-    // 检查是否需要停止
     let taskStopped = false;
     const currentTaskCheck = await getSearchTask(task.taskId);
     if (currentTaskCheck?.status === 'stopped') {
@@ -824,7 +687,6 @@ export async function executeSearchV3(
       taskStopped = true;
     }
     
-    // 并发处理有电话的记录
     if (!taskStopped && recordsWithPhone.length > 0) {
       addLog(`🔄 开始并发验证 ${recordsWithPhone.length} 条有电话记录...`, 'info', 'verify', '');
       addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
@@ -832,7 +694,6 @@ export async function executeSearchV3(
       const totalBatches = Math.ceil(recordsWithPhone.length / CONCURRENT_BATCH_SIZE);
       
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-        // 检查任务是否被停止
         const currentTask = await getSearchTask(task.taskId);
         if (currentTask?.status === 'stopped') {
           addLog(`⏹️ 任务已被用户停止`, 'warning', 'complete', '⏹️');
@@ -847,8 +708,7 @@ export async function executeSearchV3(
         const batchStartTime = Date.now();
         addLog(`📦 批次 ${batchIndex + 1}/${totalBatches}: 并发处理 ${batch.length} 条记录...`, 'info', 'process', '');
         
-        // 并发处理当前批次
-        let apiCreditsExhausted = false; // 标记 API 积分是否耗尽
+        let apiCreditsExhausted = false;
         
         const batchPromises = batch.map(async (person, indexInBatch) => {
           const globalIndex = processedCount + indexInBatch + 1;
@@ -856,7 +716,6 @@ export async function executeSearchV3(
           
           const personName = person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown';
           
-          // 获取电话号码
           const phoneNumbers = person.phone_numbers || [];
           let selectedPhone = phoneNumbers[0];
           for (const phone of phoneNumbers) {
@@ -868,7 +727,6 @@ export async function executeSearchV3(
           const phoneNumber = selectedPhone?.sanitized_number || selectedPhone?.raw_number || '';
           const phoneType = selectedPhone?.type || 'unknown';
           
-          // 构建结果数据
           const resultData = {
             apifyId: person.id,
             apolloId: person.id,
@@ -891,12 +749,11 @@ export async function executeSearchV3(
             verificationScore: null as number | null,
             verifiedAt: null as Date | null,
             industry: person.organization?.industry || null,
-            dataSource: 'apify',
+            dataSource: mode === 'fuzzy' ? 'apify' : 'brightdata',
           };
           
           stats.resultsWithPhone++;
           
-          // 二次电话验证
           if (enableVerification) {
             const personToVerify: PersonToVerify = {
               firstName: person.first_name || '',
@@ -910,7 +767,6 @@ export async function executeSearchV3(
             const verifyResult = await verifyPhoneNumber(personToVerify, userId);
             
             if (verifyResult) {
-              // 检查 API 积分是否耗尽
               if (verifyResult.apiError === 'INSUFFICIENT_CREDITS') {
                 apiCreditsExhausted = true;
                 stats.excludedApiError++;
@@ -928,7 +784,6 @@ export async function executeSearchV3(
                 stats.resultsVerified++;
               }
               
-              // 年龄筛选
               if (ageMin && ageMax && verifyResult.details?.age) {
                 const age = verifyResult.details.age;
                 if (age < ageMin || age > ageMax) {
@@ -942,17 +797,14 @@ export async function executeSearchV3(
           return { person, resultData, excluded: false, reason: null, apiError: false };
         });
         
-        // 等待当前批次完成
         const batchResults = await Promise.all(batchPromises);
         
-        // 检查是否有 API 积分耗尽的情况
         const apiErrorResults = batchResults.filter(r => r.apiError);
         if (apiErrorResults.length > 0) {
           apiCreditsExhausted = true;
           stats.apiCreditsExhausted = true;
         }
         
-        // 保存结果到数据库
         for (const result of batchResults) {
           if (!result.excluded) {
             const savedResult = await saveSearchResult(
@@ -969,7 +821,6 @@ export async function executeSearchV3(
               if (result.person.email) stats.resultsWithEmail++;
             }
             
-            // 缓存个人数据
             const personCacheKey = `person:${result.person.id}`;
             await setCache(personCacheKey, 'person', result.resultData, 180);
           }
@@ -978,7 +829,6 @@ export async function executeSearchV3(
         const batchDuration = Date.now() - batchStartTime;
         processedCount += batch.length;
         
-        // 更新进度
         const progressPercent = Math.round((processedCount / actualCount) * 100);
         const verified = batchResults.filter(r => r.resultData.phoneStatus === 'verified').length;
         const excluded = batchResults.filter(r => r.excluded).length;
@@ -986,7 +836,6 @@ export async function executeSearchV3(
         addLog(`   ✅ 批次完成: ${verified} 验证通过, ${excluded} 被排除, 耗时 ${formatDuration(batchDuration)}`, 'success', 'process', '');
         await updateProgress(`已处理 ${processedCount}/${actualCount}`, 'processing', 'process', progressPercent);
         
-        // 如果 API 积分耗尽，立即停止处理
         if (apiCreditsExhausted) {
           addLog('', 'info', 'process', '');
           addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'error', 'process', '');
@@ -996,12 +845,10 @@ export async function executeSearchV3(
           addLog('📞 请联系管理员处理 API 积分问题', 'warning', 'process', '');
           addLog('', 'info', 'process', '');
           
-          // 计算退还积分
           const unprocessedCount = actualCount - processedCount;
-          const refundCredits = unprocessedCount * PHONE_CREDITS_PER_PERSON;
+          const refundCredits = unprocessedCount * currentPhoneCreditsPerPerson;
           
           if (refundCredits > 0) {
-            // 退还积分
             const db = await getDb();
             if (db) {
               await db.update(users)
@@ -1010,23 +857,19 @@ export async function executeSearchV3(
             }
             
             stats.creditsRefunded += refundCredits;
-            addLog(`💰 已退还 ${refundCredits} 积分（未处理 ${unprocessedCount} 条记录 × ${PHONE_CREDITS_PER_PERSON} 积分/条）`, 'success', 'process', '');
+            addLog(`💰 已退还 ${refundCredits} 积分（未处理 ${unprocessedCount} 条记录 × ${currentPhoneCreditsPerPerson} 积分/条）`, 'success', 'process', '');
           }
           
           progress.status = 'stopped';
-          break; // 跳出批次循环
+          break;
         }
         
-        // 每5个批次添加分隔线
         if ((batchIndex + 1) % 5 === 0 && (batchIndex + 1) < totalBatches) {
           addLog('───────────────────────────────────────────────────────────', 'info', 'process', '');
         }
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 阶段 7: 完成统计
-    // ═══════════════════════════════════════════════════════════════
     stats.totalDuration = Date.now() - startTime;
     if (stats.recordsProcessed > 0) {
       stats.avgProcessTime = Math.round(stats.totalDuration / stats.recordsProcessed);
@@ -1041,9 +884,9 @@ export async function executeSearchV3(
                          progress.status === 'insufficient_credits' ? 'insufficient_credits' : 'completed';
     
     if (finalStatus === 'stopped') {
-      addLog(`⏹️ 搜索已停止`, 'warning', 'complete', '');
+      addLog(`⏹️ 搜索已停止`, 'warning', 'complete', '⏹️');
     } else if (finalStatus === 'insufficient_credits') {
-      addLog(`⚠️ 积分不足，搜索提前结束`, 'warning', 'complete', '');
+      addLog(`⚠️ 积分不足，搜索提前结束`, 'warning', 'complete', '⚠️');
     } else {
       addLog(`🎉 搜索完成！`, 'success', 'complete', '');
     }
@@ -1067,7 +910,6 @@ export async function executeSearchV3(
     }
     
     addLog('───────────────────────────────────────────────────────────', 'info', 'complete', '');
-    // 计算最终积分消耗
     stats.creditsFinal = stats.creditsUsed - stats.creditsRefunded;
     addLog(`💰 积分消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
     if (stats.creditsRefunded > 0) {
@@ -1079,7 +921,6 @@ export async function executeSearchV3(
     }
     addLog('═══════════════════════════════════════════════════════════', 'info', 'complete', '');
 
-    // 在日志最后添加统计数据（供前端直接使用）
     const statsLog: SearchLogEntry = {
       timestamp: formatTimestamp(),
       time: formatTime(),
@@ -1107,7 +948,6 @@ export async function executeSearchV3(
     progress.status = 'failed';
     addLog(`❌ 错误: ${error.message}`, 'error', 'complete', '❌');
     
-    // 添加统计数据
     const statsLog: SearchLogEntry = {
       timestamp: formatTimestamp(),
       time: formatTime(),
@@ -1128,8 +968,6 @@ export async function executeSearchV3(
     return getSearchTask(task.taskId);
   }
 }
-
-// ============ 验证电话号码（Scrape.do） ============
 
 export async function verifyPhoneWithScrapeDo(
   taskId: string,
@@ -1154,7 +992,6 @@ export async function verifyPhoneWithScrapeDo(
 
     const result = await verifyPhoneNumber(personToVerify, userId);
     
-    // 更新搜索结果
     if (result) {
       await updateSearchResult(resultId, {
         verified: result.verified,

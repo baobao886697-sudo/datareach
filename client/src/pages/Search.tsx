@@ -38,8 +38,10 @@ const SEARCH_LIMITS = [
 ];
 
 // 积分费用常量
-const SEARCH_COST = 1;
-const PHONE_COST_PER_PERSON = 2;
+const FUZZY_SEARCH_COST = 1;
+const FUZZY_PHONE_COST_PER_PERSON = 2;
+const EXACT_SEARCH_COST = 5;
+const EXACT_PHONE_COST_PER_PERSON = 10;
 
 // 加载状态提示信息
 const LOADING_MESSAGES = [
@@ -66,6 +68,9 @@ export default function Search() {
   
   // 电话验证开关
   const [enableVerification, setEnableVerification] = useState(true);
+
+  // 搜索模式
+  const [searchMode, setSearchMode] = useState<'fuzzy' | 'exact'>('fuzzy');
   
   // 预览结果
   const [previewResult, setPreviewResult] = useState<{
@@ -156,13 +161,14 @@ export default function Search() {
 
   // 计算积分预估
   const creditEstimate = useMemo(() => {
-    const searchCost = SEARCH_COST;
-    const phoneCost = searchLimit * PHONE_COST_PER_PERSON;
+    const searchCost = searchMode === 'fuzzy' ? FUZZY_SEARCH_COST : EXACT_SEARCH_COST;
+    const phoneCostPerPerson = searchMode === 'fuzzy' ? FUZZY_PHONE_COST_PER_PERSON : EXACT_PHONE_COST_PER_PERSON;
+    const phoneCost = searchLimit * phoneCostPerPerson;
     const totalCost = searchCost + phoneCost;
     const currentCredits = profile?.credits || 0;
     const remainingCredits = currentCredits - totalCost;
     const canAfford = currentCredits >= totalCost;
-    const maxAffordable = Math.floor((currentCredits - SEARCH_COST) / PHONE_COST_PER_PERSON);
+    const maxAffordable = Math.floor((currentCredits - searchCost) / phoneCostPerPerson);
     
     return {
       searchCost,
@@ -173,7 +179,7 @@ export default function Search() {
       canAfford,
       maxAffordable: Math.max(0, maxAffordable),
     };
-  }, [searchLimit, profile?.credits]);
+  }, [searchLimit, profile?.credits, searchMode]);
 
   // 预览搜索
   const handlePreview = (e: React.FormEvent) => {
@@ -191,6 +197,7 @@ export default function Search() {
       limit: searchLimit,
       ageMin: enableAgeFilter ? ageRange[0] : undefined,
       ageMax: enableAgeFilter ? ageRange[1] : undefined,
+      mode: searchMode,
     });
   };
 
@@ -227,6 +234,7 @@ export default function Search() {
       ageMin: enableAgeFilter ? ageRange[0] : undefined,
       ageMax: enableAgeFilter ? ageRange[1] : undefined,
       enableVerification,
+      mode: searchMode,
     });
   };
 
@@ -590,6 +598,45 @@ export default function Search() {
                   )}
                 </div>
 
+                {/* 搜索模式选择器 */}
+                <div className="space-y-3">
+                  <Label className="text-slate-300 flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-slate-500" />
+                    搜索模式
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSearchMode('fuzzy')}
+                      className={`relative p-4 rounded-xl border transition-all text-left ${
+                        searchMode === 'fuzzy'
+                          ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
+                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="text-lg font-bold">模糊搜索</div>
+                      <div className="text-xs opacity-70">便宜、大批量</div>
+                      <div className="text-xs opacity-50 mt-1">~2 积分/条</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchMode('exact')}
+                      className={`relative p-4 rounded-xl border transition-all text-left ${
+                        searchMode === 'exact'
+                          ? 'bg-purple-500/20 border-purple-500 text-purple-400'
+                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="text-lg font-bold">精准搜索</div>
+                      <div className="text-xs opacity-70">实时、高质量</div>
+                      <div className="text-xs opacity-50 mt-1">~10 积分/条</div>
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    💡 精准模式使用实时数据，电话号码更准确，但成本更高。
+                  </p>
+                </div>
+
                 {/* 电话验证 */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-slate-800/30">
                   <div className="flex items-center gap-3">
@@ -797,7 +844,7 @@ export default function Search() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">预估消耗</span>
                   <span className="text-cyan-400 font-mono font-bold">
-                    ~{SEARCH_COST + Math.min(searchLimit, previewResult.totalAvailable) * PHONE_COST_PER_PERSON} 积分
+                    ~{creditEstimate.searchCost + Math.min(searchLimit, previewResult.totalAvailable) * creditEstimate.phoneCost / searchLimit} 积分
                   </span>
                 </div>
                 <div className="flex justify-between">

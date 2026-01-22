@@ -74,8 +74,8 @@ export interface LeadPerson {
   };
   seniority: string | null;
   departments: string[];
-  // Apify 特有字段
-  source: 'apify';
+  // 数据来源
+  source: 'apify' | 'brightdata';
   rawData?: ApifyLeadRaw;
 }
 

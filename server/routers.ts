@@ -332,6 +332,7 @@ export const appRouter = router({
           limit: z.number().min(100).max(10000).optional().default(100),
           ageMin: z.number().min(18).max(80).optional(),
           ageMax: z.number().min(18).max(80).optional(),
+          mode: z.enum(["fuzzy", "exact"]).optional().default("fuzzy"),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -343,7 +344,8 @@ export const appRouter = router({
             input.state,
             input.limit,
             input.ageMin,
-            input.ageMax
+            input.ageMax,
+            input.mode
           );
           return result;
         } catch (error: any) {
@@ -364,23 +366,26 @@ export const appRouter = router({
           limit: z.number().min(100).max(10000).optional().default(100),
           ageMin: z.number().min(18).max(80).optional(),
           ageMax: z.number().min(18).max(80).optional(),
+          mode: z.enum(["fuzzy", "exact"]).optional().default("fuzzy"),
           enableVerification: z.boolean().optional().default(true),
         })
       )
       .mutation(async ({ ctx, input }) => {
         // 检查积分 - 严格模式：必须足够支付全部预估费用
         const credits = await getUserCredits(ctx.user.id);
-        const searchCost = 1;
-        const phoneCost = input.limit * 2;
+        // 根据搜索模式动态计算积分费用
+        const searchCost = input.mode === 'exact' ? 5 : 1;
+        const phoneCostPerPerson = input.mode === 'exact' ? 10 : 2;
+        const phoneCost = input.limit * phoneCostPerPerson;
         const totalCost = searchCost + phoneCost;
         
         if (credits < totalCost) {
           // 计算用户积分最多能搜索多少条
-          const maxAffordable = Math.floor((credits - searchCost) / 2);
+          const maxAffordable = Math.floor((credits - searchCost) / phoneCostPerPerson);
           if (maxAffordable <= 0) {
             throw new TRPCError({ 
               code: "PAYMENT_REQUIRED", 
-              message: `积分不足，无法开始搜索。当前积分: ${credits}，需要至少 ${searchCost + 2} 积分` 
+              message: `积分不足，无法开始搜索。当前积分: ${credits}，需要至少 ${searchCost + phoneCostPerPerson} 积分` 
             });
           }
           throw new TRPCError({ 
@@ -399,7 +404,8 @@ export const appRouter = router({
             input.limit,
             input.ageMin,
             input.ageMax,
-            input.enableVerification
+            input.enableVerification,
+            input.mode
           );
 
           return {
