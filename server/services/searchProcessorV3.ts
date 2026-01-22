@@ -53,7 +53,7 @@ export interface SearchLogEntry {
   timestamp: string;
   time: string;
   level: 'info' | 'success' | 'warning' | 'error' | 'debug';
-  phase: 'init' | 'apify' | 'process' | 'verify' | 'complete';
+  phase: 'init' | 'search' | 'process' | 'verify' | 'complete';
   step?: number;
   total?: number;
   message: string;
@@ -97,7 +97,7 @@ export interface SearchStats {
 export interface SearchProgress {
   taskId: string;
   status: 'initializing' | 'searching' | 'processing' | 'verifying' | 'completed' | 'stopped' | 'failed' | 'insufficient_credits';
-  phase: 'init' | 'apify' | 'process' | 'verify' | 'complete';
+  phase: 'init' | 'search' | 'process' | 'verify' | 'complete';
   phaseProgress: number;
   overallProgress: number;
   step: number;
@@ -487,8 +487,9 @@ export async function executeSearchV3(
     await updateProgress('扣除搜索积分', undefined, undefined, 20);
 
     currentStep++;
-    addLog('───────────────────────────────────────────────────────────', 'info', 'apify', '');
-    const cacheKey = `apify:${searchHash}`;
+    addLog('───────────────────────────────────────────────────────────', 'info', 'search', '');
+    // 根据模式动态生成缓存键前缀
+    const cacheKey = `search:${mode}:${searchHash}`;
     const cached = mode === 'fuzzy' ? await getCacheByKey(cacheKey) : null;
     
     let searchResults: LeadPerson[] = [];
@@ -510,21 +511,21 @@ export async function executeSearchV3(
       
       const fulfillmentRate = cachedSearchData.data.length / cachedSearchData.totalAvailable;
       
-      addLog(`📊 检查缓存: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'apify', '');
-      addLog(`   缓存数据量: ${cachedSearchData.data.length} 条`, 'info', 'apify', '');
-      addLog(`   LinkedIn 数据库估计: ${cachedSearchData.totalAvailable} 条`, 'info', 'apify', '');
-      addLog(`   数据充足率: ${Math.round(fulfillmentRate * 100)}%`, 'info', 'apify', '');
+      addLog(`📊 检查缓存: ${searchName} + ${searchTitle} + ${searchState} + ${requestedCount}`, 'info', 'search', '');
+      addLog(`   缓存数据量: ${cachedSearchData.data.length} 条`, 'info', 'search', '');
+      addLog(`   LinkedIn 数据库估计: ${cachedSearchData.totalAvailable} 条`, 'info', 'search', '');
+      addLog(`   数据充足率: ${Math.round(fulfillmentRate * 100)}%`, 'info', 'search', '');
       
       if (fulfillmentRate >= CACHE_FULFILLMENT_THRESHOLD) {
-        addLog(`✨ 缓存命中！数据充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%`, 'success', 'apify', '✨');
+        addLog(`✨ 缓存命中！数据充足率 ${Math.round(fulfillmentRate * 100)}% >= 80%`, 'success', 'search', '✨');
         const shuffledCache = shuffleArray([...cachedSearchData.data]);
         searchResults = shuffledCache.slice(0, Math.min(requestedCount, shuffledCache.length));
         stats.apifyReturned = searchResults.length;
-        addLog(`🎲 已随机提取 ${searchResults.length} 条记录`, 'info', 'apify', '');
-        addLog(`⏭️ 跳过 LinkedIn API 调用，节省时间和成本`, 'info', 'apify', '');
+        addLog(`🎲 已随机提取 ${searchResults.length} 条记录`, 'info', 'search', '');
+        addLog(`⏭️ 跳过 LinkedIn API 调用，节省时间和成本`, 'info', 'search', '');
       } else {
-        addLog(`⚠️ 缓存数据不足！充足率 ${Math.round(fulfillmentRate * 100)}% < 80%`, 'warning', 'apify', '⚠️');
-        addLog(`🔄 需要重新调用 LinkedIn API 获取最新数据...`, 'info', 'apify', '');
+        addLog(`⚠️ 缓存数据不足！充足率 ${Math.round(fulfillmentRate * 100)}% < 80%`, 'warning', 'search', '⚠️');
+        addLog(`🔄 需要重新调用 LinkedIn API 获取最新数据...`, 'info', 'search', '');
         // Fall through to API call
       }
     }
@@ -532,10 +533,10 @@ export async function executeSearchV3(
     if (searchResults.length === 0) {
       if (mode === 'fuzzy') {
         stats.apifyApiCalls++;
-        addLog(`🔍 正在调用 LinkedIn Leads Finder (Apify)...`, 'info', 'apify', '');
-        addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'apify', '');
-        addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'apify', '');
-        await updateProgress('调用 LinkedIn API', 'searching', 'apify', 30);
+        addLog(`🔍 正在调用 LinkedIn Leads Finder (Apify)...`, 'info', 'search', '');
+        addLog(`⏳ LinkedIn 数据获取中，请耐心等待...`, 'info', 'search', '');
+        addLog(`   (通常需要 1-3 分钟，取决于数据量)`, 'info', 'search', '');
+        await updateProgress('调用 LinkedIn API', 'searching', 'search', 30);
         
         const apiStartTime = Date.now();
         const apifyResult = await apifySearchPeople(searchName, searchTitle, searchState, requestedCount, userId);
@@ -547,8 +548,8 @@ export async function executeSearchV3(
 
         searchResults = apifyResult.people;
         stats.apifyReturned = searchResults.length;
-        addLog(`✅ LinkedIn 返回 ${searchResults.length} 条数据`, 'success', 'apify', '✅');
-        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
+        addLog(`✅ LinkedIn 返回 ${searchResults.length} 条数据`, 'success', 'search', '✅');
+        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'search', '');
 
         const newCacheData: SearchCacheData = {
           data: searchResults,
@@ -558,22 +559,22 @@ export async function executeSearchV3(
           createdAt: new Date().toISOString()
         };
         await setCache(cacheKey, 'search', newCacheData, 180);
-        addLog(`💾 已更新缓存 (180天有效)`, 'info', 'apify', '');
+        addLog(`💾 已更新缓存 (180天有效)`, 'info', 'search', '');
       } else {
-        addLog(`🎯 正在执行精准搜索 (Bright Data + PDL)...`, 'info', 'apify', '');
-        await updateProgress('调用精准搜索 API', 'searching', 'apify', 30);
+        addLog(`🎯 正在执行精准搜索 (Bright Data + PDL)...`, 'info', 'search', '');
+        await updateProgress('调用精准搜索 API', 'searching', 'search', 30);
 
         const apiStartTime = Date.now();
         searchResults = await brightdataSearchPeople(searchName, searchTitle, searchState, requestedCount);
         const apiDuration = Date.now() - apiStartTime;
 
         stats.apifyReturned = searchResults.length;
-        addLog(`✅ 精准搜索返回 ${searchResults.length} 条数据`, 'success', 'apify', '✅');
-        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'apify', '');
+        addLog(`✅ 精准搜索返回 ${searchResults.length} 条数据`, 'success', 'search', '✅');
+        addLog(`⏱️ API 响应时间: ${formatDuration(apiDuration)}`, 'info', 'search', '');
       }
     }
 
-    await updateProgress('处理搜索结果', undefined, 'apify', 50);
+    await updateProgress('处理搜索结果', undefined, 'search', 50);
 
     if (searchResults.length === 0) {
       addLog(`⚠️ 未找到匹配的结果`, 'warning', 'complete', '⚠️');

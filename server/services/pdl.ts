@@ -8,7 +8,7 @@ import { BrightDataProfile, PdlEnrichedProfile } from './brightdata';
 
 // PDL API 配置
 const PDL_API_BASE_URL = 'https://api.peopledatalabs.com/v5/person/enrich';
-const CONCURRENT_LIMIT = 5; // 并发限制，避免触发 PDL 速率限制
+const CONCURRENT_LIMIT = 10; // 并发限制，平衡性能与 API 速率限制
 
 /**
  * PDL API 返回的电话号码格式

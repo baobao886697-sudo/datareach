@@ -414,6 +414,38 @@ export default function Admin() {
               ))}
             </div>
 
+            {/* 搜索模式统计 - 第三行 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { label: "模糊搜索(总)", value: dashboardStats?.searches?.fuzzySearches || 0, icon: Search, color: "cyan", subLabel: `今日: ${dashboardStats?.searches?.todayFuzzySearches || 0}` },
+                { label: "精准搜索(总)", value: dashboardStats?.searches?.exactSearches || 0, icon: Target, color: "purple", subLabel: `今日: ${dashboardStats?.searches?.todayExactSearches || 0}` },
+              ].map((stat, index) => (
+                <div
+                  key={`mode-${index}`}
+                  className="relative p-5 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 overflow-hidden"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm text-slate-400">{stat.label}</p>
+                      {statsLoading ? (
+                        <Skeleton className="h-8 w-20 mt-2" />
+                      ) : (
+                        <>
+                          <p className="text-2xl font-bold text-white mt-1" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                            {stat.value.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">{stat.subLabel}</p>
+                        </>
+                      )}
+                    </div>
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-${stat.color}-500/10`}>
+                      <stat.icon className={`h-5 w-5 text-${stat.color}-400`} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             {/* 快速操作 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <button

@@ -651,13 +651,49 @@ export async function getLoginLogs(page: number = 1, limit: number = 50, userId?
 
 // ============ 统计相关 ============
 
-export async function getSearchStats(): Promise<{ todaySearches: number; todayCreditsUsed: number; totalSearches: number; cacheHitRate: number }> {
+export async function getSearchStats(): Promise<{ 
+  todaySearches: number; 
+  todayCreditsUsed: number; 
+  totalSearches: number; 
+  cacheHitRate: number;
+  fuzzySearches: number;
+  exactSearches: number;
+  todayFuzzySearches: number;
+  todayExactSearches: number;
+}> {
   const db = await getDb();
-  if (!db) return { todaySearches: 0, todayCreditsUsed: 0, totalSearches: 0, cacheHitRate: 0 };
+  if (!db) return { 
+    todaySearches: 0, 
+    todayCreditsUsed: 0, 
+    totalSearches: 0, 
+    cacheHitRate: 0,
+    fuzzySearches: 0,
+    exactSearches: 0,
+    todayFuzzySearches: 0,
+    todayExactSearches: 0
+  };
   const today = new Date(); today.setHours(0, 0, 0, 0);
+  
+  // 基础统计
   const todayResult = await db.select({ count: sql<number>`count(*)`, credits: sql<number>`COALESCE(SUM(creditsUsed), 0)` }).from(searchTasks).where(gte(searchTasks.createdAt, today));
   const totalResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks);
-  return { todaySearches: todayResult[0]?.count || 0, todayCreditsUsed: todayResult[0]?.credits || 0, totalSearches: totalResult[0]?.count || 0, cacheHitRate: 0 };
+  
+  // 模式统计 - 通过 params JSON 字段中的 mode 字段统计
+  const fuzzyResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks).where(sql`JSON_EXTRACT(params, '$.mode') = 'fuzzy' OR JSON_EXTRACT(params, '$.mode') IS NULL`);
+  const exactResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks).where(sql`JSON_EXTRACT(params, '$.mode') = 'exact'`);
+  const todayFuzzyResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks).where(and(gte(searchTasks.createdAt, today), sql`JSON_EXTRACT(params, '$.mode') = 'fuzzy' OR JSON_EXTRACT(params, '$.mode') IS NULL`));
+  const todayExactResult = await db.select({ count: sql<number>`count(*)` }).from(searchTasks).where(and(gte(searchTasks.createdAt, today), sql`JSON_EXTRACT(params, '$.mode') = 'exact'`));
+  
+  return { 
+    todaySearches: todayResult[0]?.count || 0, 
+    todayCreditsUsed: todayResult[0]?.credits || 0, 
+    totalSearches: totalResult[0]?.count || 0, 
+    cacheHitRate: 0,
+    fuzzySearches: fuzzyResult[0]?.count || 0,
+    exactSearches: exactResult[0]?.count || 0,
+    todayFuzzySearches: todayFuzzyResult[0]?.count || 0,
+    todayExactSearches: todayExactResult[0]?.count || 0
+  };
 }
 
 export async function getUserStats(): Promise<{ total: number; active: number; newToday: number; newThisWeek: number }> {
@@ -687,7 +723,7 @@ export async function getRechargeStats(): Promise<{ pendingCount: number; todayC
 export async function getAdminDashboardStats(): Promise<{
   users: { total: number; active: number; newToday: number; newThisWeek: number };
   orders: { pendingCount: number; todayCount: number; todayAmount: number; monthAmount: number };
-  searches: { todaySearches: number; todayCreditsUsed: number; totalSearches: number; cacheHitRate: number };
+  searches: { todaySearches: number; todayCreditsUsed: number; totalSearches: number; cacheHitRate: number; fuzzySearches: number; exactSearches: number; todayFuzzySearches: number; todayExactSearches: number };
   cache: { totalEntries: number; searchCache: number; personCache: number; verificationCache: number; totalHits: number };
 }> {
   const [userStats, rechargeStats, searchStats, cacheStats] = await Promise.all([

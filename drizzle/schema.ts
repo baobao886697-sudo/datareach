@@ -135,6 +135,7 @@ export const searchLogs = mysqlTable("search_logs", {
   cacheHit: boolean("cacheHit").default(false),
   status: varchar("status", { length: 20 }),
   errorMessage: text("errorMessage"),
+  mode: mysqlEnum("mode", ["fuzzy", "exact"]).default("fuzzy"), // 搜索模式
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -274,7 +275,7 @@ export const userFeedbacks = mysqlTable("user_feedbacks", {
   type: mysqlEnum("type", ["question", "suggestion", "business", "custom_dev", "other"]).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   content: text("content").notNull(),
-  contactInfo: varchar("contactInfo", { length: 200 }).default(null), // 可选的联系方式（微信、电话等）
+  contactInfo: varchar("contactInfo", { length: 200 }), // 可选的联系方式（微信、电话等）
   status: mysqlEnum("status", ["pending", "processing", "resolved", "closed"]).default("pending").notNull(),
   adminReply: text("adminReply"),
   repliedBy: varchar("repliedBy", { length: 50 }),
