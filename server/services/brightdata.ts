@@ -7,6 +7,7 @@
 
 import { LeadPerson, PhoneNumber } from './apify';
 import { enrichWithPDL } from './pdl';
+import { getConfig } from '../db';
 import crypto from 'crypto';
 
 // ============ 类型定义 ============
@@ -47,8 +48,28 @@ export interface PdlEnrichedProfile extends BrightDataProfile {
 }
 
 // Bright Data API 配置
-const BRIGHT_DATA_API_TOKEN = process.env.BRIGHT_DATA_API_KEY || process.env.BRIGHTDATA_API_KEY || '';
+// 环境变量作为备用
+const ENV_BRIGHT_DATA_API_TOKEN = process.env.BRIGHT_DATA_API_KEY || process.env.BRIGHTDATA_API_KEY || '';
 const BRIGHT_DATA_DATASET_ID = process.env.BRIGHT_DATA_DATASET_ID || 'gd_l1viktl72bvl7bjuj0'; // LinkedIn People 数据集 ID
+
+// 获取 Bright Data API Token，优先从数据库配置读取，否则使用环境变量
+async function getBrightDataApiToken(): Promise<string> {
+  try {
+    // 优先从数据库配置读取
+    const dbApiKey = await getConfig('BRIGHT_DATA_API_KEY');
+    if (dbApiKey) {
+      console.log('[BrightData] Using API token from database config');
+      return dbApiKey;
+    }
+  } catch (error) {
+    console.error('[BrightData] Error getting API token from database:', error);
+  }
+  // 回退到环境变量
+  if (ENV_BRIGHT_DATA_API_TOKEN) {
+    console.log('[BrightData] Using API token from environment variable');
+  }
+  return ENV_BRIGHT_DATA_API_TOKEN;
+}
 
 interface BrightDataTriggerResponse {
   snapshot_id: string;
@@ -73,10 +94,17 @@ async function triggerBrightDataCollection(
   limit: number
 ): Promise<string | null> {
   try {
+    // 获取 API Token
+    const apiToken = await getBrightDataApiToken();
+    if (!apiToken) {
+      console.error('[BrightData] API token not configured');
+      return null;
+    }
+    
     // 构建搜索关键词
     const keyword = `${searchName} ${searchTitle} ${searchState}`;
     
-        const params = new URLSearchParams({
+    const params = new URLSearchParams({
       dataset_id: BRIGHT_DATA_DATASET_ID,
       type: 'discover_new',
       discover_by: 'keyword',
@@ -92,7 +120,7 @@ async function triggerBrightDataCollection(
     const response = await fetch(`https://api.brightdata.com/datasets/v3/trigger?${params.toString()}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${BRIGHT_DATA_API_TOKEN}`,
+        'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: body,
@@ -123,12 +151,19 @@ async function pollBrightDataSnapshot(
 ): Promise<BrightDataProfile[]> {
   const startTime = Date.now();
   
+  // 获取 API Token
+  const apiToken = await getBrightDataApiToken();
+  if (!apiToken) {
+    console.error('[BrightData] API token not configured for polling');
+    return [];
+  }
+  
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const response = await fetch(`https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${BRIGHT_DATA_API_TOKEN}`,
+          'Authorization': `Bearer ${apiToken}`,
         },
       });
 
@@ -310,9 +345,10 @@ export async function brightdataSearchPeople(
 ): Promise<LeadPerson[]> {
   console.log(`[BrightData] Starting exact search: ${searchName} | ${searchTitle} | ${searchState} | limit: ${limit}`);
   
-  // 检查 API Token
-  if (!BRIGHT_DATA_API_TOKEN) {
-    console.error('[BrightData] API token not configured (BRIGHT_DATA_API_KEY or BRIGHTDATA_API_KEY)');
+  // 检查 API Token（优先从数据库配置读取）
+  const apiToken = await getBrightDataApiToken();
+  if (!apiToken) {
+    console.error('[BrightData] API token not configured (neither in database config nor environment variables)');
     // 返回空数组，让系统优雅降级
     return [];
   }
@@ -355,7 +391,9 @@ export async function brightdataSearchPeople(
  * 检查 Bright Data 服务是否可用
  */
 export async function checkBrightDataStatus(): Promise<boolean> {
-  if (!BRIGHT_DATA_API_TOKEN) {
+  // 优先从数据库配置读取 API Token
+  const apiToken = await getBrightDataApiToken();
+  if (!apiToken) {
     return false;
   }
   
@@ -363,7 +401,7 @@ export async function checkBrightDataStatus(): Promise<boolean> {
     const response = await fetch('https://api.brightdata.com/datasets/v3/datasets', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${BRIGHT_DATA_API_TOKEN}`,
+        'Authorization': `Bearer ${apiToken}`,
       },
     });
     
