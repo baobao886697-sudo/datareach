@@ -100,9 +100,9 @@ const USE_CASES = [
 
 // 客户评价
 const TESTIMONIALS = [
-  { name: "张总", role: "某科技公司 CEO", content: "数据准确率非常高，大大提升了我们的销售效率。一个月内成交额增长了40%！", rating: 5, avatar: "/images/executive2.jpg" },
-  { name: "李经理", role: "某投资机构 VP", content: "一手数据资源，帮助我们快速建立行业人脉网络。招聘效率提升了3倍。", rating: 5, avatar: "/images/executive1.jpg" },
-  { name: "王总监", role: "某猎头公司 总监", content: "多平台数据整合非常实用，节省了大量时间。强烈推荐给所有B2B企业！", rating: 5, avatar: "/images/executive3.jpg" },
+  { name: "张总", role: "某科技公司 CEO", content: "数据准确率非常高，大大提升了我们的销售效率。一个月内成交额增长了40%！", rating: 5, avatar: "/images/asian-man-1.jpg" },
+  { name: "李经理", role: "某投资机构 VP", content: "一手数据资源，帮助我们快速建立行业人脉网络。招聘效率提升了3倍。", rating: 5, avatar: "/images/asian-woman-1.jpg" },
+  { name: "王总监", role: "某猎头公司 总监", content: "多平台数据整合非常实用，节省了大量时间。强烈推荐给所有B2B企业！", rating: 5, avatar: "/images/asian-man-3.jpg" },
 ];
 
 export default function Home() {
@@ -384,11 +384,11 @@ export default function Home() {
                 <div className="absolute -top-6 -right-6 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50 shadow-xl z-20">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-700">
-                      <img src="/images/executive1.jpg" alt="Executive" className="w-full h-full object-cover" />
+                      <img src="/images/asian-woman-2.jpg" alt="Executive" className="w-full h-full object-cover" />
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-white">John Smith</div>
-                      <div className="text-xs text-slate-400">CEO at TechCorp</div>
+                      <div className="text-sm font-medium text-white">陈明达</div>
+                      <div className="text-xs text-slate-400">TechCorp 创始人</div>
                     </div>
                     <Phone className="w-4 h-4 text-green-400 ml-2" />
                   </div>
