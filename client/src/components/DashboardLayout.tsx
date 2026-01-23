@@ -247,9 +247,14 @@ function DashboardLayoutContent({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <Avatar className="h-9 w-9 border shrink-0 bg-gradient-to-br from-cyan-500/20 to-blue-600/20">
-                    <AvatarFallback className="text-xs font-medium bg-gradient-to-br from-cyan-500/20 to-blue-600/20">
-                      {user?.name?.charAt(0).toUpperCase() || <UserCircle className="h-5 w-5 text-cyan-400" />}
+                  <Avatar className="h-9 w-9 border border-cyan-500/30 shrink-0 bg-gradient-to-br from-cyan-500/20 to-blue-600/20">
+                    <AvatarFallback className="text-sm font-bold bg-gradient-to-br from-cyan-500/30 to-blue-600/30 text-cyan-300">
+                      {user?.name && user.name.length > 0 
+                        ? user.name.charAt(0).toUpperCase() 
+                        : user?.email 
+                          ? user.email.charAt(0).toUpperCase()
+                          : <UserCircle className="h-5 w-5 text-cyan-400" />
+                      }
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
