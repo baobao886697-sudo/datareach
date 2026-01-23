@@ -31,7 +31,8 @@ const US_STATES = [
 
 // 搜索数量选项
 const SEARCH_LIMITS = [
-  { value: 100, label: "100 条", description: "快速测试", recommended: true },
+  { value: 10, label: "10 条", description: "测试用", recommended: true },
+  { value: 100, label: "100 条", description: "快速测试" },
   { value: 500, label: "500 条", description: "小批量" },
   { value: 1000, label: "1000 条", description: "标准搜索" },
   { value: 5000, label: "5000 条", description: "大批量" },
@@ -59,7 +60,7 @@ export default function Search() {
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [state, setState] = useState("");
-  const [searchLimit, setSearchLimit] = useState(100);
+  const [searchLimit, setSearchLimit] = useState(10);
   const [customLimit, setCustomLimit] = useState("");
   
   // 年龄筛选（默认启用，范围 50-79）
@@ -541,7 +542,7 @@ export default function Search() {
                     <div className="relative flex-1">
                       <Input
                         type="number"
-                        placeholder="输入数量 (100-10000)"
+                        placeholder="输入数量 (10-10000)"
                         value={customLimit}
                         onChange={(e) => {
                           let value = e.target.value;
@@ -556,21 +557,21 @@ export default function Search() {
                           setCustomLimit(value);
                           
                           // 如果是有效数字，更新 searchLimit
-                          if (!isNaN(num) && num >= 100 && num <= 10000) {
+                          if (!isNaN(num) && num >= 10 && num <= 10000) {
                             setSearchLimit(num);
                           }
                         }}
                         className={`bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 pr-12 ${
                           customLimit ? 'border-cyan-500 ring-1 ring-cyan-500/30' : ''
                         }`}
-                        min={100}
+                        min={10}
                         max={10000}
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">条</span>
                     </div>
                   </div>
-                  {customLimit && parseInt(customLimit) < 100 && customLimit.length >= 3 && (
-                    <p className="text-xs text-amber-400 mt-1">最小搜索数量为 100 条</p>
+                  {customLimit && parseInt(customLimit) < 10 && customLimit.length >= 2 && (
+                    <p className="text-xs text-amber-400 mt-1">最小搜索数量为 10 条</p>
                   )}
                 </div>
 
