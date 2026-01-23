@@ -412,34 +412,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 浮动卡片 - 数据验证成功 */}
-                <div className="absolute -top-6 -right-6 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50 shadow-xl z-20">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500/20 to-emerald-500/20 flex items-center justify-center">
-                      <CheckCircle className="w-6 h-6 text-green-400" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-white">数据验证成功</div>
-                      <div className="text-xs text-slate-400">已找到 847 位匹配的决策者</div>
-                    </div>
-                  </div>
-                </div>
 
-                {/* 浮动卡片 - 企业信赖 */}
-                <div className="absolute -bottom-6 -left-6 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50 shadow-xl z-20">
-                  <div className="flex items-center gap-3">
-                    <Building2 className="w-8 h-8 text-purple-400" />
-                    <div>
-                      <div className="text-2xl font-bold text-white">10,000+</div>
-                      <div className="text-xs text-slate-400">企业信赖</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 协作图片 */}
-                <div className="absolute -right-10 top-1/2 -translate-y-1/2 w-32 h-32 rounded-xl overflow-hidden border-2 border-slate-800 shadow-xl z-0 opacity-60">
-                  <img src="/images/collaboration.jpg" alt="Collaboration" className="w-full h-full object-cover" />
-                </div>
               </div>
             </div>
           </div>
