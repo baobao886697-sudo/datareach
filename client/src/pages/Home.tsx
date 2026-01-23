@@ -1,13 +1,40 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Link, useLocation } from "wouter";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useLocation } from "wouter";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import { 
   Target, Search, Phone, Shield, Zap, CheckCircle, ArrowRight, Sparkles, 
   Database, Globe, TrendingUp, Users, Building2, Linkedin, Twitter, 
   Facebook, Mail, MapPin, BarChart3, Lock, Clock, Award, Star,
-  ChevronRight, Play, Layers, Network, Cpu, Eye
+  ChevronRight, Play, Layers, Network, Cpu, Eye, EyeOff, ChevronDown
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+
+// 生成设备指纹（保持原有逻辑）
+function generateDeviceId(): string {
+  const nav = window.navigator;
+  const screen = window.screen;
+  const fingerprint = [
+    nav.userAgent,
+    nav.language,
+    screen.colorDepth,
+    screen.width + 'x' + screen.height,
+    new Date().getTimezoneOffset(),
+    nav.hardwareConcurrency || 'unknown',
+  ].join('|');
+  
+  let hash = 0;
+  for (let i = 0; i < fingerprint.length; i++) {
+    const char = fingerprint.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+}
 
 // 动态计数器组件
 function AnimatedCounter({ end, duration = 2000, suffix = "" }: { end: number; duration?: number; suffix?: string }) {
@@ -73,15 +100,27 @@ const USE_CASES = [
 
 // 客户评价
 const TESTIMONIALS = [
-  { name: "张总", role: "某科技公司 CEO", content: "数据准确率非常高，大大提升了我们的销售效率。", rating: 5 },
-  { name: "李经理", role: "某投资机构 VP", content: "一手数据资源，帮助我们快速建立行业人脉网络。", rating: 5 },
-  { name: "王总监", role: "某猎头公司 总监", content: "多平台数据整合非常实用，节省了大量时间。", rating: 5 },
+  { name: "张总", role: "某科技公司 CEO", content: "数据准确率非常高，大大提升了我们的销售效率。一个月内成交额增长了40%！", rating: 5, avatar: "/images/executive2.jpg" },
+  { name: "李经理", role: "某投资机构 VP", content: "一手数据资源，帮助我们快速建立行业人脉网络。招聘效率提升了3倍。", rating: 5, avatar: "/images/executive1.jpg" },
+  { name: "王总监", role: "某猎头公司 总监", content: "多平台数据整合非常实用，节省了大量时间。强烈推荐给所有B2B企业！", rating: 5, avatar: "/images/executive3.jpg" },
 ];
 
 export default function Home() {
   const { user, loading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [activeSource, setActiveSource] = useState(0);
+  
+  // 弹窗登录/注册状态
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // 表单状态
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
 
   // 已登录用户自动跳转到仪表盘（保持原有逻辑）
   useEffect(() => {
@@ -97,6 +136,77 @@ export default function Home() {
     }, 3000);
     return () => clearInterval(timer);
   }, []);
+
+  // 登录 mutation（保持原有逻辑）
+  const loginMutation = trpc.auth.login.useMutation({
+    onSuccess: () => {
+      toast.success("登录成功！");
+      setShowAuthModal(false);
+      window.location.href = "/dashboard";
+    },
+    onError: (error) => {
+      toast.error(error.message || "登录失败");
+      setIsLoading(false);
+    },
+  });
+
+  // 注册 mutation（保持原有逻辑）
+  const registerMutation = trpc.auth.register.useMutation({
+    onSuccess: () => {
+      toast.success("注册成功！请登录");
+      setAuthMode('login');
+      setPassword("");
+      setConfirmPassword("");
+      setIsLoading(false);
+    },
+    onError: (error) => {
+      toast.error(error.message || "注册失败");
+      setIsLoading(false);
+    },
+  });
+
+  const handleAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!email || !password) {
+      toast.error("请填写所有必填字段");
+      return;
+    }
+
+    if (authMode === 'register') {
+      if (password !== confirmPassword) {
+        toast.error("两次密码输入不一致");
+        return;
+      }
+      if (password.length < 6) {
+        toast.error("密码至少需要6个字符");
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    const deviceId = generateDeviceId();
+
+    if (authMode === 'login') {
+      loginMutation.mutate({ email, password, deviceId });
+    } else {
+      registerMutation.mutate({ 
+        email, 
+        password, 
+        inviteCode: inviteCode || undefined,
+        deviceId 
+      });
+    }
+  };
+
+  const openAuth = (mode: 'login' | 'register') => {
+    setAuthMode(mode);
+    setShowAuthModal(true);
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setInviteCode("");
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0f1a] relative overflow-hidden">
@@ -153,118 +263,178 @@ export default function Home() {
             <a href="#cases" className="text-slate-400 hover:text-cyan-400 transition-colors text-sm font-medium">使用场景</a>
           </div>
 
-          {/* 操作按钮 */}
+          {/* 操作按钮 - 改为弹窗 */}
           <div className="flex items-center gap-3">
-            <Link href="/login">
-              <Button variant="ghost" className="text-slate-300 hover:text-cyan-400 hover:bg-cyan-500/10 hidden sm:flex">
-                登录
-              </Button>
-            </Link>
-            <Link href="/register">
-              <Button className="bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-lg shadow-cyan-500/25 border-0 px-6">
-                免费开始
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
+            <Button 
+              variant="ghost" 
+              onClick={() => openAuth('login')}
+              className="text-slate-300 hover:text-cyan-400 hover:bg-cyan-500/10 hidden sm:flex"
+            >
+              登录
+            </Button>
+            <Button 
+              onClick={() => openAuth('register')}
+              className="bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-lg shadow-cyan-500/25 border-0 px-6"
+            >
+              免费开始
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* Hero Section - 添加图片展示 */}
       <section className="relative py-20 lg:py-32">
         <div className="container mx-auto px-4 lg:px-8">
-          <div className="max-w-6xl mx-auto">
-            {/* 顶部标签 */}
-            <div className="flex justify-center mb-8">
-              <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10 border border-cyan-500/20 backdrop-blur-sm">
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                  <span className="text-green-400 text-xs font-medium">实时在线</span>
+          <div className="grid lg:grid-cols-2 gap-12 items-center max-w-7xl mx-auto">
+            {/* 左侧文案 */}
+            <div>
+              {/* 顶部标签 */}
+              <div className="flex mb-8">
+                <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10 border border-cyan-500/20 backdrop-blur-sm">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                    <span className="text-green-400 text-xs font-medium">实时在线</span>
+                  </div>
+                  <div className="w-px h-4 bg-slate-700" />
+                  <span className="text-cyan-400 text-sm">全球领先的商业数据平台</span>
+                  <Sparkles className="w-4 h-4 text-yellow-400" />
                 </div>
-                <div className="w-px h-4 bg-slate-700" />
-                <span className="text-cyan-400 text-sm">全球领先的商业数据平台</span>
-                <Sparkles className="w-4 h-4 text-yellow-400" />
               </div>
-            </div>
-            
-            {/* 主标题 */}
-            <h1 className="text-center text-5xl lg:text-7xl xl:text-8xl font-bold leading-[1.1] mb-8">
-              <span className="text-white">全球人脉资源</span>
-              <br />
-              <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-500 bg-clip-text text-transparent">
-                一键触达
-              </span>
-            </h1>
-            
-            {/* 副标题 */}
-            <p className="text-center text-xl lg:text-2xl text-slate-400 max-w-3xl mx-auto mb-12 leading-relaxed">
-              整合全球
-              <span className="text-cyan-400 font-semibold"> 10亿+ </span>
-              商业联系人数据，覆盖
-              <span className="text-purple-400 font-semibold"> 195+ </span>
-              国家和地区
-              <br className="hidden lg:block" />
-              <span className="text-slate-500">一手数据资源 · 多重验证系统 · 实时更新</span>
-            </p>
-            
-            {/* CTA按钮 */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
-              <Link href="/register">
-                <Button size="lg" className="gap-3 text-lg px-10 py-7 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-2xl shadow-cyan-500/30 border-0 rounded-2xl group">
+              
+              {/* 主标题 */}
+              <h1 className="text-5xl lg:text-6xl xl:text-7xl font-bold leading-[1.1] mb-8">
+                <span className="text-white">全球人脉资源</span>
+                <br />
+                <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-500 bg-clip-text text-transparent">
+                  一键触达
+                </span>
+              </h1>
+              
+              {/* 副标题 */}
+              <p className="text-xl text-slate-400 mb-8 leading-relaxed">
+                整合全球
+                <span className="text-cyan-400 font-semibold"> 10亿+ </span>
+                商业联系人数据，覆盖
+                <span className="text-purple-400 font-semibold"> 195+ </span>
+                国家和地区
+                <br />
+                <span className="text-slate-500">一手数据资源 · 多重验证系统 · 实时更新</span>
+              </p>
+              
+              {/* CTA按钮 - 改为弹窗 */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-12">
+                <Button 
+                  size="lg" 
+                  onClick={() => openAuth('register')}
+                  className="gap-3 text-lg px-10 py-7 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-2xl shadow-cyan-500/30 border-0 rounded-2xl group"
+                >
                   <Zap className="h-5 w-5 group-hover:animate-pulse" />
                   立即开始免费试用
                   <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Button>
-              </Link>
-              <Button size="lg" variant="outline" className="gap-3 text-lg px-10 py-7 border-slate-700 text-slate-300 hover:bg-slate-800/50 hover:border-cyan-500/50 hover:text-cyan-400 rounded-2xl">
-                <Play className="h-5 w-5" />
-                观看演示视频
-              </Button>
-            </div>
+                <Button size="lg" variant="outline" className="gap-3 text-lg px-10 py-7 border-slate-700 text-slate-300 hover:bg-slate-800/50 hover:border-cyan-500/50 hover:text-cyan-400 rounded-2xl">
+                  <Play className="h-5 w-5" />
+                  观看演示视频
+                </Button>
+              </div>
 
-            {/* 核心数据展示 */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 max-w-5xl mx-auto">
-              {[
-                { value: 1000000000, suffix: "+", label: "全球数据记录", icon: Database, color: "cyan" },
-                { value: 195, suffix: "+", label: "覆盖国家地区", icon: Globe, color: "purple" },
-                { value: 95, suffix: "%+", label: "数据验证准确率", icon: Shield, color: "green" },
-                { value: 24, suffix: "/7", label: "全天候实时服务", icon: Clock, color: "blue" },
-              ].map((stat, index) => (
-                <div 
-                  key={index} 
-                  className="relative group p-6 rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-500 backdrop-blur-sm overflow-hidden"
-                >
-                  {/* 悬停光效 */}
-                  <div className={`absolute inset-0 bg-gradient-to-br from-${stat.color}-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-                  
-                  <div className="relative z-10">
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-${stat.color}-500/20 to-${stat.color}-600/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                      <stat.icon className={`w-6 h-6 text-${stat.color}-400`} />
-                    </div>
-                    <div className="text-3xl lg:text-4xl font-bold text-white mb-2" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                      <AnimatedCounter end={stat.value} suffix={stat.suffix} />
-                    </div>
-                    <div className="text-sm text-slate-500">{stat.label}</div>
+              {/* 核心数据展示 */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { value: "10亿+", label: "全球数据", icon: Database },
+                  { value: "195+", label: "覆盖国家", icon: Globe },
+                  { value: "95%+", label: "准确率", icon: Shield },
+                  { value: "24/7", label: "实时服务", icon: Clock },
+                ].map((stat, index) => (
+                  <div key={index} className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50 backdrop-blur-sm">
+                    <stat.icon className="w-5 h-5 text-cyan-400 mb-2" />
+                    <div className="text-xl font-bold text-white">{stat.value}</div>
+                    <div className="text-xs text-slate-500">{stat.label}</div>
                   </div>
-                </div>
-              ))}
-            </div>
-
-            {/* 信任背书 */}
-            <div className="mt-16 text-center">
-              <p className="text-slate-600 text-sm mb-6">已服务超过 10,000+ 企业客户</p>
-              <div className="flex flex-wrap justify-center items-center gap-8 opacity-50">
-                {['企业A', '企业B', '企业C', '企业D', '企业E'].map((company, i) => (
-                  <div key={i} className="text-slate-500 font-semibold text-lg">{company}</div>
                 ))}
               </div>
             </div>
+
+            {/* 右侧图片展示 */}
+            <div className="relative hidden lg:block">
+              <div className="relative">
+                {/* 主图 */}
+                <div className="relative z-10 rounded-2xl overflow-hidden shadow-2xl shadow-cyan-500/10 border border-slate-800/50">
+                  <img 
+                    src="/images/team-meeting.jpg" 
+                    alt="Business Team Meeting" 
+                    className="w-full h-[400px] object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a0f1a] via-transparent to-transparent" />
+                  <div className="absolute bottom-6 left-6 right-6">
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center">
+                        <CheckCircle className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <div className="text-white font-semibold">数据验证成功</div>
+                        <div className="text-sm text-slate-400">已找到 847 位匹配的决策者</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 浮动卡片 - 人物信息 */}
+                <div className="absolute -top-6 -right-6 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50 shadow-xl z-20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-700">
+                      <img src="/images/executive1.jpg" alt="Executive" className="w-full h-full object-cover" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-white">John Smith</div>
+                      <div className="text-xs text-slate-400">CEO at TechCorp</div>
+                    </div>
+                    <Phone className="w-4 h-4 text-green-400 ml-2" />
+                  </div>
+                </div>
+
+                {/* 浮动卡片 - 全球覆盖 */}
+                <div className="absolute -bottom-6 -left-6 p-4 rounded-xl bg-slate-900/90 backdrop-blur-sm border border-slate-700/50 shadow-xl z-20">
+                  <div className="flex items-center gap-3">
+                    <Globe className="w-8 h-8 text-cyan-400" />
+                    <div>
+                      <div className="text-2xl font-bold text-white">195+</div>
+                      <div className="text-xs text-slate-400">覆盖国家</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 协作图片 */}
+                <div className="absolute -right-10 top-1/2 -translate-y-1/2 w-32 h-32 rounded-xl overflow-hidden border-2 border-slate-800 shadow-xl z-0 opacity-60">
+                  <img src="/images/collaboration.jpg" alt="Collaboration" className="w-full h-full object-cover" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 滚动提示 */}
+          <div className="flex flex-col items-center gap-2 mt-16 animate-bounce">
+            <span className="text-sm text-slate-500">向下滚动了解更多</span>
+            <ChevronDown className="w-5 h-5 text-slate-500" />
+          </div>
+        </div>
+      </section>
+
+      {/* 信任背书 */}
+      <section className="relative py-12 border-y border-cyan-500/10 bg-slate-900/30">
+        <div className="container mx-auto px-4 lg:px-8">
+          <p className="text-center text-slate-600 text-sm mb-6">已服务超过 10,000+ 企业客户</p>
+          <div className="flex flex-wrap justify-center items-center gap-8 opacity-50">
+            {['企业A', '企业B', '企业C', '企业D', '企业E', '企业F'].map((company, i) => (
+              <div key={i} className="text-slate-500 font-semibold text-lg">{company}</div>
+            ))}
           </div>
         </div>
       </section>
 
       {/* 数据源展示 */}
-      <section id="sources" className="relative py-24 border-t border-cyan-500/10">
+      <section id="sources" className="relative py-24">
         <div className="container mx-auto px-4 lg:px-8">
           <div className="text-center mb-16">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/10 border border-purple-500/20 mb-6">
@@ -302,6 +472,50 @@ export default function Home() {
                 <p className="text-sm text-slate-500 mt-1">数据记录</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 全球网络展示 - 新增图片区块 */}
+      <section className="relative py-24 border-t border-cyan-500/10">
+        <div className="container mx-auto px-4 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center max-w-6xl mx-auto">
+            <div className="relative">
+              <img 
+                src="/images/global-network.webp" 
+                alt="Global Network" 
+                className="w-full rounded-2xl shadow-2xl shadow-cyan-500/10 border border-slate-800/50"
+              />
+            </div>
+            <div>
+              <h2 className="text-4xl font-bold mb-6">
+                <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">全球覆盖</span>
+                <br />触达每一个商业机会
+              </h2>
+              <p className="text-slate-400 text-lg mb-8 leading-relaxed">
+                我们的数据网络覆盖全球195+个国家和地区，无论您的目标客户在哪里，
+                DataReach 都能帮您精准触达。从北美到欧洲，从亚太到中东，
+                一键获取全球商业精英的联系方式。
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                  <div className="text-3xl font-bold text-cyan-400">98%</div>
+                  <div className="text-sm text-slate-500">北美市场覆盖率</div>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                  <div className="text-3xl font-bold text-purple-400">95%</div>
+                  <div className="text-sm text-slate-500">欧洲市场覆盖率</div>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                  <div className="text-3xl font-bold text-green-400">92%</div>
+                  <div className="text-sm text-slate-500">亚太市场覆盖率</div>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                  <div className="text-3xl font-bold text-orange-400">88%</div>
+                  <div className="text-sm text-slate-500">其他地区覆盖率</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -422,12 +636,13 @@ export default function Home() {
                 ))}
               </div>
 
-              <Link href="/register">
-                <Button className="w-full py-7 text-lg bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-xl shadow-cyan-500/25 border-0 rounded-2xl font-semibold">
-                  立即开始免费试用
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
+              <Button 
+                onClick={() => openAuth('register')}
+                className="w-full py-7 text-lg bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-xl shadow-cyan-500/25 border-0 rounded-2xl font-semibold"
+              >
+                立即开始免费试用
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
 
               <p className="text-center text-slate-500 text-sm mt-4">
                 <Lock className="inline w-4 h-4 mr-1" />
@@ -438,7 +653,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 客户评价 */}
+      {/* 客户评价 - 添加头像图片 */}
       <section className="relative py-24 border-t border-cyan-500/10">
         <div className="container mx-auto px-4 lg:px-8">
           <div className="text-center mb-16">
@@ -456,9 +671,14 @@ export default function Home() {
                   ))}
                 </div>
                 <p className="text-slate-300 mb-6 leading-relaxed">"{item.content}"</p>
-                <div>
-                  <p className="text-white font-semibold">{item.name}</p>
-                  <p className="text-sm text-slate-500">{item.role}</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-700">
+                    <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <p className="text-white font-semibold">{item.name}</p>
+                    <p className="text-sm text-slate-500">{item.role}</p>
+                  </div>
                 </div>
               </div>
             ))}
@@ -484,12 +704,14 @@ export default function Home() {
               <p className="text-slate-400 mb-10 max-w-xl mx-auto text-lg">
                 立即注册，开始使用全球领先的商业数据平台，获取一手精准的潜在客户联系方式。
               </p>
-              <Link href="/register">
-                <Button size="lg" className="gap-3 text-lg px-12 py-7 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-2xl shadow-cyan-500/30 border-0 rounded-2xl">
-                  免费开始使用
-                  <ArrowRight className="h-5 w-5" />
-                </Button>
-              </Link>
+              <Button 
+                size="lg" 
+                onClick={() => openAuth('register')}
+                className="gap-3 text-lg px-12 py-7 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-700 text-white shadow-2xl shadow-cyan-500/30 border-0 rounded-2xl"
+              >
+                免费开始使用
+                <ArrowRight className="h-5 w-5" />
+              </Button>
             </div>
           </div>
         </div>
@@ -525,6 +747,142 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      {/* 登录/注册弹窗 */}
+      <Dialog open={showAuthModal} onOpenChange={setShowAuthModal}>
+        <DialogContent className="sm:max-w-md bg-slate-900 border-slate-800 p-0 overflow-hidden">
+          <div className="p-6">
+            <DialogHeader className="mb-6">
+              <DialogTitle className="text-2xl font-bold text-center text-white">
+                {authMode === 'login' ? '欢迎回来' : '创建账户'}
+              </DialogTitle>
+              <p className="text-center text-slate-400 mt-2">
+                {authMode === 'login' 
+                  ? '登录您的账户，开始探索全球人脉' 
+                  : '注册成为会员，获取一手商业数据'}
+              </p>
+            </DialogHeader>
+
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="modal-email" className="text-slate-300">邮箱地址</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Input
+                    id="modal-email"
+                    type="email"
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="modal-password" className="text-slate-300">密码</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Input
+                    id="modal-password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {authMode === 'register' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="modal-confirm-password" className="text-slate-300">确认密码</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                      <Input
+                        id="modal-confirm-password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="pl-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="modal-invite-code" className="text-slate-300">
+                      邀请码 <span className="text-slate-500">(选填)</span>
+                    </Label>
+                    <Input
+                      id="modal-invite-code"
+                      type="text"
+                      placeholder="输入邀请码获得额外奖励"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value)}
+                      className="bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+                    />
+                  </div>
+                </>
+              )}
+
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 py-6 text-lg"
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    处理中...
+                  </span>
+                ) : (
+                  <>
+                    {authMode === 'login' ? '登录' : '注册'}
+                    <ArrowRight className="w-5 h-5 ml-2" />
+                  </>
+                )}
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <p className="text-slate-400">
+                {authMode === 'login' ? '还没有账户？' : '已有账户？'}
+                <button
+                  type="button"
+                  onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+                  className="ml-2 text-cyan-400 hover:text-cyan-300 font-medium"
+                >
+                  {authMode === 'login' ? '立即注册' : '立即登录'}
+                </button>
+              </p>
+            </div>
+
+            {/* 信任标识 */}
+            <div className="mt-6 pt-6 border-t border-slate-800 flex items-center justify-center gap-6 text-xs text-slate-500">
+              <span className="flex items-center gap-1">
+                <Shield className="w-4 h-4" />
+                数据安全加密
+              </span>
+              <span className="flex items-center gap-1">
+                <Lock className="w-4 h-4" />
+                隐私保护
+              </span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 全局样式 */}
       <style>{`
