@@ -131,7 +131,7 @@ export async function getTpsSearchTask(taskId: string) {
 export async function updateTpsSearchTaskProgress(
   taskDbId: number,
   data: {
-    status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+    status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "insufficient_credits";
     totalSubTasks?: number;
     completedSubTasks?: number;
     progress?: number;

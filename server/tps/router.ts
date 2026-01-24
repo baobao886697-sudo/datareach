@@ -38,6 +38,9 @@ import {
   logCreditChange,
   logApi,
 } from "./db";
+import { getDb } from "../db";
+import { tpsSearchTasks } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 // 统一队列并发配置
 const TOTAL_CONCURRENCY = TPS_CONFIG.TOTAL_CONCURRENCY;  // 40 总并发
@@ -146,13 +149,27 @@ export const tpsRouter = router({
       const userCredits = await getUserCredits(userId);
       const searchCost = parseFloat(config.searchCost);
       const detailCost = parseFloat(config.detailCost);
+      const maxPages = config.maxPages || 25;
       
-      // 预估最小消耗
-      const minEstimatedCost = input.names.length * (searchCost + detailCost * 10);
-      if (userCredits < minEstimatedCost) {
+      // 计算子任务数
+      let subTaskCount = 0;
+      if (input.mode === "nameOnly") {
+        subTaskCount = input.names.length;
+      } else {
+        const locations = input.locations || [""];
+        subTaskCount = input.names.length * locations.length;
+      }
+      
+      // 预估最大消耗（与前端保持一致）
+      const avgDetailsPerTask = 50;  // 每个任务平均 50 条详情
+      const maxSearchPageCost = subTaskCount * maxPages * searchCost;
+      const estimatedDetailCost = subTaskCount * avgDetailsPerTask * detailCost;
+      const maxEstimatedCost = maxSearchPageCost + estimatedDetailCost;
+      
+      if (userCredits < maxEstimatedCost) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `积分不足，预估最少需要 ${minEstimatedCost.toFixed(1)} 积分，当前余额 ${userCredits} 积分`,
+          message: `积分不足，预估最多需要 ${maxEstimatedCost.toFixed(1)} 积分（搜索页 ${maxSearchPageCost.toFixed(1)} + 详情页 ${estimatedDetailCost.toFixed(1)}），当前余额 ${userCredits} 积分`,
         });
       }
       
@@ -514,6 +531,61 @@ async function executeTpsSearchUnifiedQueue(
     await Promise.all(runningSearches);
     
     addLog(`📊 搜索阶段完成: ${allDetailTasks.length} 条详情待获取`);
+    
+    // ==================== 搜索阶段完成后的积分检查 ====================
+    // 计算已消耗的搜索页费用
+    const searchPageCostSoFar = totalSearchPages * searchCost;
+    
+    // 去重详情链接，计算需要获取的详情数
+    const uniqueDetailLinks = [...new Set(allDetailTasks.map(t => t.searchResult.detailLink))];
+    const estimatedDetailCostRemaining = uniqueDetailLinks.length * detailCost;
+    const totalEstimatedCost = searchPageCostSoFar + estimatedDetailCostRemaining;
+    
+    // 再次检查用户积分是否足够
+    const currentCredits = await getUserCredits(userId);
+    if (currentCredits < totalEstimatedCost) {
+      // 积分不足，终止任务
+      addLog(`⚠️ 积分不足！当前余额 ${currentCredits} 积分，需要 ${totalEstimatedCost.toFixed(1)} 积分（搜索页 ${searchPageCostSoFar.toFixed(1)} + 详情页 ${estimatedDetailCostRemaining.toFixed(1)}）`);
+      addLog(`❌ 任务提前终止，已完成的搜索页费用将正常扣除`);
+      
+      // 只扣除已完成的搜索页费用
+      if (searchPageCostSoFar > 0) {
+        await deductCredits(userId, searchPageCostSoFar, `TPS搜索[提前终止] [${taskId}]`);
+        await logCreditChange(userId, -searchPageCostSoFar, "search", `TPS搜索任务[提前终止] ${taskId}`, taskId);
+      }
+      
+      // 标记任务为积分不足状态
+      await updateTpsSearchTaskProgress(taskDbId, {
+        status: "insufficient_credits",
+        searchPageRequests: totalSearchPages,
+        logs,
+      });
+      
+      // 记录完成信息
+      const database = await getDb();
+      if (database) {
+        await database.update(tpsSearchTasks).set({
+          errorMessage: `积分不足，任务提前终止。已扣除搜索页费用 ${searchPageCostSoFar.toFixed(1)} 积分`,
+          creditsUsed: searchPageCostSoFar.toString(),
+          completedAt: new Date(),
+        }).where(eq(tpsSearchTasks.id, taskDbId));
+      }
+      
+      await logApi({
+        userId,
+        apiType: "scrape_tps",
+        endpoint: "fullSearch",
+        requestParams: { names: input.names.length, mode: input.mode },
+        responseStatus: 402,  // Payment Required
+        success: false,
+        errorMessage: "积分不足，任务提前终止",
+        creditsUsed: searchPageCostSoFar,
+      });
+      
+      return;  // 终止任务
+    }
+    
+    addLog(`✅ 积分检查通过: 当前 ${currentCredits} 积分，预估需要 ${totalEstimatedCost.toFixed(1)} 积分`);
     
     // ==================== 阶段二：统一队列获取详情 ====================
     if (allDetailTasks.length > 0) {

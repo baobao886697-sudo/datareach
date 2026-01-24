@@ -359,7 +359,7 @@ export const tpsSearchTasks = mysqlTable("tps_search_tasks", {
   detailPageRequests: int("detailPageRequests").default(0).notNull(), // 详情页请求数
   cacheHits: int("cacheHits").default(0).notNull(), // 缓存命中数
   creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0").notNull(),
-  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits"]).default("pending").notNull(),
   progress: int("progress").default(0).notNull(), // 进度百分比
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),
