@@ -47,7 +47,7 @@ const tpsSearchInputSchema = z.object({
   locations: z.array(z.string()).optional(),
   mode: z.enum(["nameOnly", "nameLocation"]),
   filters: tpsFiltersSchema,
-  maxPages: z.number().min(1).max(25).optional(),
+  // maxPages 已删除，固定使用最大 25 页
 });
 
 export const tpsRouter = router({
@@ -335,7 +335,9 @@ async function executeTpsSearch(
   const searchCost = parseFloat(config.searchCost);
   const detailCost = parseFloat(config.detailCost);
   const token = config.scrapeDoToken;
-  const maxPages = input.maxPages || config.maxPages;
+  const maxPages = TPS_CONFIG.MAX_SAFE_PAGES;  // 固定使用最大 25 页
+  const TASK_CONCURRENCY = 4;  // 4 任务并发
+  const PER_TASK_CONCURRENCY = TPS_CONFIG.SCRAPEDO_CONCURRENCY;  // 每任务 10 并发
   
   const logs: Array<{ timestamp: string; message: string }> = [];
   const addLog = (message: string) => {
@@ -393,47 +395,85 @@ async function executeTpsSearch(
     await saveTpsDetailCache(items, cacheDays);
   };
   
+  // 用于跨任务电话号码去重
+  const seenPhones = new Set<string>();
+  let completedCount = 0;
+  
   try {
-    // 逐个执行子任务
-    for (let i = 0; i < subTasks.length; i++) {
-      const subTask = subTasks[i];
-      addLog(`📋 [${i + 1}/${subTasks.length}] 搜索: ${subTask.name}${subTask.location ? ` @ ${subTask.location}` : ""}`);
+    // 4 任务并发执行
+    addLog(`🧵 并发模式: ${TASK_CONCURRENCY} 任务并发，每任务 ${PER_TASK_CONCURRENCY} 请求并发`);
+    
+    // 分批处理任务
+    for (let batchStart = 0; batchStart < subTasks.length; batchStart += TASK_CONCURRENCY) {
+      const batchEnd = Math.min(batchStart + TASK_CONCURRENCY, subTasks.length);
+      const batch = subTasks.slice(batchStart, batchEnd);
       
-      const result = await fullSearch(
-        subTask.name,
-        subTask.location,
-        token,
-        {
-          maxPages,
-          filters: input.filters || {},
-          concurrency: config.maxConcurrent || 40,
-          onProgress: (msg) => addLog(msg),
-          getCachedDetails,
-          setCachedDetails,
-        }
-      );
+      addLog(`📦 批次 ${Math.floor(batchStart / TASK_CONCURRENCY) + 1}: 处理任务 ${batchStart + 1}-${batchEnd}`);
       
-      if (result.success) {
-        totalSearchPages += result.stats.searchPageRequests;
-        totalDetailPages += result.stats.detailPageRequests;
-        totalCacheHits += result.stats.cacheHits;
-        totalResults += result.results.length;
+      // 并发执行这一批任务
+      const batchPromises = batch.map(async (subTask, batchIndex) => {
+        const globalIndex = batchStart + batchIndex;
+        addLog(`📋 [${globalIndex + 1}/${subTasks.length}] 搜索: ${subTask.name}${subTask.location ? ` @ ${subTask.location}` : ""}`);
         
-        // 保存结果
-        if (result.results.length > 0) {
-          await saveTpsSearchResults(taskDbId, i, subTask.name, subTask.location, result.results);
-          allResults.push(...result.results);
+        const result = await fullSearch(
+          subTask.name,
+          subTask.location,
+          token,
+          {
+            maxPages,
+            filters: input.filters || {},
+            concurrency: PER_TASK_CONCURRENCY,
+            onProgress: (msg) => addLog(msg),
+            getCachedDetails,
+            setCachedDetails,
+          }
+        );
+        
+        return { result, subTask, globalIndex };
+      });
+      
+      // 等待这一批完成
+      const batchResults = await Promise.all(batchPromises);
+      
+      // 处理结果
+      for (const { result, subTask, globalIndex } of batchResults) {
+        if (result.success) {
+          totalSearchPages += result.stats.searchPageRequests;
+          totalDetailPages += result.stats.detailPageRequests;
+          totalCacheHits += result.stats.cacheHits;
+          
+          // 跨任务电话号码去重
+          const uniqueResults: TpsDetailResult[] = [];
+          for (const r of result.results) {
+            if (r.phone && seenPhones.has(r.phone)) {
+              continue;  // 跳过重复电话
+            }
+            if (r.phone) {
+              seenPhones.add(r.phone);
+            }
+            uniqueResults.push(r);
+          }
+          
+          totalResults += uniqueResults.length;
+          
+          // 保存结果
+          if (uniqueResults.length > 0) {
+            await saveTpsSearchResults(taskDbId, globalIndex, subTask.name, subTask.location, uniqueResults);
+            allResults.push(...uniqueResults);
+          }
+          
+          addLog(`✅ [${globalIndex + 1}/${subTasks.length}] 完成: ${uniqueResults.length} 条结果${result.results.length > uniqueResults.length ? ` (去重 ${result.results.length - uniqueResults.length} 条)` : ""}`);
+        } else {
+          addLog(`❌ [${globalIndex + 1}/${subTasks.length}] 失败: ${result.error}`);
         }
         
-        addLog(`✅ [${i + 1}/${subTasks.length}] 完成: ${result.results.length} 条结果`);
-      } else {
-        addLog(`❌ [${i + 1}/${subTasks.length}] 失败: ${result.error}`);
+        completedCount++;
       }
       
       // 更新进度
-      const progress = Math.round(((i + 1) / subTasks.length) * 100);
+      const progress = Math.round((completedCount / subTasks.length) * 100);
       await updateTpsSearchTaskProgress(taskDbId, {
-        completedSubTasks: i + 1,
+        completedSubTasks: completedCount,
         progress,
         totalResults,
         searchPageRequests: totalSearchPages,

@@ -50,7 +50,6 @@ export default function TpsSearch() {
   });
   
   // 高级选项
-  const [maxPages, setMaxPages] = useState(10);
   const [showFilters, setShowFilters] = useState(false);
   
   // 获取用户资料
@@ -70,6 +69,7 @@ export default function TpsSearch() {
   const estimatedSearches = mode === "nameOnly" 
     ? names.length 
     : names.length * Math.max(locations.length, 1);
+  const maxPages = 25;  // 固定使用最大 25 页
   const estimatedCost = estimatedSearches * maxPages * searchCost;
   
   // 提交搜索
@@ -111,7 +111,7 @@ export default function TpsSearch() {
       locations: mode === "nameLocation" ? locations : undefined,
       mode,
       filters: showFilters ? filters : undefined,
-      maxPages,
+      // maxPages 已删除，后端固定使用 25 页
     });
   };
 
@@ -246,22 +246,6 @@ export default function TpsSearch() {
               </CardHeader>
               {showFilters && (
                 <CardContent className="space-y-6">
-                  {/* 每页搜索数量 */}
-                  <div>
-                    <Label>每个姓名搜索页数: {maxPages} 页</Label>
-                    <Slider
-                      value={[maxPages]}
-                      onValueChange={([v]) => setMaxPages(v)}
-                      min={1}
-                      max={50}
-                      step={1}
-                      className="mt-2"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      每页约 10 条结果，更多页数 = 更多结果 = 更多消耗
-                    </p>
-                  </div>
-                  
                   {/* 年龄范围 */}
                   <div>
                     <Label>年龄范围: {filters.minAge} - {filters.maxAge} 岁</Label>

@@ -26,7 +26,7 @@ export const TPS_CONFIG = {
   MAX_RECORDS: 250,
   REQUEST_TIMEOUT: 30000,
   BATCH_DELAY: 200,
-  SCRAPEDO_CONCURRENCY: 40,
+  SCRAPEDO_CONCURRENCY: 10,  // 每任务 10 并发（4 任务并发时总共 40）
   // 重试配置（与 EXE 客户端一致）
   IMMEDIATE_RETRIES: 2,       // 即时重试次数
   IMMEDIATE_RETRY_DELAY: 1000, // 即时重试延迟 (1秒)
@@ -302,9 +302,25 @@ export function parseSearchPage(html: string, filters: TpsFilters): TpsSearchPag
     const name = $card.find('.content-header').first().text().trim();
     if (!name) return;
     
-    // 提取年龄
-    const ageMatch = cardText.match(/Age\s+(\d+)/i);
-    const age = ageMatch ? parseInt(ageMatch[1]) : undefined;
+    // 提取年龄 - 方法1: 查找 "Age " 后面的 content-value
+    let age: number | undefined;
+    $card.find('.content-label').each((j, label) => {
+      if ($(label).text().trim() === 'Age') {
+        const ageValue = $(label).next('.content-value').text().trim();
+        const parsed = parseInt(ageValue);
+        if (!isNaN(parsed)) {
+          age = parsed;
+        }
+      }
+    });
+    
+    // 提取年龄 - 方法2: 从文本中提取 "Age XX"（备用方法）
+    if (!age) {
+      const ageMatch = cardText.match(/Age\s+(\d+)/i);
+      if (ageMatch) {
+        age = parseInt(ageMatch[1]);
+      }
+    }
     
     // 年龄过滤
     if (filters.minAge || filters.maxAge) {
