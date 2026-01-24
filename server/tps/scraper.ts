@@ -212,18 +212,29 @@ export function parseSearchPage(html: string): TpsSearchResult[] {
   return results;
 }
 
+// 默认年龄范围（当用户未设置时使用）
+const DEFAULT_MIN_AGE = 30;
+const DEFAULT_MAX_AGE = 70;
+
 /**
- * 搜索页年龄初筛
+ * 搜索页年龄精确过滤
+ * 
+ * 优化说明：
+ * - 使用精确匹配，不留 ±5 岁缓冲，节省 API 积分
+ * - 用户未设置年龄范围时，使用默认值 30-70 岁
+ * - 没有年龄信息的结果会被保留（无法判断）
  */
 export function preFilterByAge(results: TpsSearchResult[], filters: TpsFilters): TpsSearchResult[] {
-  if (!filters.minAge && !filters.maxAge) {
-    return results;
-  }
+  // 使用用户设置的年龄范围，如果未设置则使用默认值
+  const minAge = filters.minAge ?? DEFAULT_MIN_AGE;
+  const maxAge = filters.maxAge ?? DEFAULT_MAX_AGE;
   
   return results.filter(r => {
+    // 没有年龄信息的保留（无法判断）
     if (r.age === undefined) return true;
-    if (filters.minAge !== undefined && r.age < filters.minAge - 5) return false;
-    if (filters.maxAge !== undefined && r.age > filters.maxAge + 5) return false;
+    // 精确匹配年龄范围
+    if (r.age < minAge) return false;
+    if (r.age > maxAge) return false;
     return true;
   });
 }
@@ -360,12 +371,23 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
   return results;
 }
 
-// ==================== 过滤逻辑 (保持不变) ====================
+// ==================== 过滤逻辑 ====================
 
+/**
+ * 详情页结果精确过滤
+ * 
+ * 优化说明：
+ * - 用户未设置年龄范围时，使用默认值 30-70 岁
+ * - 与搜索页过滤逻辑保持一致
+ */
 export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
+  // 使用用户设置的年龄范围，如果未设置则使用默认值
+  const minAge = filters.minAge ?? DEFAULT_MIN_AGE;
+  const maxAge = filters.maxAge ?? DEFAULT_MAX_AGE;
+  
   if (result.age !== undefined) {
-    if (filters.minAge !== undefined && result.age < filters.minAge) return false;
-    if (filters.maxAge !== undefined && result.age > filters.maxAge) return false;
+    if (result.age < minAge) return false;
+    if (result.age > maxAge) return false;
   }
   if (filters.minYear !== undefined && result.reportYear !== undefined) {
     if (result.reportYear < filters.minYear) return false;
