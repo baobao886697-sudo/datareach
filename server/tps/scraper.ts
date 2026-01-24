@@ -580,7 +580,7 @@ export async function fetchDetailsInBatch(
   concurrency: number,
   filters: TpsFilters,
   onProgress: (message: string) => void,
-  getCachedDetails: (links: string[]) => Promise<Map<string, TpsDetailResult>>,
+  getCachedDetails: (links: string[]) => Promise<Map<string, TpsDetailResult[]>>,
   setCachedDetails: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>
 ): Promise<FetchDetailsResult> {
   const results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }> = [];
@@ -610,18 +610,19 @@ export async function fetchDetailsInBatch(
   }
   
   for (const [link, linkTasks] of tasksByLink) {
-    const cached = cachedMap.get(link);
+    const cachedArray = cachedMap.get(link);
     
-    // 验证缓存数据完整性（必须有电话号码才算有效缓存）
-    if (cached && cached.phone && cached.phone.length >= 10) {
+    // 验证缓存数据完整性（至少有一条有效电话记录）
+    if (cachedArray && cachedArray.length > 0 && cachedArray.some(c => c.phone && c.phone.length >= 10)) {
       cacheHits++;
-      // 应用过滤
-      if (shouldIncludeResult(cached, filters)) {
+      // 应用过滤（对每条电话记录单独过滤）
+      const filteredCached = cachedArray.filter(r => shouldIncludeResult(r, filters));
+      filteredOut += cachedArray.length - filteredCached.length;
+      
+      if (filteredCached.length > 0) {
         for (const task of linkTasks) {
-          results.push({ task, details: [cached] });
+          results.push({ task, details: filteredCached });
         }
-      } else {
-        filteredOut++;
       }
     } else {
       // 需要获取

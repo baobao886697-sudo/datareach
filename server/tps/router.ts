@@ -430,13 +430,17 @@ async function executeTpsSearchUnifiedQueue(
   let totalResults = 0;
   let totalFilteredOut = 0;
   
-  // 缓存函数
+  // 缓存函数（修复：返回数组以支持多电话号码）
   const getCachedDetails = async (links: string[]) => {
     const cached = await getCachedTpsDetails(links);
-    const map = new Map<string, TpsDetailResult>();
+    const map = new Map<string, TpsDetailResult[]>();
     for (const item of cached) {
       if (item.data) {
-        map.set(item.detailLink, item.data as TpsDetailResult);
+        const link = item.detailLink;
+        if (!map.has(link)) {
+          map.set(link, []);
+        }
+        map.get(link)!.push(item.data as TpsDetailResult);
       }
     }
     return map;

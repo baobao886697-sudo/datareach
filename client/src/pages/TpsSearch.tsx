@@ -117,7 +117,7 @@ export default function TpsSearch() {
       names,
       locations: mode === "nameLocation" ? locations : undefined,
       mode,
-      filters: showFilters ? filters : undefined,
+      filters: filters,  // 始终传递过滤条件（包含默认值）
       // maxPages 已删除，后端固定使用 25 页
     });
   };
