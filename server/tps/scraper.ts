@@ -200,8 +200,10 @@ export function parseSearchPage(html: string): { results: TpsSearchResult[]; tot
   $cards.each((_, card) => {
     const $card = $(card);
     
-    // 获取姓名（多种选择器）
+    // 获取姓名（多种选择器，按优先级尝试）
+    // TPS 有两种卡片结构：.h4 和 .content-header
     let name = $card.find('.h4').first().text().trim();
+    if (!name) name = $card.find('.content-header').first().text().trim();
     if (!name) name = $card.find('.name, .person-name, h4, h3').first().text().trim();
     if (!name) return;
     
