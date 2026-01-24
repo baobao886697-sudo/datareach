@@ -6,14 +6,14 @@
  * 功能：
  * - 通过 Scrape.do 代理访问 TruePeopleSearch
  * - 解析搜索页和详情页
- * - 固定 4 线程 × 10 并发配置（稳定可靠）
+ * - 支持统一队列模式（40 并发统一消费）
  * - 过滤和去重
  * - 2+2 延后重试机制（与 EXE 客户端一致）
  * 
- * v3.1 更新:
- * - 回滚到固定 4 线程 × 10 并发配置
- * - 移除动态并发（避免并发波动导致限流）
- * - 保持 Scrape.do API timeout=30000ms
+ * v3.2 更新:
+ * - 新增分离的搜索和详情抓取函数（支持统一队列模式）
+ * - 保留原有 fullSearch 函数（向后兼容）
+ * - 40 并发统一消费详情队列，最大化并发利用率
  */
 
 import * as cheerio from 'cheerio';
@@ -27,10 +27,10 @@ export const TPS_CONFIG = {
   MAX_RECORDS: 250,
   REQUEST_TIMEOUT: 30000,
   BATCH_DELAY: 200,  // 批次延迟 200ms（稳定优先）
-  // 固定并发配置
-  TASK_CONCURRENCY: 4,      // 4 线程（任务并发）
-  SCRAPEDO_CONCURRENCY: 10, // 每线程 10 并发
-  // 总并发 = 4 × 10 = 40（与 Scrape.do 账户限制匹配）
+  // 统一队列并发配置
+  TOTAL_CONCURRENCY: 40,    // 总并发数（与 Scrape.do 账户限制匹配）
+  TASK_CONCURRENCY: 4,      // 搜索任务并发数
+  SCRAPEDO_CONCURRENCY: 10, // 每任务详情并发（向后兼容）
   // 重试配置（与 EXE 客户端一致）
   IMMEDIATE_RETRIES: 2,       // 即时重试次数
   IMMEDIATE_RETRY_DELAY: 1000, // 即时重试延迟 (1秒)
@@ -81,6 +81,14 @@ export interface TpsSearchOptions {
   setCachedDetails?: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>;
 }
 
+// 统一队列模式的详情任务
+export interface DetailTask {
+  searchResult: TpsSearchResult;
+  subTaskIndex: number;
+  name: string;
+  location: string;
+}
+
 // ==================== 辅助函数 ====================
 
 /**
@@ -88,7 +96,7 @@ export interface TpsSearchOptions {
  * 
  * 支持即时重试（2次）和延后重试标记
  */
-async function fetchViaProxy(
+export async function fetchViaProxy(
   url: string,
   token: string,
   retryCount: number = 0
@@ -147,7 +155,7 @@ async function fetchViaProxy(
  * 
  * 使用两种方法提取年龄（DOM + 正则），与 EXE 客户端一致
  */
-function parseSearchPage(html: string): { results: TpsSearchResult[]; totalRecords: number } {
+export function parseSearchPage(html: string): { results: TpsSearchResult[]; totalRecords: number } {
   const $ = cheerio.load(html);
   const results: TpsSearchResult[] = [];
   
@@ -217,7 +225,7 @@ function parseSearchPage(html: string): { results: TpsSearchResult[]; totalRecor
  * 
  * 使用两种方法提取电话类型和运营商（DOM + 正则），与 EXE 客户端一致
  */
-function parseDetailPage(html: string, searchResult: TpsSearchResult): TpsDetailResult[] {
+export function parseDetailPage(html: string, searchResult: TpsSearchResult): TpsDetailResult[] {
   const $ = cheerio.load(html);
   const results: TpsDetailResult[] = [];
   
@@ -367,7 +375,7 @@ function parseDetailPage(html: string, searchResult: TpsSearchResult): TpsDetail
  * - Comcast/Spectrum 运营商
  * - 固话类型
  */
-function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
+export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
   // 年龄过滤
   if (result.age !== undefined) {
     if (filters.minAge !== undefined && result.age < filters.minAge) return false;
@@ -415,7 +423,7 @@ function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): bool
 /**
  * 批量获取页面（固定并发）
  * 
- * 使用固定的 10 并发，稳定可靠
+ * 使用固定的并发数，稳定可靠
  */
 async function fetchBatch(
   urls: string[],
@@ -498,10 +506,311 @@ async function executeDeferredRetry(
   return results;
 }
 
-// ==================== 主搜索函数 ====================
+// ==================== 统一队列模式函数（新增） ====================
 
 /**
- * 完整搜索流程
+ * 仅执行搜索阶段（不获取详情）
+ * 
+ * 用于统一队列模式：先收集所有搜索结果，再统一获取详情
+ * 
+ * @param name 搜索姓名
+ * @param location 搜索地点（可选）
+ * @param token Scrape.do API token
+ * @param maxPages 最大页数
+ * @param filters 过滤条件（用于年龄初筛）
+ * @param onProgress 进度回调
+ */
+export async function searchOnly(
+  name: string,
+  location: string,
+  token: string,
+  maxPages: number,
+  filters: TpsFilters,
+  onProgress?: (message: string) => void
+): Promise<{
+  success: boolean;
+  searchResults: TpsSearchResult[];
+  stats: {
+    searchPageRequests: number;
+    filteredOut: number;
+  };
+  error?: string;
+}> {
+  const stats = {
+    searchPageRequests: 0,
+    filteredOut: 0,
+  };
+  
+  try {
+    // 构建搜索 URL
+    const searchParams = new URLSearchParams();
+    searchParams.set('name', name);
+    if (location) {
+      searchParams.set('citystatezip', location);
+    }
+    
+    const baseSearchUrl = `${TPS_CONFIG.TPS_BASE}/results?${searchParams.toString()}`;
+    
+    // 获取第一页（确定总记录数）
+    onProgress?.(`📄 获取搜索结果第 1 页...`);
+    const { html: firstPageHtml, status: firstPageStatus } = await fetchViaProxy(baseSearchUrl, token);
+    stats.searchPageRequests++;
+    
+    if (!firstPageHtml) {
+      return {
+        success: false,
+        searchResults: [],
+        stats,
+        error: `获取第一页失败，状态码: ${firstPageStatus}`,
+      };
+    }
+    
+    const { results: firstPageResults, totalRecords } = parseSearchPage(firstPageHtml);
+    onProgress?.(`📊 找到 ${totalRecords} 条记录`);
+    
+    // 计算需要获取的页数
+    const totalPages = Math.min(
+      maxPages,
+      Math.ceil(totalRecords / TPS_CONFIG.RESULTS_PER_PAGE)
+    );
+    
+    // 收集所有搜索结果
+    let allSearchResults = [...firstPageResults];
+    
+    // 获取剩余搜索页（使用较低并发，因为搜索页数量有限）
+    if (totalPages > 1) {
+      const remainingPageUrls: string[] = [];
+      for (let page = 2; page <= totalPages; page++) {
+        remainingPageUrls.push(`${baseSearchUrl}&page=${page}`);
+      }
+      
+      onProgress?.(`📄 获取剩余 ${remainingPageUrls.length} 页搜索结果...`);
+      
+      // 搜索页使用较低并发（5），因为数量有限且需要快速完成
+      const { results: pageResults, deferredUrls } = await fetchBatch(
+        remainingPageUrls,
+        token,
+        5,
+        onProgress
+      );
+      
+      stats.searchPageRequests += remainingPageUrls.length;
+      
+      // 解析搜索结果
+      for (const [url, html] of pageResults) {
+        const { results } = parseSearchPage(html);
+        allSearchResults.push(...results);
+      }
+      
+      // 延后重试
+      if (deferredUrls.length > 0) {
+        const retryResults = await executeDeferredRetry(deferredUrls, token, 5, onProgress);
+        
+        for (const [url, html] of retryResults) {
+          const { results } = parseSearchPage(html);
+          allSearchResults.push(...results);
+        }
+      }
+    }
+    
+    // 搜索页初筛（年龄过滤）
+    const filteredSearchResults = allSearchResults.filter(result => {
+      // 跳过已故人员
+      if (result.name.toLowerCase().includes('deceased')) return false;
+      
+      // 年龄初筛
+      if (result.age !== undefined) {
+        if (filters.minAge !== undefined && result.age < filters.minAge) {
+          stats.filteredOut++;
+          return false;
+        }
+        if (filters.maxAge !== undefined && result.age > filters.maxAge) {
+          stats.filteredOut++;
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    onProgress?.(`🔍 初筛后 ${filteredSearchResults.length} 条记录`);
+    
+    return {
+      success: true,
+      searchResults: filteredSearchResults,
+      stats,
+    };
+    
+  } catch (error: any) {
+    return {
+      success: false,
+      searchResults: [],
+      stats,
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * 批量获取详情页（用于统一队列模式）
+ * 
+ * 使用指定的并发数获取详情页
+ * 
+ * @param tasks 详情任务列表
+ * @param token Scrape.do API token
+ * @param concurrency 并发数
+ * @param filters 过滤条件
+ * @param onProgress 进度回调
+ * @param getCachedDetails 缓存读取函数
+ * @param setCachedDetails 缓存写入函数
+ */
+export async function fetchDetailsInBatch(
+  tasks: DetailTask[],
+  token: string,
+  concurrency: number,
+  filters: TpsFilters,
+  onProgress?: (message: string) => void,
+  getCachedDetails?: (links: string[]) => Promise<Map<string, TpsDetailResult>>,
+  setCachedDetails?: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>
+): Promise<{
+  results: Array<{ task: DetailTask; details: TpsDetailResult[] }>;
+  stats: {
+    detailPageRequests: number;
+    cacheHits: number;
+    filteredOut: number;
+  };
+}> {
+  const stats = {
+    detailPageRequests: 0,
+    cacheHits: 0,
+    filteredOut: 0,
+  };
+  
+  const results: Array<{ task: DetailTask; details: TpsDetailResult[] }> = [];
+  
+  // 去重详情链接
+  const uniqueLinks = [...new Set(tasks.map(t => t.searchResult.detailLink))];
+  
+  // 检查缓存
+  let cachedDetails = new Map<string, TpsDetailResult>();
+  if (getCachedDetails) {
+    cachedDetails = await getCachedDetails(uniqueLinks);
+    stats.cacheHits = cachedDetails.size;
+    if (cachedDetails.size > 0) {
+      onProgress?.(`💾 缓存命中 ${cachedDetails.size} 条`);
+    }
+  }
+  
+  // 需要获取的链接
+  const linksToFetch = uniqueLinks.filter(link => !cachedDetails.has(link));
+  
+  // 构建链接到任务的映射
+  const linkToTasks = new Map<string, DetailTask[]>();
+  for (const task of tasks) {
+    const link = task.searchResult.detailLink;
+    if (!linkToTasks.has(link)) {
+      linkToTasks.set(link, []);
+    }
+    linkToTasks.get(link)!.push(task);
+  }
+  
+  // 处理缓存命中的结果
+  for (const [link, cachedResult] of cachedDetails) {
+    const tasksForLink = linkToTasks.get(link) || [];
+    for (const task of tasksForLink) {
+      if (shouldIncludeResult(cachedResult, filters)) {
+        results.push({ task, details: [cachedResult] });
+      } else {
+        stats.filteredOut++;
+      }
+    }
+  }
+  
+  // 获取新详情
+  if (linksToFetch.length > 0) {
+    onProgress?.(`📋 获取 ${linksToFetch.length} 条详情（${concurrency} 并发）...`);
+    
+    const detailUrls = linksToFetch.map(link => 
+      link.startsWith('http') ? link : `${TPS_CONFIG.TPS_BASE}${link}`
+    );
+    
+    stats.detailPageRequests = detailUrls.length;
+    
+    const { results: detailHtmlResults, deferredUrls } = await fetchBatch(
+      detailUrls,
+      token,
+      concurrency,
+      onProgress
+    );
+    
+    // 解析详情并缓存
+    const newCacheItems: Array<{ link: string; data: TpsDetailResult }> = [];
+    
+    for (const [url, html] of detailHtmlResults) {
+      const link = linksToFetch.find(l => url.includes(l)) || url;
+      const tasksForLink = linkToTasks.get(link) || [];
+      
+      for (const task of tasksForLink) {
+        const details = parseDetailPage(html, task.searchResult);
+        const filteredDetails: TpsDetailResult[] = [];
+        
+        for (const detail of details) {
+          if (shouldIncludeResult(detail, filters)) {
+            filteredDetails.push(detail);
+            newCacheItems.push({ link: detail.detailLink, data: detail });
+          } else {
+            stats.filteredOut++;
+          }
+        }
+        
+        if (filteredDetails.length > 0) {
+          results.push({ task, details: filteredDetails });
+        }
+      }
+    }
+    
+    // 延后重试
+    if (deferredUrls.length > 0) {
+      onProgress?.(`🔄 延后重试 ${deferredUrls.length} 个详情页...`);
+      const retryResults = await executeDeferredRetry(deferredUrls, token, Math.floor(concurrency / 2), onProgress);
+      
+      for (const [url, html] of retryResults) {
+        const link = linksToFetch.find(l => url.includes(l)) || url;
+        const tasksForLink = linkToTasks.get(link) || [];
+        
+        for (const task of tasksForLink) {
+          const details = parseDetailPage(html, task.searchResult);
+          const filteredDetails: TpsDetailResult[] = [];
+          
+          for (const detail of details) {
+            if (shouldIncludeResult(detail, filters)) {
+              filteredDetails.push(detail);
+              newCacheItems.push({ link: detail.detailLink, data: detail });
+            } else {
+              stats.filteredOut++;
+            }
+          }
+          
+          if (filteredDetails.length > 0) {
+            results.push({ task, details: filteredDetails });
+          }
+        }
+      }
+    }
+    
+    // 保存缓存
+    if (setCachedDetails && newCacheItems.length > 0) {
+      await setCachedDetails(newCacheItems);
+    }
+  }
+  
+  return { results, stats };
+}
+
+// ==================== 原有主搜索函数（保持向后兼容） ====================
+
+/**
+ * 完整搜索流程（原有函数，保持向后兼容）
  * 
  * 固定 10 并发，稳定可靠
  * 

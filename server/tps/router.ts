@@ -3,19 +3,22 @@
  * 
  * 提供 TPS 搜索功能的 API 端点
  * 
- * v3.1 更新:
- * - 回滚到固定 4 线程 × 10 并发配置
- * - 移除动态并发管理器（避免并发波动导致限流）
- * - 保持稳定可靠的并发策略
+ * v3.2 更新:
+ * - 实现统一队列模式：40 并发统一消费详情队列
+ * - 两阶段执行：先并发搜索，再统一获取详情
+ * - 最大化并发利用率，避免线程间不平衡
  */
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { 
-  fullSearch, 
+  searchOnly,
+  fetchDetailsInBatch,
   TpsFilters, 
   TpsDetailResult,
+  TpsSearchResult,
+  DetailTask,
   TPS_CONFIG,
 } from "./scraper";
 import {
@@ -36,10 +39,9 @@ import {
   logApi,
 } from "./db";
 
-// 固定并发配置
-const TASK_CONCURRENCY = TPS_CONFIG.TASK_CONCURRENCY;      // 4 线程
-const SCRAPEDO_CONCURRENCY = TPS_CONFIG.SCRAPEDO_CONCURRENCY;  // 每线程 10 并发
-// 总并发 = 4 × 10 = 40（与 Scrape.do 账户限制匹配）
+// 统一队列并发配置
+const TOTAL_CONCURRENCY = TPS_CONFIG.TOTAL_CONCURRENCY;  // 40 总并发
+const SEARCH_CONCURRENCY = TPS_CONFIG.TASK_CONCURRENCY;  // 4 搜索并发
 
 // 输入验证 schema
 const tpsFiltersSchema = z.object({
@@ -157,7 +159,7 @@ export const tpsRouter = router({
       });
       
       // 异步执行搜索（不阻塞响应）
-      executeTpsSearch(task.id, task.taskId, config, input, userId).catch(err => {
+      executeTpsSearchUnifiedQueue(task.id, task.taskId, config, input, userId).catch(err => {
         console.error(`TPS 搜索任务 ${task.taskId} 执行失败:`, err);
       });
       
@@ -333,9 +335,20 @@ export const tpsRouter = router({
     }),
 });
 
-// ==================== 搜索执行逻辑（固定 4 线程 × 10 并发） ====================
+// ==================== 统一队列模式搜索执行逻辑 ====================
 
-async function executeTpsSearch(
+/**
+ * 统一队列模式执行搜索
+ * 
+ * 两阶段执行：
+ * 1. 阶段一：并发执行所有搜索任务（4 并发），收集详情链接
+ * 2. 阶段二：统一队列消费所有详情链接（40 并发）
+ * 
+ * 优势：
+ * - 详情获取阶段始终保持 40 并发，不会因任务大小不均而浪费
+ * - 搜索阶段快速完成，详情阶段高效并行
+ */
+async function executeTpsSearchUnifiedQueue(
   taskDbId: number,
   taskId: string,
   config: any,
@@ -353,25 +366,26 @@ async function executeTpsSearch(
   };
   
   // 构建子任务列表
-  const subTasks: Array<{ name: string; location: string }> = [];
+  const subTasks: Array<{ name: string; location: string; index: number }> = [];
   
   if (input.mode === "nameOnly") {
-    for (const name of input.names) {
-      subTasks.push({ name, location: "" });
+    for (let i = 0; i < input.names.length; i++) {
+      subTasks.push({ name: input.names[i], location: "", index: i });
     }
   } else {
     const locations = input.locations && input.locations.length > 0 
       ? input.locations 
       : [""];
+    let index = 0;
     for (const name of input.names) {
       for (const location of locations) {
-        subTasks.push({ name, location });
+        subTasks.push({ name, location, index: index++ });
       }
     }
   }
   
   addLog(`🚀 开始搜索任务，共 ${subTasks.length} 个子任务`);
-  addLog(`⚡ 固定并发模式: ${TASK_CONCURRENCY} 线程 × ${SCRAPEDO_CONCURRENCY} 并发 = ${TASK_CONCURRENCY * SCRAPEDO_CONCURRENCY} 总并发`);
+  addLog(`⚡ 统一队列模式: 搜索 ${SEARCH_CONCURRENCY} 并发 → 详情 ${TOTAL_CONCURRENCY} 并发`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
@@ -385,7 +399,7 @@ async function executeTpsSearch(
   let totalDetailPages = 0;
   let totalCacheHits = 0;
   let totalResults = 0;
-  const allResults: TpsDetailResult[] = [];
+  let totalFilteredOut = 0;
   
   // 缓存函数
   const getCachedDetails = async (links: string[]) => {
@@ -406,106 +420,153 @@ async function executeTpsSearch(
   
   // 用于跨任务电话号码去重
   const seenPhones = new Set<string>();
-  let completedCount = 0;
   
   try {
-    // 固定 4 线程并发执行任务
-    // 每个线程使用固定的 10 并发
+    // ==================== 阶段一：并发搜索 ====================
+    addLog(`📋 阶段一：并发搜索（${SEARCH_CONCURRENCY} 并发）...`);
     
-    const taskQueue = [...subTasks.map((task, index) => ({ ...task, index }))];
-    let taskIndex = 0;
+    // 收集所有详情任务
+    const allDetailTasks: DetailTask[] = [];
+    const subTaskResults: Map<number, { searchResults: TpsSearchResult[]; searchPages: number }> = new Map();
     
-    // 处理单个子任务
-    const processSubTask = async (subTask: { name: string; location: string; index: number }) => {
-      const globalIndex = subTask.index;
+    let completedSearches = 0;
+    
+    // 并发执行搜索
+    const searchQueue = [...subTasks];
+    let searchIndex = 0;
+    const runningSearches: Promise<void>[] = [];
+    
+    const processSearch = async (subTask: { name: string; location: string; index: number }) => {
+      const result = await searchOnly(
+        subTask.name,
+        subTask.location,
+        token,
+        maxPages,
+        input.filters || {},
+        (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`)
+      );
       
-      addLog(`📋 [${globalIndex + 1}/${subTasks.length}] 搜索: ${subTask.name}${subTask.location ? ` @ ${subTask.location}` : ""}`);
+      completedSearches++;
       
-      try {
-        const result = await fullSearch(
-          subTask.name,
-          subTask.location,
-          token,
-          {
-            maxPages,
-            filters: input.filters || {},
-            concurrency: SCRAPEDO_CONCURRENCY,  // 固定 10 并发
-            onProgress: (msg) => addLog(msg),
-            getCachedDetails,
-            setCachedDetails,
-          }
-        );
+      if (result.success) {
+        totalSearchPages += result.stats.searchPageRequests;
+        totalFilteredOut += result.stats.filteredOut;
         
-        if (result.success) {
-          totalSearchPages += result.stats.searchPageRequests;
-          totalDetailPages += result.stats.detailPageRequests;
-          totalCacheHits += result.stats.cacheHits;
-          
-          // 跨任务电话号码去重
-          const uniqueResults: TpsDetailResult[] = [];
-          for (const r of result.results) {
-            if (r.phone && seenPhones.has(r.phone)) {
-              continue;  // 跳过重复电话
-            }
-            if (r.phone) {
-              seenPhones.add(r.phone);
-            }
-            uniqueResults.push(r);
-          }
-          
-          totalResults += uniqueResults.length;
-          
-          // 保存结果
-          if (uniqueResults.length > 0) {
-            await saveTpsSearchResults(taskDbId, globalIndex, subTask.name, subTask.location, uniqueResults);
-            allResults.push(...uniqueResults);
-          }
-          
-          addLog(`✅ [${globalIndex + 1}/${subTasks.length}] 完成: ${uniqueResults.length} 条结果${result.results.length > uniqueResults.length ? ` (去重 ${result.results.length - uniqueResults.length} 条)` : ""}`);
-        } else {
-          addLog(`❌ [${globalIndex + 1}/${subTasks.length}] 失败: ${result.error}`);
+        // 保存搜索结果
+        subTaskResults.set(subTask.index, {
+          searchResults: result.searchResults,
+          searchPages: result.stats.searchPageRequests,
+        });
+        
+        // 收集详情任务
+        for (const searchResult of result.searchResults) {
+          allDetailTasks.push({
+            searchResult,
+            subTaskIndex: subTask.index,
+            name: subTask.name,
+            location: subTask.location,
+          });
         }
-      } finally {
-        completedCount++;
         
-        // 更新进度
-        const progress = Math.round((completedCount / subTasks.length) * 100);
-        await updateTpsSearchTaskProgress(taskDbId, {
-          completedSubTasks: completedCount,
-          progress,
-          totalResults,
-          searchPageRequests: totalSearchPages,
-          detailPageRequests: totalDetailPages,
-          cacheHits: totalCacheHits,
-          logs,
+        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] 搜索完成: ${result.searchResults.length} 条待获取详情`);
+      } else {
+        addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
+      }
+      
+      // 更新进度（搜索阶段占 30%）
+      const searchProgress = Math.round((completedSearches / subTasks.length) * 30);
+      await updateTpsSearchTaskProgress(taskDbId, {
+        completedSubTasks: completedSearches,
+        progress: searchProgress,
+        searchPageRequests: totalSearchPages,
+        logs,
+      });
+    };
+    
+    const startNextSearch = () => {
+      if (searchIndex < searchQueue.length) {
+        const task = searchQueue[searchIndex++];
+        const promise = processSearch(task).then(() => {
+          startNextSearch();
         });
+        runningSearches.push(promise);
       }
     };
     
-    // 固定 4 线程并发执行
-    const runningTasks: Promise<void>[] = [];
-    
-    const startNextTask = () => {
-      if (taskIndex < taskQueue.length) {
-        const task = taskQueue[taskIndex++];
-        const promise = processSubTask(task).then(() => {
-          // 任务完成后，启动下一个任务
-          startNextTask();
-        });
-        runningTasks.push(promise);
-      }
-    };
-    
-    // 启动 4 个初始任务
-    const initialBatchSize = Math.min(TASK_CONCURRENCY, taskQueue.length);
-    addLog(`🧵 启动 ${initialBatchSize} 个线程...`);
-    
-    for (let i = 0; i < initialBatchSize; i++) {
-      startNextTask();
+    // 启动搜索并发
+    const initialSearchBatch = Math.min(SEARCH_CONCURRENCY, searchQueue.length);
+    for (let i = 0; i < initialSearchBatch; i++) {
+      startNextSearch();
     }
     
-    // 等待所有任务完成
-    await Promise.all(runningTasks);
+    await Promise.all(runningSearches);
+    
+    addLog(`📊 搜索阶段完成: ${allDetailTasks.length} 条详情待获取`);
+    
+    // ==================== 阶段二：统一队列获取详情 ====================
+    if (allDetailTasks.length > 0) {
+      addLog(`📋 阶段二：统一队列获取详情（${TOTAL_CONCURRENCY} 并发）...`);
+      
+      // 去重详情链接
+      const uniqueLinks = [...new Set(allDetailTasks.map(t => t.searchResult.detailLink))];
+      addLog(`🔗 去重后 ${uniqueLinks.length} 个唯一详情链接`);
+      
+      // 统一获取详情
+      const detailResult = await fetchDetailsInBatch(
+        allDetailTasks,
+        token,
+        TOTAL_CONCURRENCY,
+        input.filters || {},
+        addLog,
+        getCachedDetails,
+        setCachedDetails
+      );
+      
+      totalDetailPages += detailResult.stats.detailPageRequests;
+      totalCacheHits += detailResult.stats.cacheHits;
+      totalFilteredOut += detailResult.stats.filteredOut;
+      
+      // 按子任务分组保存结果
+      const resultsBySubTask = new Map<number, TpsDetailResult[]>();
+      
+      for (const { task, details } of detailResult.results) {
+        if (!resultsBySubTask.has(task.subTaskIndex)) {
+          resultsBySubTask.set(task.subTaskIndex, []);
+        }
+        
+        // 跨任务电话号码去重
+        for (const detail of details) {
+          if (detail.phone && seenPhones.has(detail.phone)) {
+            continue;  // 跳过重复电话
+          }
+          if (detail.phone) {
+            seenPhones.add(detail.phone);
+          }
+          resultsBySubTask.get(task.subTaskIndex)!.push(detail);
+        }
+      }
+      
+      // 保存结果到数据库
+      for (const [subTaskIndex, results] of resultsBySubTask) {
+        const subTask = subTasks.find(t => t.index === subTaskIndex);
+        if (subTask && results.length > 0) {
+          await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+          totalResults += results.length;
+        }
+      }
+      
+      addLog(`📊 详情阶段完成: ${totalResults} 条结果`);
+    }
+    
+    // 更新最终进度
+    await updateTpsSearchTaskProgress(taskDbId, {
+      progress: 100,
+      totalResults,
+      searchPageRequests: totalSearchPages,
+      detailPageRequests: totalDetailPages,
+      cacheHits: totalCacheHits,
+      logs,
+    });
     
     // 计算实际消耗
     const actualCost = totalSearchPages * searchCost + totalDetailPages * detailCost;
@@ -529,6 +590,7 @@ async function executeTpsSearch(
     
     // 完成任务
     addLog(`🎉 搜索任务完成！共 ${totalResults} 条结果，消耗 ${actualCost.toFixed(1)} 积分`);
+    addLog(`📈 统计: 搜索页 ${totalSearchPages}，详情页 ${totalDetailPages}，缓存命中 ${totalCacheHits}，过滤 ${totalFilteredOut}`);
     
     await completeTpsSearchTask(taskDbId, {
       totalResults,
