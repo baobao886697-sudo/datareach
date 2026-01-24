@@ -419,8 +419,13 @@ async function executeTpsSearchUnifiedQueue(
     }
   }
   
-  addLog(`🚀 开始搜索任务，共 ${subTasks.length} 个子任务`);
-  addLog(`⚡ 优化模式 v3.3: 搜索 ${SEARCH_CONCURRENCY} 任务并发 × 25页并发 → 详情 ${TOTAL_CONCURRENCY} 并发`);
+  // 增强启动日志
+  addLog(`═══════════════════════════════════════════════════`);
+  addLog(`🌸 开始 TPS 搜索 (v3.4 增强日志版)`);
+  addLog(`📜 总任务数: ${subTasks.length}`);
+  addLog(`🧵 并发配置: 搜索 ${SEARCH_CONCURRENCY} 任务 × 25页 / 详情 ${TOTAL_CONCURRENCY} 并发`);
+  addLog(`🔍 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名' : '姓名+地点'}`);
+  addLog(`═══════════════════════════════════════════════════`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
@@ -462,7 +467,7 @@ async function executeTpsSearchUnifiedQueue(
   
   try {
     // ==================== 阶段一：并发搜索 ====================
-    addLog(`📋 阶段一：并发搜索（${SEARCH_CONCURRENCY} 并发）...`);
+    addLog(`📋 阶段一：并发搜索 (${SEARCH_CONCURRENCY} 任务并发 × 25页并发)...`);
     
     // 收集所有详情任务
     const allDetailTasks: DetailTask[] = [];
@@ -507,7 +512,8 @@ async function executeTpsSearchUnifiedQueue(
           });
         }
         
-        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] 搜索完成: ${result.searchResults.length} 条待获取详情`);
+        const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
+        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页, 过滤 ${result.stats.filteredOut} 条`);
       } else {
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
       }
@@ -540,7 +546,11 @@ async function executeTpsSearchUnifiedQueue(
     
     await Promise.all(runningSearches);
     
-    addLog(`📊 搜索阶段完成: ${allDetailTasks.length} 条详情待获取`);
+    // 增强搜索阶段完成日志
+    addLog(`════════ 搜索阶段完成 ════════`);
+    addLog(`📊 搜索页请求: ${totalSearchPages} 页`);
+    addLog(`📊 待获取详情: ${allDetailTasks.length} 条`);
+    addLog(`📊 年龄预过滤: ${totalFilteredOut} 条被排除`);
     
     // ==================== 搜索阶段完成后的积分检查 ====================
     // 计算已消耗的搜索页费用
@@ -649,7 +659,11 @@ async function executeTpsSearchUnifiedQueue(
         }
       }
       
-      addLog(`📊 详情阶段完成: ${totalResults} 条结果`);
+      addLog(`════════ 详情阶段完成 ════════`);
+      addLog(`📊 详情页请求: ${totalDetailPages} 页`);
+      addLog(`📊 缓存命中: ${totalCacheHits} 条`);
+      addLog(`📊 详情过滤: ${totalFilteredOut} 条被排除`);
+      addLog(`📊 有效结果: ${totalResults} 条`);
     }
     
     // 更新最终进度
@@ -682,9 +696,18 @@ async function executeTpsSearchUnifiedQueue(
       creditsUsed: actualCost,
     });
     
-    // 完成任务
-    addLog(`🎉 搜索任务完成！共 ${totalResults} 条结果，消耗 ${actualCost.toFixed(1)} 积分`);
-    addLog(`📈 统计: 搜索页 ${totalSearchPages}，详情页 ${totalDetailPages}，缓存命中 ${totalCacheHits}，过滤 ${totalFilteredOut}`);
+    // 增强完成日志
+    addLog(`═══════════════════════════════════════════════════`);
+    addLog(`🎉 任务完成!`);
+    addLog(`═══════════════════════════════════════════════════`);
+    addLog(`📱 总结果数: ${totalResults}`);
+    addLog(`💰 总消耗: ${actualCost.toFixed(1)} 积分`);
+    addLog(`════════ 详细统计 ════════`);
+    addLog(`   搜索页请求: ${totalSearchPages} 页 (费用: ${(totalSearchPages * searchCost).toFixed(1)})`);
+    addLog(`   详情页请求: ${totalDetailPages} 页 (费用: ${(totalDetailPages * detailCost).toFixed(1)})`);
+    addLog(`   缓存命中: ${totalCacheHits} 条 (节省: ${(totalCacheHits * detailCost).toFixed(1)} 积分)`);
+    addLog(`   过滤排除: ${totalFilteredOut} 条`);
+    addLog(`═══════════════════════════════════════════════════`);
     
     await completeTpsSearchTask(taskDbId, {
       totalResults,

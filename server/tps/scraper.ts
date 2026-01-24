@@ -461,7 +461,7 @@ export async function searchOnly(
       Math.ceil(totalRecords / 10), // 每页10条结果
       maxPages
     );
-    onProgress?.(`找到 ${totalRecords} 条记录，预估总页数: ${totalPages}`);
+    onProgress?.(`找到 ${totalRecords} 条记录, 共 ${totalPages} 页`);
 
     // 阶段二: 并发获取剩余搜索页
     const allResults = [...preFilterByAge(firstResults, filters)];
@@ -498,7 +498,7 @@ export async function searchOnly(
 
     // 阶段三: 去重
     const uniqueResults = deduplicateByDetailLink(allResults);
-    onProgress?.(`搜索完成: 共 ${uniqueResults.length} 条唯一结果 (过滤掉 ${allResults.length - uniqueResults.length} 条重复)`);
+    // 搜索完成日志已在 router.ts 中输出，这里不再重复
 
     return {
       success: true,
@@ -582,7 +582,7 @@ export async function fetchDetailsInBatch(
     }
   }
   
-  onProgress(`缓存命中: ${cacheHits}，待获取: ${tasksToFetch.length}`);
+  onProgress(`⚡ 缓存命中: ${cacheHits}, 待获取: ${tasksToFetch.length}`);
   
   const cacheToSave: Array<{ link: string; data: TpsDetailResult }> = [];
   let completed = 0;
@@ -615,7 +615,8 @@ export async function fetchDetailsInBatch(
       } finally {
         completed++;
         if (completed % 10 === 0 || completed === tasksToFetch.length) {
-          onProgress(`获取详情进度: ${completed}/${tasksToFetch.length}`);
+          const percent = Math.round((completed / tasksToFetch.length) * 100);
+          onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
         }
       }
     };
@@ -660,7 +661,8 @@ export async function fetchDetailsInBatch(
             } finally {
                 completed++;
                 if (completed % 10 === 0 || completed === tasksToFetch.length) {
-                    onProgress(`获取详情进度: ${completed}/${tasksToFetch.length}`);
+                    const percent = Math.round((completed / tasksToFetch.length) * 100);
+          onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
                 }
                 concurrencyPool.delete(promise);
             }
