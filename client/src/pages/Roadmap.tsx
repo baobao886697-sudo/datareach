@@ -24,7 +24,8 @@ import {
   TrendingUp,
   MessageSquare,
   Calendar,
-  Star
+  Star,
+  UserSearch
 } from "lucide-react";
 
 interface RoadmapItem {
@@ -50,6 +51,16 @@ const roadmapItems: RoadmapItem[] = [
     progress: 100,
     category: "data-source",
     features: ["模糊搜索", "精准搜索", "年龄筛选", "职位筛选", "地区筛选"]
+  },
+  {
+    id: "truepeoplesearch",
+    title: "TruePeopleSearch 数据搜索",
+    description: "整合美国 TruePeopleSearch 平台数据，通过姓名和地区精准定位目标人群，获取电话号码等联系方式",
+    icon: UserSearch,
+    status: "completed",
+    progress: 100,
+    category: "data-source",
+    features: ["姓名搜索", "地区筛选", "年龄筛选", "运营商过滤", "电话类型筛选", "缓存优化"]
   },
   // 开发中
   {

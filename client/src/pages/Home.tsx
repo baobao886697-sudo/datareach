@@ -12,7 +12,7 @@ import {
   Database, Globe, TrendingUp, Users, Building2, Linkedin, Twitter, 
   Facebook, Mail, MapPin, BarChart3, Lock, Clock, Award, Star,
   ChevronRight, Play, Layers, Network, Cpu, Eye, EyeOff, ChevronDown,
-  AlertTriangle, Loader2
+  AlertTriangle, Loader2, UserSearch
 } from "lucide-react";
 
 // 生成设备指纹（保持原有逻辑）
@@ -58,7 +58,8 @@ function AnimatedCounter({ end, duration = 2000, suffix = "" }: { end: number; d
 // 数据源卡片
 const DATA_SOURCES = [
   { icon: Linkedin, name: "LinkedIn", records: "6.5亿+", color: "from-blue-500 to-blue-600", available: true },
-  { icon: Building2, name: "企业工商", records: "2亿+", color: "from-emerald-500 to-green-600", available: true },
+  { icon: UserSearch, name: "TruePeopleSearch", records: "3亿+", color: "from-teal-500 to-cyan-600", available: true, isNew: true },
+  { icon: Building2, name: "企业工商", records: "2亿+", color: "from-emerald-500 to-green-600", available: false },
   { icon: Twitter, name: "Twitter/X", records: "5亿+", color: "from-slate-600 to-slate-700", available: false },
   { icon: Facebook, name: "Facebook", records: "3亿+", color: "from-blue-600 to-indigo-600", available: false },
 ];
@@ -453,11 +454,11 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 max-w-5xl mx-auto">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5 max-w-6xl mx-auto">
             {DATA_SOURCES.map((source, index) => (
               <div 
                 key={index}
-                className={`relative p-6 rounded-2xl border transition-all duration-500 ${
+                className={`relative p-5 rounded-2xl border transition-all duration-500 ${
                   source.available 
                     ? 'bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 hover:border-cyan-500/50 cursor-pointer' 
                     : 'bg-slate-900/50 border-slate-800 opacity-60'
@@ -466,14 +467,17 @@ export default function Home() {
                 {!source.available && (
                   <div className="absolute top-3 right-3 px-2 py-1 text-[10px] bg-slate-700 text-slate-400 rounded">即将上线</div>
                 )}
-                <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${source.color} flex items-center justify-center mb-4 ${source.available ? 'shadow-lg' : ''}`}>
-                  <source.icon className="w-7 h-7 text-white" />
+                {(source as any).isNew && (
+                  <div className="absolute top-3 right-3 px-2 py-1 text-[10px] bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded font-medium animate-pulse">新上线</div>
+                )}
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${source.color} flex items-center justify-center mb-3 ${source.available ? 'shadow-lg' : ''}`}>
+                  <source.icon className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="text-xl font-semibold text-white mb-2">{source.name}</h3>
-                <p className="text-2xl font-bold text-cyan-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                <h3 className="text-lg font-semibold text-white mb-1">{source.name}</h3>
+                <p className="text-xl font-bold text-cyan-400" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
                   {source.records}
                 </p>
-                <p className="text-sm text-slate-500 mt-1">数据记录</p>
+                <p className="text-xs text-slate-500 mt-1">数据记录</p>
               </div>
             ))}
           </div>
