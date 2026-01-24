@@ -8,6 +8,11 @@
  * - 解析搜索页和详情页
  * - 支持并发控制和缓存
  * - 过滤和去重
+ * - 2+2 延后重试机制（与 EXE 客户端一致）
+ * 
+ * v2.0 更新:
+ * - 添加 2+2 延后重试机制：即时重试2次（1秒间隔）+ 延后重试2次（2秒间隔）
+ * - 与 EXE 客户端的并发策略保持一致
  */
 
 import * as cheerio from 'cheerio';
@@ -22,6 +27,11 @@ export const TPS_CONFIG = {
   REQUEST_TIMEOUT: 30000,
   BATCH_DELAY: 200,
   SCRAPEDO_CONCURRENCY: 40,
+  // 重试配置（与 EXE 客户端一致）
+  IMMEDIATE_RETRIES: 2,       // 即时重试次数
+  IMMEDIATE_RETRY_DELAY: 1000, // 即时重试延迟 (1秒)
+  DEFERRED_RETRIES: 2,        // 延后重试次数
+  DEFERRED_RETRY_DELAY: 2000, // 延后重试延迟 (2秒)
 };
 
 // ==================== 类型定义 ====================
@@ -76,6 +86,7 @@ export interface TpsFetchResult {
   html?: string;
   error?: string;
   statusCode?: number;
+  needDeferredRetry?: boolean;  // 标记是否需要延后重试（429 限流）
 }
 
 export interface TpsFullSearchStats {
@@ -94,6 +105,10 @@ export interface TpsFullSearchStats {
   cacheMisses: number;
   skippedDuplicateLinks?: number;
   skippedDuplicatePhones?: number;
+  // 新增：重试统计
+  immediateRetries?: number;
+  deferredRetries?: number;
+  rateLimitedRequests?: number;
 }
 
 export interface TpsFullSearchResult {
@@ -141,15 +156,20 @@ export function buildDetailUrl(detailLink: string): string {
 
 /**
  * 通过 Scrape.do 代理获取页面
- * 支持 429 限流重试机制
+ * 
+ * 支持 429 限流重试机制（即时重试阶段）：
+ * - 遇到 429 时，最多重试 IMMEDIATE_RETRIES 次
+ * - 每次重试间隔 IMMEDIATE_RETRY_DELAY 毫秒
+ * - 如果即时重试后仍然 429，返回 needDeferredRetry=true，等待延后重试
  */
 export async function fetchViaProxy(
   url: string, 
   token: string, 
-  maxRetries: number = 2,
-  retryDelay: number = 1000
+  maxRetries: number = TPS_CONFIG.IMMEDIATE_RETRIES,
+  retryDelay: number = TPS_CONFIG.IMMEDIATE_RETRY_DELAY
 ): Promise<TpsFetchResult> {
   let lastError: TpsFetchResult = { ok: false, error: '未知错误' };
+  let rateLimitedCount = 0;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -170,18 +190,28 @@ export async function fetchViaProxy(
       
       clearTimeout(timeoutId);
       
-      // 429 限流重试
+      // 429 限流处理
       if (response.status === 429) {
+        rateLimitedCount++;
         lastError = {
           ok: false,
           error: `请求被限流 (429)，第 ${attempt + 1} 次尝试`,
           statusCode: 429
         };
+        
         if (attempt < maxRetries) {
+          // 还有即时重试机会
           await delay(retryDelay);
           continue;
         }
-        return lastError;
+        
+        // 即时重试用完，标记需要延后重试
+        return {
+          ok: false,
+          error: '请求被限流 (429)，需要延后重试',
+          statusCode: 429,
+          needDeferredRetry: true
+        };
       }
       
       if (!response.ok) {
@@ -412,6 +442,13 @@ export function parseDetailPage(html: string): TpsDetailResult | null {
     }
   });
   
+  if (!carrier) {
+    const carrierMatch = phoneInfoText.match(/(?:Last reported.*?\n|Primary.*?\n)([A-Za-z&\s.-]+?)(?:\n|$)/);
+    if (carrierMatch) {
+      carrier = carrierMatch[1].trim();
+    }
+  }
+  
   return {
     name: `${firstName} ${lastName}`.trim(),
     firstName,
@@ -420,18 +457,18 @@ export function parseDetailPage(html: string): TpsDetailResult | null {
     city,
     state,
     location: city && state ? `${city}, ${state}` : (city || state),
-    propertyValue,
-    yearBuilt,
     phone,
     phoneType,
-    isPrimary,
-    reportYear,
     carrier,
+    reportYear,
+    isPrimary,
+    propertyValue,
+    yearBuilt,
     isDeceased: false
   };
 }
 
-// ==================== 过滤逻辑 ====================
+// ==================== 过滤函数 ====================
 
 /**
  * 检查结果是否应该被包含
@@ -441,20 +478,25 @@ export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters
   if (result.isDeceased) return false;
   if (!result.age) return false;
   
+  // 年龄范围
   const minAge = filters.minAge || 0;
   const maxAge = filters.maxAge || 120;
   if (result.age < minAge || result.age > maxAge) return false;
   
+  // 报告年份
   const minYear = filters.minYear || 2000;
   if (result.reportYear && result.reportYear < minYear) return false;
   
+  // 最低房产价值
   const minPropertyValue = filters.minPropertyValue || 0;
   if (minPropertyValue > 0 && result.propertyValue < minPropertyValue) return false;
   
+  // 运营商过滤
   const carrierLower = (result.carrier || '').toLowerCase();
   if (filters.excludeTMobile && carrierLower.includes('t-mobile')) return false;
   if (filters.excludeComcast && (carrierLower.includes('comcast') || carrierLower.includes('spectrum'))) return false;
   
+  // 固话过滤
   if (filters.excludeLandline && result.phoneType === 'Landline') return false;
   
   return true;
@@ -470,7 +512,15 @@ export function delay(ms: number): Promise<void> {
 }
 
 /**
- * 并发批量获取页面
+ * 批量获取结果接口
+ */
+interface BatchFetchResult {
+  results: TpsFetchResult[];
+  deferredUrls: string[];  // 需要延后重试的 URL
+}
+
+/**
+ * 并发批量获取页面（支持收集需要延后重试的请求）
  */
 export async function fetchBatch(
   urls: string[], 
@@ -495,6 +545,134 @@ export async function fetchBatch(
   return results;
 }
 
+/**
+ * 并发批量获取页面（带延后重试队列收集）
+ * 
+ * 返回：
+ * - results: 成功获取的结果（包括失败但不需要重试的）
+ * - deferredUrls: 需要延后重试的 URL 列表
+ */
+export async function fetchBatchWithDeferredRetry(
+  urls: string[], 
+  token: string, 
+  concurrency: number = TPS_CONFIG.SCRAPEDO_CONCURRENCY
+): Promise<BatchFetchResult> {
+  const results: TpsFetchResult[] = [];
+  const deferredUrls: string[] = [];
+  
+  for (let i = 0; i < urls.length; i += concurrency) {
+    const batch = urls.slice(i, i + concurrency);
+    
+    const batchPromises = batch.map(url => fetchViaProxy(url, token));
+    const batchResults = await Promise.all(batchPromises);
+    
+    // 分离需要延后重试的请求
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
+      const url = batch[j];
+      
+      if (result.needDeferredRetry) {
+        // 需要延后重试
+        deferredUrls.push(url);
+        // 暂时放入一个占位结果
+        results.push({ ok: false, error: 'DEFERRED', statusCode: 429, needDeferredRetry: true });
+      } else {
+        results.push(result);
+      }
+    }
+    
+    // 批次间延迟
+    if (i + concurrency < urls.length) {
+      await delay(TPS_CONFIG.BATCH_DELAY);
+    }
+  }
+  
+  return { results, deferredUrls };
+}
+
+/**
+ * 执行延后重试
+ * 
+ * 对于 429 限流的请求，在所有任务完成后进行延后重试
+ * 使用更长的等待时间（2秒）和更少的并发
+ */
+async function executeDeferredRetry(
+  urls: string[],
+  token: string,
+  log: (msg: string) => void
+): Promise<Map<string, TpsFetchResult>> {
+  const results = new Map<string, TpsFetchResult>();
+  
+  if (urls.length === 0) {
+    return results;
+  }
+  
+  log(`⏳ 开始延后重试 ${urls.length} 个被限流的请求...`);
+  
+  // 延后重试使用更低的并发（降低到原来的一半）
+  const deferredConcurrency = Math.max(5, Math.floor(TPS_CONFIG.SCRAPEDO_CONCURRENCY / 2));
+  
+  for (let retryAttempt = 0; retryAttempt < TPS_CONFIG.DEFERRED_RETRIES; retryAttempt++) {
+    if (urls.length === 0) break;
+    
+    log(`⏳ 延后重试第 ${retryAttempt + 1}/${TPS_CONFIG.DEFERRED_RETRIES} 轮，剩余 ${urls.length} 个请求...`);
+    
+    // 等待更长时间
+    await delay(TPS_CONFIG.DEFERRED_RETRY_DELAY);
+    
+    const stillDeferred: string[] = [];
+    
+    // 分批处理
+    for (let i = 0; i < urls.length; i += deferredConcurrency) {
+      const batch = urls.slice(i, i + deferredConcurrency);
+      
+      const batchPromises = batch.map(url => 
+        fetchViaProxy(url, token, 1, TPS_CONFIG.DEFERRED_RETRY_DELAY)  // 延后重试只重试1次
+      );
+      const batchResults = await Promise.all(batchPromises);
+      
+      for (let j = 0; j < batchResults.length; j++) {
+        const result = batchResults[j];
+        const url = batch[j];
+        
+        if (result.ok) {
+          results.set(url, result);
+        } else if (result.statusCode === 429) {
+          // 仍然被限流，加入下一轮重试
+          stillDeferred.push(url);
+        } else {
+          // 其他错误，记录失败
+          results.set(url, result);
+        }
+      }
+      
+      // 批次间延迟（延后重试使用更长的延迟）
+      if (i + deferredConcurrency < urls.length) {
+        await delay(TPS_CONFIG.BATCH_DELAY * 2);
+      }
+    }
+    
+    urls = stillDeferred;
+  }
+  
+  // 最终仍然失败的请求
+  for (const url of urls) {
+    results.set(url, {
+      ok: false,
+      error: '延后重试后仍然被限流 (429)',
+      statusCode: 429
+    });
+  }
+  
+  if (urls.length > 0) {
+    log(`⚠️ ${urls.length} 个请求在延后重试后仍然失败`);
+  } else {
+    log(`✅ 延后重试完成，所有请求已处理`);
+  }
+  
+  return results;
+}
+
 // ==================== 完整搜索流程 ====================
 
 export interface TpsFullSearchOptions {
@@ -508,6 +686,10 @@ export interface TpsFullSearchOptions {
 
 /**
  * 完整搜索流程
+ * 
+ * 实现与 EXE 客户端一致的 2+2 重试机制：
+ * 1. 即时重试：遇到 429 时，最多重试 2 次，每次间隔 1 秒
+ * 2. 延后重试：即时重试失败后，在所有请求完成后，再重试 2 次，每次间隔 2 秒
  */
 export async function fullSearch(
   name: string,
@@ -547,26 +729,57 @@ export async function fullSearch(
     detailPageRequests: 0,
     totalRequests: 0,
     cacheHits: 0,
-    cacheMisses: 0
+    cacheMisses: 0,
+    immediateRetries: 0,
+    deferredRetries: 0,
+    rateLimitedRequests: 0
   };
+  
+  // 延后重试队列
+  const deferredSearchPages: string[] = [];
+  const deferredDetailPages: string[] = [];
   
   // ==================== 第一阶段：获取第一页 ====================
   const firstPageUrl = buildSearchUrl(name, location, 1);
   log(`📄 获取第一页...`);
   
   const firstPageResult = await fetchViaProxy(firstPageUrl, token);
+  
+  // 如果第一页就被限流，直接返回错误
   if (!firstPageResult.ok) {
-    log(`❌ 第一页获取失败: ${firstPageResult.error}`);
-    return {
-      success: false,
-      error: firstPageResult.error,
-      results: [],
-      totalRecords: 0,
-      pagesSearched: 0,
-      finalCount: 0,
-      stats,
-      logs
-    };
+    if (firstPageResult.needDeferredRetry) {
+      log(`⚠️ 第一页被限流，尝试延后重试...`);
+      const deferredResults = await executeDeferredRetry([firstPageUrl], token, log);
+      const retryResult = deferredResults.get(firstPageUrl);
+      if (!retryResult?.ok) {
+        log(`❌ 第一页获取失败: ${retryResult?.error || firstPageResult.error}`);
+        return {
+          success: false,
+          error: retryResult?.error || firstPageResult.error,
+          results: [],
+          totalRecords: 0,
+          pagesSearched: 0,
+          finalCount: 0,
+          stats,
+          logs
+        };
+      }
+      // 使用重试成功的结果
+      firstPageResult.ok = true;
+      firstPageResult.html = retryResult.html;
+    } else {
+      log(`❌ 第一页获取失败: ${firstPageResult.error}`);
+      return {
+        success: false,
+        error: firstPageResult.error,
+        results: [],
+        totalRecords: 0,
+        pagesSearched: 0,
+        finalCount: 0,
+        stats,
+        logs
+      };
+    }
   }
   
   const firstPageData = parseSearchPage(firstPageResult.html!, filters);
@@ -599,15 +812,26 @@ export async function fullSearch(
         remainingPageUrls.push(buildSearchUrl(name, location, page));
       }
       
-      const pageResults = await fetchBatch(remainingPageUrls, token, concurrency);
+      // 使用带延后重试收集的批量获取
+      const { results: pageResults, deferredUrls } = await fetchBatchWithDeferredRetry(
+        remainingPageUrls, token, concurrency
+      );
       stats.searchPageRequests += remainingPageUrls.length;
       
+      // 记录需要延后重试的搜索页
+      deferredSearchPages.push(...deferredUrls);
+      if (deferredUrls.length > 0) {
+        stats.rateLimitedRequests = (stats.rateLimitedRequests || 0) + deferredUrls.length;
+        log(`⚠️ ${deferredUrls.length} 个搜索页被限流，将在后续延后重试`);
+      }
+      
+      // 处理成功的结果
       for (let i = 0; i < pageResults.length; i++) {
         const pageResult = pageResults[i];
         const pageNum = i + 2;
         
-        if (pageResult.ok) {
-          const pageData = parseSearchPage(pageResult.html!, filters);
+        if (pageResult.ok && pageResult.html) {
+          const pageData = parseSearchPage(pageResult.html, filters);
           stats.pagesSearched++;
           stats.skippedNoAge += pageData.stats.skippedNoAge;
           stats.skippedDeceased += pageData.stats.skippedDeceased;
@@ -619,9 +843,32 @@ export async function fullSearch(
           }
           
           log(`✅ 搜索页 ${pageNum}: ${pageData.results.length} 条通过初筛`);
-        } else {
+        } else if (!pageResult.needDeferredRetry) {
           log(`❌ 搜索页 ${pageNum} 获取失败: ${pageResult.error}`);
         }
+      }
+    }
+  }
+  
+  // ==================== 搜索页延后重试 ====================
+  if (deferredSearchPages.length > 0) {
+    const deferredResults = await executeDeferredRetry(deferredSearchPages, token, log);
+    stats.deferredRetries = (stats.deferredRetries || 0) + deferredSearchPages.length;
+    
+    for (const [url, result] of deferredResults) {
+      if (result.ok && result.html) {
+        const pageData = parseSearchPage(result.html, filters);
+        stats.pagesSearched++;
+        stats.skippedNoAge += pageData.stats.skippedNoAge;
+        stats.skippedDeceased += pageData.stats.skippedDeceased;
+        stats.skippedAgeRange += pageData.stats.skippedAgeRange;
+        
+        for (const r of pageData.results) {
+          allDetailLinks.push(r.detailLink);
+          searchPageResults.push(r);
+        }
+        
+        log(`✅ 延后重试成功: ${pageData.results.length} 条通过初筛`);
       }
     }
   }
@@ -677,23 +924,64 @@ export async function fullSearch(
     log(`🔄 并发获取 ${linksToFetch.length} 个详情页 (并发数: ${concurrency})...`);
     
     const detailUrls = linksToFetch.map(link => buildDetailUrl(link));
-    const detailFetchResults = await fetchBatch(detailUrls, token, concurrency);
+    
+    // 使用带延后重试收集的批量获取
+    const { results: detailFetchResults, deferredUrls } = await fetchBatchWithDeferredRetry(
+      detailUrls, token, concurrency
+    );
+    
+    // 记录需要延后重试的详情页
+    if (deferredUrls.length > 0) {
+      stats.rateLimitedRequests = (stats.rateLimitedRequests || 0) + deferredUrls.length;
+      log(`⚠️ ${deferredUrls.length} 个详情页被限流，将在后续延后重试`);
+    }
+    
+    // 建立 URL 到 link 的映射
+    const urlToLink = new Map<string, string>();
+    for (let i = 0; i < linksToFetch.length; i++) {
+      urlToLink.set(detailUrls[i], linksToFetch[i]);
+    }
     
     const cacheItems: Array<{ link: string; data: TpsDetailResult }> = [];
     
+    // 处理成功的结果
     for (let i = 0; i < detailFetchResults.length; i++) {
       const result = detailFetchResults[i];
       const link = linksToFetch[i];
       
-      if (result.ok) {
-        const parsed = parseDetailPage(result.html!);
+      if (result.ok && result.html) {
+        const parsed = parseDetailPage(result.html);
         fetchedResults.push({ link, data: parsed });
         
         if (parsed && setCachedDetails) {
           cacheItems.push({ link, data: parsed });
         }
-      } else {
+      } else if (!result.needDeferredRetry) {
         fetchedResults.push({ link, data: null });
+      }
+    }
+    
+    // ==================== 详情页延后重试 ====================
+    if (deferredUrls.length > 0) {
+      const deferredDetailResults = await executeDeferredRetry(deferredUrls, token, log);
+      stats.deferredRetries = (stats.deferredRetries || 0) + deferredUrls.length;
+      
+      for (const [url, result] of deferredDetailResults) {
+        const link = urlToLink.get(url);
+        if (!link) continue;
+        
+        if (result.ok && result.html) {
+          const parsed = parseDetailPage(result.html);
+          fetchedResults.push({ link, data: parsed });
+          
+          if (parsed && setCachedDetails) {
+            cacheItems.push({ link, data: parsed });
+          }
+          
+          log(`✅ 详情页延后重试成功`);
+        } else {
+          fetchedResults.push({ link, data: null });
+        }
       }
     }
     
@@ -766,6 +1054,10 @@ export async function fullSearch(
   
   log(`✅ 搜索完成: ${finalResults.length} 条有效结果`);
   log(`📊 统计: 搜索页 ${stats.searchPageRequests} 次, 详情页 ${stats.detailPageRequests} 次, 缓存命中 ${stats.cacheHits} 次`);
+  
+  if (stats.rateLimitedRequests && stats.rateLimitedRequests > 0) {
+    log(`⚠️ 限流统计: ${stats.rateLimitedRequests} 次 429 限流, ${stats.deferredRetries || 0} 次延后重试`);
+  }
   
   return {
     success: true,
