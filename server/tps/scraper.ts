@@ -178,11 +178,31 @@ export function parseSearchPage(html: string): { results: TpsSearchResult[]; tot
   }
   
   // 解析搜索结果卡片
-  $('.card-summary').each((_, card) => {
+  // 尝试多种选择器来匹配卡片
+  const cardSelectors = ['.card-summary', '.person-card', '.search-result-card', '[data-detail-link]'];
+  let $cards = $();
+  
+  for (const selector of cardSelectors) {
+    $cards = $(selector);
+    if ($cards.length > 0) break;
+  }
+  
+  // 如果没有找到卡片，记录调试信息
+  if ($cards.length === 0) {
+    console.log('[TPS Debug] No cards found. Page structure:', {
+      bodyLength: $('body').text().length,
+      hasCloudflare: $('body').text().includes('Cloudflare'),
+      hasVerifying: $('body').text().includes('Verifying'),
+      firstDivClasses: $('div').first().attr('class'),
+    });
+  }
+  
+  $cards.each((_, card) => {
     const $card = $(card);
     
-    // 获取姓名
-    const name = $card.find('.h4').first().text().trim();
+    // 获取姓名（多种选择器）
+    let name = $card.find('.h4').first().text().trim();
+    if (!name) name = $card.find('.name, .person-name, h4, h3').first().text().trim();
     if (!name) return;
     
     // 获取年龄（两种方法，与 EXE 客户端一致）
@@ -209,10 +229,14 @@ export function parseSearchPage(html: string): { results: TpsSearchResult[]; tot
     // 获取位置
     const location = $card.find('.content-value').eq(1).text().trim() || '';
     
-    // 获取详情链接
-    const detailLink = $card.find('a[href*="/find/person/"]').first().attr('href') || '';
+    // 获取详情链接（多种选择器）
+    let detailLink = $card.find('a[href*="/find/person/"]').first().attr('href') || '';
+    if (!detailLink) detailLink = $card.find('a[href*="/person/"]').first().attr('href') || '';
+    if (!detailLink) detailLink = $card.attr('data-detail-link') || '';
+    if (!detailLink) detailLink = $card.find('a').first().attr('href') || '';
     
-    if (detailLink) {
+    // 过滤无效链接
+    if (detailLink && !detailLink.includes('#') && detailLink !== '/') {
       results.push({ name, age, location, detailLink });
     }
   });
