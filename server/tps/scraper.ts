@@ -504,8 +504,9 @@ export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters
   if (result.reportYear && result.reportYear < minYear) return false;
   
   // 最低房产价值
+  // 修复: 如果设置了最低房产价值，没有房产信息的也应该被过滤
   const minPropertyValue = filters.minPropertyValue || 0;
-  if (minPropertyValue > 0 && result.propertyValue < minPropertyValue) return false;
+  if (minPropertyValue > 0 && (!result.propertyValue || result.propertyValue < minPropertyValue)) return false;
   
   // 运营商过滤
   const carrierLower = (result.carrier || '').toLowerCase();
@@ -513,7 +514,8 @@ export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters
   if (filters.excludeComcast && (carrierLower.includes('comcast') || carrierLower.includes('spectrum'))) return false;
   
   // 固话过滤
-  if (filters.excludeLandline && result.phoneType === 'Landline') return false;
+  // 修复: 不区分大小写，确保 'Landline', 'landline', 'LANDLINE' 都能被过滤
+  if (filters.excludeLandline && result.phoneType?.toLowerCase() === 'landline') return false;
   
   return true;
 }
