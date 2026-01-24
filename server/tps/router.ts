@@ -373,15 +373,15 @@ export const tpsRouter = router({
 // ==================== 统一队列模式搜索执行逻辑 ====================
 
 /**
- * 统一队列模式执行搜索
+ * 统一队列模式执行搜索 (v3.3 优化版)
  * 
  * 两阶段执行：
- * 1. 阶段一：并发执行所有搜索任务（4 并发），收集详情链接
+ * 1. 阶段一：并发执行所有搜索任务（4 并发），每个任务内部并发获取所有搜索页
  * 2. 阶段二：统一队列消费所有详情链接（40 并发）
  * 
- * 优势：
- * - 详情获取阶段始终保持 40 并发，不会因任务大小不均而浪费
- * - 搜索阶段快速完成，详情阶段高效并行
+ * v3.3 优化：
+ * - 搜索阶段：每个任务内部并发获取所有搜索页（而非顺序获取）
+ * - 预期性能提升：搜索阶段 10-15 倍
  */
 async function executeTpsSearchUnifiedQueue(
   taskDbId: number,
@@ -420,7 +420,7 @@ async function executeTpsSearchUnifiedQueue(
   }
   
   addLog(`🚀 开始搜索任务，共 ${subTasks.length} 个子任务`);
-  addLog(`⚡ 统一队列模式: 搜索 ${SEARCH_CONCURRENCY} 并发 → 详情 ${TOTAL_CONCURRENCY} 并发`);
+  addLog(`⚡ 优化模式 v3.3: 搜索 ${SEARCH_CONCURRENCY} 任务并发 × 25页并发 → 详情 ${TOTAL_CONCURRENCY} 并发`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
