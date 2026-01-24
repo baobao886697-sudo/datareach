@@ -212,9 +212,9 @@ export function parseSearchPage(html: string): TpsSearchResult[] {
   return results;
 }
 
-// 默认年龄范围（当用户未设置时使用）
-const DEFAULT_MIN_AGE = 30;
-const DEFAULT_MAX_AGE = 70;
+// 默认年龄范围（与前端 TpsSearch.tsx 保持一致）
+const DEFAULT_MIN_AGE = 50;
+const DEFAULT_MAX_AGE = 79;
 
 /**
  * 搜索页年龄精确过滤
