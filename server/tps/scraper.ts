@@ -2,25 +2,68 @@ import * as cheerio from 'cheerio';
 
 // ==================== Scrape.do API ====================
 
+// 超时配置
+const SCRAPE_TIMEOUT_MS = 5000;  // 5 秒超时
+const SCRAPE_MAX_RETRIES = 1;    // 最多重试 1 次
+
 /**
- * 使用 Scrape.do API 获取页面
+ * 使用 Scrape.do API 获取页面（带超时和重试）
+ * 
+ * 优化策略：
+ * - 首次请求：5 秒超时
+ * - 超时后自动重试一次（5 秒超时）
+ * - 提升整体响应速度，避免慢请求阻塞
  */
 async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   const encodedUrl = encodeURIComponent(url);
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=30000`;
+  // Scrape.do 的 timeout 参数单位是毫秒
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}`;
   
-  const response = await fetch(apiUrl, {
-    method: 'GET',
-    headers: {
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  });
+  let lastError: Error | null = null;
   
-  if (!response.ok) {
-    throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+  for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 2000); // 客户端超时比 API 超时多 2 秒
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+      }
+      
+      return await response.text();
+    } catch (error: any) {
+      lastError = error;
+      
+      // 如果是最后一次尝试，不再重试
+      if (attempt >= SCRAPE_MAX_RETRIES) {
+        break;
+      }
+      
+      // 超时或网络错误时重试
+      const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
+      const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+      
+      if (isTimeout || isNetworkError) {
+        console.log(`[fetchWithScrapedo] 请求超时/失败，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+        continue;
+      }
+      
+      // 其他错误直接抛出
+      throw error;
+    }
   }
   
-  return await response.text();
+  throw lastError || new Error('请求失败');
 }
 
 // ==================== 配置常量 ====================
