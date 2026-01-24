@@ -470,22 +470,37 @@ async function ensureTables() {
         names JSON NOT NULL,
         locations JSON,
         filters JSON,
-        maxPages INT NOT NULL DEFAULT 25,
-        status ENUM('pending', 'running', 'completed', 'failed', 'stopped', 'insufficient_credits') NOT NULL DEFAULT 'pending',
-        progress INT NOT NULL DEFAULT 0,
         totalSubTasks INT NOT NULL DEFAULT 0,
         completedSubTasks INT NOT NULL DEFAULT 0,
         totalResults INT NOT NULL DEFAULT 0,
+        searchPageRequests INT NOT NULL DEFAULT 0,
+        detailPageRequests INT NOT NULL DEFAULT 0,
+        cacheHits INT NOT NULL DEFAULT 0,
         creditsUsed DECIMAL(10,2) NOT NULL DEFAULT 0,
+        status ENUM('pending', 'running', 'completed', 'failed', 'cancelled', 'insufficient_credits') NOT NULL DEFAULT 'pending',
+        progress INT NOT NULL DEFAULT 0,
+        logs JSON,
         errorMessage TEXT,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL,
+        startedAt TIMESTAMP NULL,
         completedAt TIMESTAMP NULL,
         INDEX idx_userId (userId),
         INDEX idx_status (status)
       )
     `);
     console.log("[Database] TPS search tasks table ready");
+    
+    // 添加缺失的字段（如果表已存在）
+    try {
+      await db.execute(sql`ALTER TABLE tps_search_tasks ADD COLUMN IF NOT EXISTS searchPageRequests INT NOT NULL DEFAULT 0`);
+      await db.execute(sql`ALTER TABLE tps_search_tasks ADD COLUMN IF NOT EXISTS detailPageRequests INT NOT NULL DEFAULT 0`);
+      await db.execute(sql`ALTER TABLE tps_search_tasks ADD COLUMN IF NOT EXISTS cacheHits INT NOT NULL DEFAULT 0`);
+      await db.execute(sql`ALTER TABLE tps_search_tasks ADD COLUMN IF NOT EXISTS logs JSON`);
+      await db.execute(sql`ALTER TABLE tps_search_tasks ADD COLUMN IF NOT EXISTS startedAt TIMESTAMP NULL`);
+      console.log("[Database] TPS search tasks columns synced");
+    } catch (e) {
+      // 忽略字段已存在的错误
+    }
     
     // 21. TPS 搜索结果表
     await db.execute(sql`
