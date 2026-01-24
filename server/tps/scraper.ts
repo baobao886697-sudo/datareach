@@ -141,52 +141,85 @@ export function buildDetailUrl(detailLink: string): string {
 
 /**
  * 通过 Scrape.do 代理获取页面
+ * 支持 429 限流重试机制
  */
-export async function fetchViaProxy(url: string, token: string): Promise<TpsFetchResult> {
-  try {
-    const encodedUrl = encodeURIComponent(url);
-    const apiUrl = `${TPS_CONFIG.SCRAPEDO_BASE}/?token=${token}&url=${encodedUrl}&super=true&geoCode=us`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TPS_CONFIG.REQUEST_TIMEOUT);
-    
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+export async function fetchViaProxy(
+  url: string, 
+  token: string, 
+  maxRetries: number = 2,
+  retryDelay: number = 1000
+): Promise<TpsFetchResult> {
+  let lastError: TpsFetchResult = { ok: false, error: '未知错误' };
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const encodedUrl = encodeURIComponent(url);
+      const apiUrl = `${TPS_CONFIG.SCRAPEDO_BASE}/?token=${token}&url=${encodedUrl}&super=true&geoCode=us`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TPS_CONFIG.REQUEST_TIMEOUT);
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        }
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // 429 限流重试
+      if (response.status === 429) {
+        lastError = {
+          ok: false,
+          error: `请求被限流 (429)，第 ${attempt + 1} 次尝试`,
+          statusCode: 429
+        };
+        if (attempt < maxRetries) {
+          await delay(retryDelay);
+          continue;
+        }
+        return lastError;
       }
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      return {
-        ok: false,
-        error: `HTTP ${response.status}: ${response.statusText}`,
-        statusCode: response.status
-      };
+      
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: `HTTP ${response.status}: ${response.statusText}`,
+          statusCode: response.status
+        };
+      }
+      
+      const html = await response.text();
+      
+      // 检查是否被阻止
+      if (html.includes('Access Denied') || html.includes('blocked') || html.includes('captcha')) {
+        return {
+          ok: false,
+          error: '访问被阻止，请稍后重试',
+          statusCode: 403
+        };
+      }
+      
+      return { ok: true, html };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        lastError = { ok: false, error: '请求超时', statusCode: 408 };
+      } else {
+        lastError = { ok: false, error: error.message || '请求失败' };
+      }
+      
+      // 如果还有重试机会，等待后重试
+      if (attempt < maxRetries) {
+        await delay(retryDelay);
+        continue;
+      }
     }
-    
-    const html = await response.text();
-    
-    // 检查是否被阻止
-    if (html.includes('Access Denied') || html.includes('blocked') || html.includes('captcha')) {
-      return {
-        ok: false,
-        error: '访问被阻止，请稍后重试',
-        statusCode: 403
-      };
-    }
-    
-    return { ok: true, html };
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      return { ok: false, error: '请求超时', statusCode: 408 };
-    }
-    return { ok: false, error: error.message || '请求失败' };
   }
+  
+  return lastError;
 }
 
 // ==================== 页面解析 ====================

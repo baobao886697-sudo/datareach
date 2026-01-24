@@ -309,6 +309,7 @@ export default function TpsTask() {
                           <TableHead className="text-gray-400">运营商</TableHead>
                           <TableHead className="text-gray-400">报告年份</TableHead>
                           <TableHead className="text-gray-400">房产价值</TableHead>
+                          <TableHead className="text-gray-400">建造年份</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -361,6 +362,9 @@ export default function TpsTask() {
                                   ${result.propertyValue.toLocaleString()}
                                 </div>
                               ) : "-"}
+                            </TableCell>
+                            <TableCell className="text-sm text-gray-400">
+                              {result.yearBuilt || "-"}
                             </TableCell>
                           </TableRow>
                         ))}

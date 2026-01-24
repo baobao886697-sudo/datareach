@@ -38,14 +38,15 @@ export default function TpsSearch() {
   const [namesInput, setNamesInput] = useState("");
   const [locationsInput, setLocationsInput] = useState("");
   
-  // 过滤条件
+  // 过滤条件 - 与 EXE 客户端保持一致的默认值
   const [filters, setFilters] = useState({
-    minAge: 25,
-    maxAge: 65,
-    minYear: 2015,
+    minAge: 50,
+    maxAge: 79,
+    minYear: 2025,
     minPropertyValue: 0,
     excludeTMobile: false,
     excludeComcast: false,
+    excludeLandline: false,
   });
   
   // 高级选项
@@ -269,10 +270,13 @@ export default function TpsSearch() {
                         value={[filters.minAge, filters.maxAge]}
                         onValueChange={([min, max]) => setFilters(f => ({ ...f, minAge: min, maxAge: max }))}
                         min={18}
-                        max={100}
+                        max={99}
                         step={1}
                       />
                     </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      过滤掉不在此年龄范围内的记录
+                    </p>
                   </div>
                   
                   {/* 电话年份 */}
@@ -282,7 +286,7 @@ export default function TpsSearch() {
                       value={[filters.minYear]}
                       onValueChange={([v]) => setFilters(f => ({ ...f, minYear: v }))}
                       min={2000}
-                      max={2026}
+                      max={2030}
                       step={1}
                       className="mt-2"
                     />
@@ -298,10 +302,13 @@ export default function TpsSearch() {
                       value={[filters.minPropertyValue]}
                       onValueChange={([v]) => setFilters(f => ({ ...f, minPropertyValue: v }))}
                       min={0}
-                      max={1000000}
-                      step={50000}
+                      max={10000000}
+                      step={100000}
                       className="mt-2"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      过滤掉房产价值低于此金额的记录
+                    </p>
                   </div>
                   
                   {/* 排除运营商 */}
@@ -319,11 +326,22 @@ export default function TpsSearch() {
                   <div className="flex items-center justify-between">
                     <div>
                       <Label>排除 Comcast 号码</Label>
-                      <p className="text-xs text-muted-foreground">过滤掉 Comcast 运营商的号码</p>
+                      <p className="text-xs text-muted-foreground">过滤掉 Comcast/Spectrum 运营商的号码</p>
                     </div>
                     <Switch
                       checked={filters.excludeComcast}
                       onCheckedChange={(v) => setFilters(f => ({ ...f, excludeComcast: v }))}
+                    />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>排除固话号码</Label>
+                      <p className="text-xs text-muted-foreground">过滤掉 Landline 类型的固定电话号码</p>
+                    </div>
+                    <Switch
+                      checked={filters.excludeLandline}
+                      onCheckedChange={(v) => setFilters(f => ({ ...f, excludeLandline: v }))}
                     />
                   </div>
                 </CardContent>

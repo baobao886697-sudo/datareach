@@ -271,9 +271,26 @@ export const tpsRouter = router({
       
       const results = await getTpsSearchResults(task.id, 1, 10000);
       
+      // 电话号码格式化函数：转换为 +1 格式
+      const formatPhone = (phone: string): string => {
+        if (!phone) return "";
+        // 移除所有非数字字符
+        const digits = phone.replace(/\D/g, "");
+        // 如果是10位数字，添加+1前缀
+        if (digits.length === 10) {
+          return `+1${digits}`;
+        }
+        // 如果是11位且以1开头，添加+前缀
+        if (digits.length === 11 && digits.startsWith("1")) {
+          return `+${digits}`;
+        }
+        // 其他情况返回原始数字
+        return digits;
+      };
+      
       // 生成 CSV
       const headers = [
-        "姓名", "年龄", "城市", "州", "电话", "电话类型", 
+        "姓名", "年龄", "城市", "州", "位置", "电话", "电话类型", 
         "运营商", "报告年份", "是否主号", "房产价值", "建造年份"
       ];
       
@@ -282,7 +299,8 @@ export const tpsRouter = router({
         r.age?.toString() || "",
         r.city || "",
         r.state || "",
-        r.phone || "",
+        r.location || (r.city && r.state ? `${r.city}, ${r.state}` : (r.city || r.state || "")),
+        formatPhone(r.phone),
         r.phoneType || "",
         r.carrier || "",
         r.reportYear?.toString() || "",
@@ -291,7 +309,9 @@ export const tpsRouter = router({
         r.yearBuilt?.toString() || "",
       ]);
       
-      const csv = [
+      // 添加 UTF-8 BOM 头以确保 Excel 正确识别中文
+      const BOM = "\uFEFF";
+      const csv = BOM + [
         headers.join(","),
         ...rows.map((row: string[]) => row.map((cell: string) => `"${cell.replace(/"/g, '""')}"`).join(","))
       ].join("\n");
