@@ -1,5 +1,28 @@
 import * as cheerio from 'cheerio';
 
+// ==================== Scrape.do API ====================
+
+/**
+ * 使用 Scrape.do API 获取页面
+ */
+async function fetchWithScrapedo(url: string, token: string): Promise<string> {
+  const encodedUrl = encodeURIComponent(url);
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=30000`;
+  
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: {
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+  }
+  
+  return await response.text();
+}
+
 // ==================== 配置常量 ====================
 
 export const TPS_CONFIG = {
@@ -412,136 +435,288 @@ export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters
 // ==================== 分离的搜索和详情函数（统一队列模式） ====================
 
 /**
+ * searchOnly 返回结果类型
+ */
+export interface SearchOnlyResult {
+  success: boolean;
+  searchResults: TpsSearchResult[];
+  stats: {
+    searchPageRequests: number;
+    filteredOut: number;
+  };
+  error?: string;
+}
+
+/**
  * 仅执行搜索，返回详情任务列表
  * 用于统一队列模式的第一阶段
+ * 
+ * @param name - 搜索姓名
+ * @param location - 搜索地点
+ * @param token - Scrape.do API Token
+ * @param maxPages - 最大搜索页数
+ * @param filters - 过滤条件
+ * @param onProgress - 进度回调
  */
 export async function searchOnly(
   name: string,
   location: string,
+  token: string,
   maxPages: number,
   filters: TpsFilters,
-  fetchPage: (url: string) => Promise<string>,
   onProgress?: (message: string) => void
-): Promise<{ searchResults: TpsSearchResult[]; pagesSearched: number; detailTasks: DetailTask[] }> {
+): Promise<SearchOnlyResult> {
   const baseUrl = 'https://www.truepeoplesearch.com/results';
   const allResults: TpsSearchResult[] = [];
-  let pagesSearched = 0;
+  let searchPageRequests = 0;
+  let totalFound = 0;
+  let filteredOut = 0;
   
-  for (let page = 1; page <= maxPages; page++) {
-    const params = new URLSearchParams();
-    params.set('name', name);
-    if (location) params.set('citystatezip', location);
-    if (page > 1) params.set('page', page.toString());
-    
-    const url = `${baseUrl}?${params.toString()}`;
-    onProgress?.(`搜索 ${name} @ ${location || '全国'} 第 ${page}/${maxPages} 页...`);
-    
-    try {
-      const html = await fetchPage(url);
-      pagesSearched++;
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      const params = new URLSearchParams();
+      params.set('name', name);
+      if (location) params.set('citystatezip', location);
+      if (page > 1) params.set('page', page.toString());
       
-      const results = parseSearchPage(html);
-      if (results.length === 0) {
-        onProgress?.(`第 ${page} 页无结果，停止搜索`);
-        break;
+      const url = `${baseUrl}?${params.toString()}`;
+      onProgress?.(`搜索 ${name} @ ${location || '全国'} 第 ${page}/${maxPages} 页...`);
+      
+      try {
+        const html = await fetchWithScrapedo(url, token);
+        searchPageRequests++;
+        
+        const results = parseSearchPage(html);
+        totalFound += results.length;
+        
+        if (results.length === 0) {
+          onProgress?.(`第 ${page} 页无结果，停止搜索`);
+          break;
+        }
+        
+        // 年龄初筛
+        const filtered = preFilterByAge(results, filters);
+        filteredOut += results.length - filtered.length;
+        allResults.push(...filtered);
+        
+        onProgress?.(`第 ${page} 页: 找到 ${results.length} 条，初筛后 ${filtered.length} 条`);
+      } catch (error: any) {
+        onProgress?.(`第 ${page} 页搜索失败: ${error.message || error}`);
+        // 继续下一页
       }
-      
-      // 年龄初筛
-      const filtered = preFilterByAge(results, filters);
-      allResults.push(...filtered);
-      
-      onProgress?.(`第 ${page} 页: 找到 ${results.length} 条，初筛后 ${filtered.length} 条`);
-    } catch (error) {
-      onProgress?.(`第 ${page} 页搜索失败: ${error}`);
-      // 继续下一页
     }
-  }
-  
-  // 去重并创建详情任务
-  const seenLinks = new Set<string>();
-  const detailTasks: DetailTask[] = [];
-  
-  for (const result of allResults) {
-    if (result.detailLink && !seenLinks.has(result.detailLink)) {
-      seenLinks.add(result.detailLink);
-      detailTasks.push({
-        detailLink: result.detailLink,
-        searchName: name,
-        searchLocation: location,
-        searchResult: result,
-      });
+    
+    // 去重
+    const seenLinks = new Set<string>();
+    const uniqueResults: TpsSearchResult[] = [];
+    
+    for (const result of allResults) {
+      if (result.detailLink && !seenLinks.has(result.detailLink)) {
+        seenLinks.add(result.detailLink);
+        uniqueResults.push(result);
+      }
     }
+    
+    onProgress?.(`搜索完成: ${allResults.length} 条结果，${uniqueResults.length} 个唯一详情链接`);
+    
+    return {
+      success: true,
+      searchResults: uniqueResults,
+      stats: {
+        searchPageRequests,
+        filteredOut,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      searchResults: [],
+      stats: {
+        searchPageRequests,
+        filteredOut,
+      },
+      error: error.message || String(error),
+    };
   }
-  
-  onProgress?.(`搜索完成: ${allResults.length} 条结果，${detailTasks.length} 个唯一详情链接`);
-  
-  return { searchResults: allResults, pagesSearched, detailTasks };
+}
+
+/**
+ * 扩展的详情任务类型（包含子任务索引）
+ */
+export interface DetailTaskWithIndex {
+  searchResult: TpsSearchResult;
+  subTaskIndex: number;
+  name: string;
+  location: string;
+}
+
+/**
+ * fetchDetailsInBatch 返回结果类型
+ */
+export interface FetchDetailsResult {
+  results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }>;
+  stats: {
+    detailPageRequests: number;
+    cacheHits: number;
+    filteredOut: number;
+  };
 }
 
 /**
  * 批量获取详情
  * 用于统一队列模式的第二阶段
+ * 
+ * @param tasks - 详情任务列表
+ * @param token - Scrape.do API Token
+ * @param concurrency - 并发数
+ * @param filters - 过滤条件
+ * @param onProgress - 进度回调
+ * @param getCachedDetails - 批量获取缓存函数
+ * @param setCachedDetails - 批量保存缓存函数
  */
 export async function fetchDetailsInBatch(
-  tasks: DetailTask[],
+  tasks: DetailTaskWithIndex[],
+  token: string,
+  concurrency: number,
   filters: TpsFilters,
-  fetchPage: (url: string) => Promise<string>,
-  getCachedDetail: (detailLink: string) => Promise<TpsDetailResult[] | null>,
-  saveCachedDetail: (detailLink: string, results: TpsDetailResult[]) => Promise<void>,
-  onProgress?: (message: string) => void
-): Promise<{ results: TpsDetailResult[]; detailPagesFetched: number; cacheHits: number }> {
-  const allResults: TpsDetailResult[] = [];
-  let detailPagesFetched = 0;
+  onProgress: (message: string) => void,
+  getCachedDetails: (links: string[]) => Promise<Map<string, TpsDetailResult>>,
+  setCachedDetails: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>
+): Promise<FetchDetailsResult> {
+  const results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }> = [];
+  let detailPageRequests = 0;
   let cacheHits = 0;
+  let filteredOut = 0;
   
   const baseUrl = 'https://www.truepeoplesearch.com';
   
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
-    const detailUrl = task.detailLink.startsWith('http') 
-      ? task.detailLink 
-      : `${baseUrl}${task.detailLink}`;
+  // 去重详情链接
+  const uniqueLinks = [...new Set(tasks.map(t => t.searchResult.detailLink))];
+  
+  // 批量获取缓存
+  onProgress(`检查缓存: ${uniqueLinks.length} 个链接...`);
+  const cachedMap = await getCachedDetails(uniqueLinks);
+  
+  // 分离缓存命中和未命中的任务
+  const tasksToFetch: DetailTaskWithIndex[] = [];
+  const tasksByLink = new Map<string, DetailTaskWithIndex[]>();
+  
+  for (const task of tasks) {
+    const link = task.searchResult.detailLink;
+    if (!tasksByLink.has(link)) {
+      tasksByLink.set(link, []);
+    }
+    tasksByLink.get(link)!.push(task);
+  }
+  
+  for (const [link, linkTasks] of tasksByLink) {
+    const cached = cachedMap.get(link);
     
-    onProgress?.(`获取详情 ${i + 1}/${tasks.length}: ${task.searchResult.name}`);
-    
-    try {
-      // 检查缓存
-      const cached = await getCachedDetail(task.detailLink);
-      
-      // 验证缓存数据完整性（必须有电话号码才算有效缓存）
-      if (cached && cached.length > 0 && cached.some(r => r.phone && r.phone.length >= 10)) {
-        cacheHits++;
-        // 应用过滤
-        const filtered = cached.filter(r => shouldIncludeResult(r, filters));
-        allResults.push(...filtered);
-        continue;
-      }
-      
-      // 获取详情页
-      const html = await fetchPage(detailUrl);
-      detailPagesFetched++;
-      
-      // 解析详情
-      const details = parseDetailPage(html, task.searchResult);
-      
-      // 保存到缓存
-      if (details.length > 0) {
-        await saveCachedDetail(task.detailLink, details);
-      }
-      
+    // 验证缓存数据完整性（必须有电话号码才算有效缓存）
+    if (cached && cached.phone && cached.phone.length >= 10) {
+      cacheHits++;
       // 应用过滤
-      const filtered = details.filter(r => shouldIncludeResult(r, filters));
-      allResults.push(...filtered);
-      
-    } catch (error) {
-      onProgress?.(`获取详情失败: ${task.detailLink} - ${error}`);
-      // 继续下一个
+      if (shouldIncludeResult(cached, filters)) {
+        for (const task of linkTasks) {
+          results.push({ task, details: [cached] });
+        }
+      } else {
+        filteredOut++;
+      }
+    } else {
+      // 需要获取
+      tasksToFetch.push(linkTasks[0]);
     }
   }
   
-  onProgress?.(`详情获取完成: ${allResults.length} 条结果，缓存命中 ${cacheHits}，新获取 ${detailPagesFetched}`);
+  onProgress(`缓存命中: ${cacheHits}，待获取: ${tasksToFetch.length}`);
   
-  return { results: allResults, detailPagesFetched, cacheHits };
+  // 并发获取未缓存的详情
+  const cacheToSave: Array<{ link: string; data: TpsDetailResult }> = [];
+  let completed = 0;
+  
+  // 并发控制
+  const runWithConcurrency = async () => {
+    let index = 0;
+    const running: Promise<void>[] = [];
+    
+    const processTask = async (task: DetailTaskWithIndex) => {
+      const link = task.searchResult.detailLink;
+      const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
+      
+      try {
+        const html = await fetchWithScrapedo(detailUrl, token);
+        detailPageRequests++;
+        
+        // 解析详情
+        const details = parseDetailPage(html, task.searchResult);
+        
+        // 保存到缓存队列
+        for (const detail of details) {
+          if (detail.phone && detail.phone.length >= 10) {
+            cacheToSave.push({ link, data: detail });
+          }
+        }
+        
+        // 应用过滤并添加结果
+        const filtered = details.filter(r => shouldIncludeResult(r, filters));
+        filteredOut += details.length - filtered.length;
+        
+        // 为所有共享该链接的任务添加结果
+        const linkTasks = tasksByLink.get(link) || [task];
+        for (const t of linkTasks) {
+          results.push({ task: t, details: filtered });
+        }
+        
+        completed++;
+        if (completed % 10 === 0 || completed === tasksToFetch.length) {
+          onProgress(`获取详情进度: ${completed}/${tasksToFetch.length}`);
+        }
+      } catch (error: any) {
+        onProgress(`获取详情失败: ${link} - ${error.message || error}`);
+        completed++;
+      }
+    };
+    
+    const startNext = () => {
+      if (index < tasksToFetch.length) {
+        const task = tasksToFetch[index++];
+        const promise = processTask(task).then(() => {
+          startNext();
+        });
+        running.push(promise);
+      }
+    };
+    
+    // 启动初始并发
+    const initialBatch = Math.min(concurrency, tasksToFetch.length);
+    for (let i = 0; i < initialBatch; i++) {
+      startNext();
+    }
+    
+    await Promise.all(running);
+  };
+  
+  if (tasksToFetch.length > 0) {
+    await runWithConcurrency();
+  }
+  
+  // 批量保存缓存
+  if (cacheToSave.length > 0) {
+    onProgress(`保存缓存: ${cacheToSave.length} 条...`);
+    await setCachedDetails(cacheToSave);
+  }
+  
+  onProgress(`详情获取完成: ${results.length} 条结果，缓存命中 ${cacheHits}，新获取 ${detailPageRequests}`);
+  
+  return {
+    results,
+    stats: {
+      detailPageRequests,
+      cacheHits,
+      filteredOut,
+    },
+  };
 }
 
 // ==================== 完整搜索函数（保留向后兼容） ====================
