@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation, useRoute } from "wouter";
+import { Link, useLocation, useRoute, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,15 @@ import { ParticleNetwork } from "@/components/ParticleNetwork";
 export default function ResetPassword() {
   const [, setLocation] = useLocation();
   const [, params] = useRoute("/reset-password/:token");
-  const token = params?.token || "";
+  const searchString = useSearch();
+  
+  // 支持从路径参数或查询参数获取 token
+  const getTokenFromSearch = () => {
+    const urlParams = new URLSearchParams(searchString);
+    return urlParams.get('token') || '';
+  };
+  
+  const token = params?.token || getTokenFromSearch();
   
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
