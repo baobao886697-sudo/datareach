@@ -32,7 +32,7 @@ import {
   saveAnywhoDetailCache,
   deductCredits,
   getUserCredits,
-  logCreditChange,
+
   logApi,
 } from "./db";
 import { getDb, logUserActivity } from "../db";
@@ -677,16 +677,7 @@ async function executeAnywhoSearch(
     const creditsUsed = (totalSearchPages * searchCost) + (totalDetailPages * detailCost);
     
     // 扣除积分
-    await deductCredits(userId, creditsUsed);
-    
-    // 记录积分变动
-    await logCreditChange({
-      userId,
-      amount: -Math.ceil(creditsUsed),
-      type: "anywho_search",
-      description: `Anywho 搜索任务 ${taskId.slice(0, 8)}`,
-      relatedId: taskId,
-    });
+    await deductCredits(userId, creditsUsed, "search", `Anywho 搜索任务 ${taskId.slice(0, 8)}`, taskId);
     
     // 完成任务
     await completeAnywhoSearchTask(taskId, {
