@@ -500,14 +500,23 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
  * - 与搜索页过滤逻辑保持一致
  */
 export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
+  // 数据完整性验证：必须有电话号码
+  if (!result.phone || result.phone.length < 10) {
+    return false;
+  }
+  
+  // 数据完整性验证：必须有年龄
+  if (result.age === undefined || result.age === null) {
+    return false;
+  }
+  
   // 使用用户设置的年龄范围，如果未设置则使用默认值
   const minAge = filters.minAge ?? DEFAULT_MIN_AGE;
   const maxAge = filters.maxAge ?? DEFAULT_MAX_AGE;
   
-  if (result.age !== undefined) {
-    if (result.age < minAge) return false;
-    if (result.age > maxAge) return false;
-  }
+  // 年龄范围验证
+  if (result.age < minAge) return false;
+  if (result.age > maxAge) return false;
   if (filters.minYear !== undefined && result.reportYear !== undefined) {
     if (result.reportYear < filters.minYear) return false;
   }
