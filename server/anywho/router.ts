@@ -307,7 +307,7 @@ export const anywhoRouter = router({
         page++;
       }
       
-      // 完善详细的 CSV 表头
+      // 完善详细的 CSV 表头（已删除：婚姻记录、所有电话、家庭成员、搜索地点）
       const headers = [
         "序号",
         "姓名",
@@ -315,7 +315,6 @@ export const anywhoRouter = router({
         "姓",
         "年龄",
         "婚姻状况",
-        "婚姻记录",
         "城市",
         "州",
         "完整地址",
@@ -324,26 +323,30 @@ export const anywhoRouter = router({
         "主号码标识",
         "电话类型",
         "运营商",
-        "所有电话",
         "邮箱",
-        "家庭成员",
         "是否已故",
         "详情链接",
         "搜索姓名",
-        "搜索地点",
         "数据来源",
         "获取时间",
       ];
       
       const rows = allResults.map((r, index) => {
-        // 格式化所有电话
-        const allPhones = r.allPhones ? (Array.isArray(r.allPhones) ? r.allPhones.join("; ") : r.allPhones) : "";
-        // 格式化婚姻记录
-        const marriageRecords = r.marriageRecords ? (Array.isArray(r.marriageRecords) ? r.marriageRecords.join("; ") : r.marriageRecords) : "";
-        // 格式化家庭成员
-        const familyMembers = r.familyMembers ? (Array.isArray(r.familyMembers) ? r.familyMembers.join("; ") : r.familyMembers) : "";
         // 格式化邮箱
         const emails = r.emails ? (Array.isArray(r.emails) ? r.emails.join("; ") : r.emails) : "";
+        
+        // 格式化电话号码（加美国国际区号 1）
+        const formatPhone = (phone: string | null | undefined): string => {
+          if (!phone) return "";
+          // 移除所有非数字字符
+          const cleanPhone = phone.replace(/\D/g, "");
+          // 如果已经以 1 开头且长度为 11 位，则不重复添加
+          if (cleanPhone.startsWith("1") && cleanPhone.length === 11) {
+            return cleanPhone;
+          }
+          // 否则在前面加 1
+          return cleanPhone ? "1" + cleanPhone : "";
+        };
         
         return [
           index + 1,                                    // 序号
@@ -352,22 +355,18 @@ export const anywhoRouter = router({
           r.lastName || "",                             // 姓
           r.age || "",                                  // 年龄
           r.marriageStatus || "",                       // 婚姻状况
-          marriageRecords,                              // 婚姻记录
           r.city || "",                                 // 城市
           r.state || "",                                // 州
           r.location || "",                             // 完整地址
           r.currentAddress || "",                       // 当前住址
-          r.phone || "",                                // 主号码
+          formatPhone(r.phone),                         // 主号码（加1）
           r.isPrimary ? "是" : "否",                    // 主号码标识
           r.phoneType || "",                            // 电话类型
           r.carrier || "",                              // 运营商
-          allPhones,                                    // 所有电话
           emails,                                       // 邮箱
-          familyMembers,                                // 家庭成员
           r.isDeceased ? "是" : "否",                   // 是否已故
           r.detailLink || "",                           // 详情链接
           r.searchName || "",                           // 搜索姓名
-          r.searchLocation || "",                       // 搜索地点
           r.fromCache ? "缓存" : "实时获取",            // 数据来源
           r.createdAt ? new Date(r.createdAt).toLocaleString("zh-CN") : "", // 获取时间
         ];
