@@ -29,6 +29,27 @@
       "when": 1768700000000,
       "tag": "0003_add_tps_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1768750000000,
+      "tag": "0004_sync_tps_search_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1768760000000,
+      "tag": "0005_add_filtered_out_column",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1768770000000,
+      "tag": "0006_add_from_cache_column",
+      "breakpoints": true
     }
   ]
 }
