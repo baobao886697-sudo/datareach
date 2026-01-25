@@ -572,10 +572,9 @@ export async function fetchDetailsInBatch(
       cacheHits++;
       const filteredCached = cachedArray.filter(r => shouldIncludeResult(r, filters));
       filteredOut += cachedArray.length - filteredCached.length;
-      if (filteredCached.length > 0) {
-        for (const task of linkTasks) {
-          results.push({ task, details: filteredCached });
-        }
+      // 即使过滤后为空，也要为所有任务创建空结果记录，确保子任务不会丢失
+      for (const task of linkTasks) {
+        results.push({ task, details: filteredCached });
       }
     } else {
       tasksToFetch.push(linkTasks[0]);
