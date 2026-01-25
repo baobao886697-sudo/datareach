@@ -110,17 +110,32 @@ const STATE_ABBR_MAP: Record<string, string> = Object.fromEntries(
 
 /**
  * 使用 Scrape.do API 抓取网页
+ * 
+ * 重要参数说明（来自 Scrape.do 文档）：
+ * - render: 启用无头浏览器渲染 JavaScript（Anywho 是 Next.js 应用，必须启用）
+ * - super: 使用住宅/移动代理网络，提高成功率
+ * - waitUntil: 控制页面加载完成时机
+ * - customWait: 页面加载后额外等待时间
+ * - waitSelector: 等待特定 CSS 选择器出现
  */
 async function scrapeUrl(
   url: string,
   token: string,
   options: {
     render?: boolean;
+    useSuper?: boolean;
     customWait?: number;
+    waitSelector?: string;
     geoCode?: string;
   } = {}
 ): Promise<string | null> {
-  const { render = false, customWait = 2000, geoCode = 'us' } = options;
+  const { 
+    render = true,           // 默认启用 JavaScript 渲染（Anywho 是 Next.js 应用）
+    useSuper = true,         // 默认使用住宅代理
+    customWait = 3000,       // 默认等待 3 秒
+    waitSelector,            // 可选：等待特定元素
+    geoCode = 'us' 
+  } = options;
   
   const params = new URLSearchParams({
     token,
@@ -128,10 +143,21 @@ async function scrapeUrl(
     geoCode,
   });
   
+  // 使用住宅代理（提高成功率）
+  if (useSuper) {
+    params.append('super', 'true');
+  }
+  
+  // 启用 JavaScript 渲染（Anywho 是 Next.js 应用，必须启用）
   if (render) {
     params.append('render', 'true');
     params.append('waitUntil', 'networkidle2');
     params.append('customWait', customWait.toString());
+    
+    // 等待特定元素加载（确保数据完全加载）
+    if (waitSelector) {
+      params.append('waitSelector', waitSelector);
+    }
   }
   
   const apiUrl = `${ANYWHO_CONFIG.SCRAPE_API}?${params.toString()}`;
@@ -545,8 +571,13 @@ export async function searchOnly(
     const searchUrl = buildSearchUrl(name, location, page);
     console.log(`[Anywho] 抓取第 ${page} 页: ${searchUrl}`);
     
-    // 使用 Scrape.do API 抓取（不需要渲染）
-    const html = await scrapeUrl(searchUrl, token, { render: false });
+    // 使用 Scrape.do API 抓取（启用 JavaScript 渲染，Anywho 是 Next.js 应用）
+    const html = await scrapeUrl(searchUrl, token, { 
+      render: true,
+      useSuper: true,
+      customWait: 3000,
+      waitSelector: 'a[href*="/people/"]'  // 等待搜索结果链接加载
+    });
     
     if (!html) {
       console.error(`[Anywho] 第 ${page} 页抓取失败`);
@@ -630,8 +661,12 @@ export async function fetchDetailsInBatch(
       
       console.log(`[Anywho] 获取详情: ${detailUrl}`);
       
-      // 抓取详情页（不需要渲染）
-      const html = await scrapeUrl(detailUrl, token, { render: false });
+      // 抓取详情页（启用 JavaScript 渲染，Anywho 是 Next.js 应用）
+      const html = await scrapeUrl(detailUrl, token, { 
+        render: true,
+        useSuper: true,
+        customWait: 3000
+      });
       
       if (!html) {
         console.error(`[Anywho] 详情页抓取失败: ${detailUrl}`);
