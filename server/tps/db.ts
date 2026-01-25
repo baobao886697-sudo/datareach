@@ -36,14 +36,12 @@ export async function getTpsConfig() {
   const config = configs[0];
   
   // 从 systemConfigs 表获取配置（管理后台配置的位置）
-  const [tokenFromSystemConfig, minAgeConfig, maxAgeConfig, searchCreditsConfig, detailCreditsConfig, cacheDaysConfig, maxConcurrentConfig] = await Promise.all([
+  const [tokenFromSystemConfig, minAgeConfig, maxAgeConfig, searchCreditsConfig, detailCreditsConfig] = await Promise.all([
     getConfig('TPS_SCRAPE_TOKEN'),
     getConfig('TPS_MIN_AGE'),
     getConfig('TPS_MAX_AGE'),
     getConfig('TPS_SEARCH_CREDITS'),
     getConfig('TPS_DETAIL_CREDITS'),
-    getConfig('TPS_CACHE_DAYS'),
-    getConfig('TPS_MAX_CONCURRENT'),
   ]);
   
   // 解析年龄配置，默认 50-79 岁
@@ -54,18 +52,14 @@ export async function getTpsConfig() {
   const searchCost = searchCreditsConfig || "0.3";
   const detailCost = detailCreditsConfig || "0.3";
   
-  // 解析缓存天数和并发数配置
-  const cacheDays = cacheDaysConfig ? parseInt(cacheDaysConfig, 10) : 180;
-  const maxConcurrent = maxConcurrentConfig ? parseInt(maxConcurrentConfig, 10) : 40;
-  
   if (!config) {
     // 返回默认配置，优先使用 systemConfigs 中的配置
     return {
       id: 0,
       searchCost,
       detailCost,
-      maxConcurrent,
-      cacheDays,
+      maxConcurrent: 40,
+      cacheDays: 30,
       scrapeDoToken: tokenFromSystemConfig || process.env.TPS_SCRAPE_DO_TOKEN || null,
       maxPages: 25,
       batchDelay: 200,
@@ -83,8 +77,6 @@ export async function getTpsConfig() {
     scrapeDoToken: config.scrapeDoToken || tokenFromSystemConfig || process.env.TPS_SCRAPE_DO_TOKEN || null,
     defaultMinAge: minAgeConfig ? defaultMinAge : (config.defaultMinAge || 50),
     defaultMaxAge: maxAgeConfig ? defaultMaxAge : (config.defaultMaxAge || 79),
-    cacheDays: cacheDaysConfig ? cacheDays : (config.cacheDays || 180),
-    maxConcurrent: maxConcurrentConfig ? maxConcurrent : (config.maxConcurrent || 40),
   };
 }
 
