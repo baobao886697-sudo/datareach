@@ -274,6 +274,7 @@ export default function Admin() {
             { id: "monitor", label: "系统监控", icon: BarChart3 },
             { id: "logs", label: "系统日志", icon: FileText },
             { id: "tps", label: "TPS 配置", icon: UserSearch },
+            { id: "anywho", label: "Anywho 配置", icon: Search },
             { id: "settings", label: "系统配置", icon: Settings },
           ].map((item) => (
             <button
@@ -1215,6 +1216,270 @@ export default function Admin() {
                     <li>修改 API Token 后需要重启服务</li>
                     <li>并发数过高可能导致 429 错误</li>
                   </ul>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ============ Anywho 配置 ============ */}
+        {activeTab === "anywho" && (
+          <div className="relative space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Search className="w-5 h-5 text-amber-400" />
+                  <span className="text-sm text-amber-400">Anywho</span>
+                </div>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                  Anywho 配置
+                </h1>
+                <p className="text-slate-400 mt-1">管理 Anywho 搜索功能的配置（含婚姻状况查询）</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* 积分消耗配置 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Coins className="h-5 w-5 text-yellow-400" />
+                    积分消耗配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    设置 Anywho 搜索的积分消耗
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['ANYWHO_SEARCH_CREDITS', 'ANYWHO_DETAIL_CREDITS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'ANYWHO_SEARCH_CREDITS': '搜索页消耗（积分/页）',
+                      'ANYWHO_DETAIL_CREDITS': '详情页消耗（积分/条）',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || '0.5', description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || '0.5'}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder="0.5"
+                        />
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-slate-700">
+                    <p className="text-xs text-slate-500">
+                      默认值：搜索 0.5 积分/页，详情 0.5 积分/条<br/>
+                      示例：搜索 3 页 + 获取 10 条详情 = 1.5 + 5 = 6.5 积分
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* API 配置 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Server className="h-5 w-5 text-blue-400" />
+                    API 配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Scrape.do API 设置
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['ANYWHO_SCRAPE_TOKEN', 'ANYWHO_MAX_CONCURRENT', 'ANYWHO_CACHE_DAYS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'ANYWHO_SCRAPE_TOKEN': 'Scrape.do API Token',
+                      'ANYWHO_MAX_CONCURRENT': '最大并发数',
+                      'ANYWHO_CACHE_DAYS': '缓存天数',
+                    };
+                    const defaults: Record<string, string> = {
+                      'ANYWHO_SCRAPE_TOKEN': '***已配置***',
+                      'ANYWHO_MAX_CONCURRENT': '20',
+                      'ANYWHO_CACHE_DAYS': '30',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || '', description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={key === 'ANYWHO_SCRAPE_TOKEN' && config?.value ? '***已配置***' : (config?.value || defaults[key])}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {/* 过滤配置 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Target className="h-5 w-5 text-green-400" />
+                    默认过滤配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    搜索结果的默认过滤条件
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['ANYWHO_MIN_AGE', 'ANYWHO_MAX_AGE', 'ANYWHO_EXCLUDE_DECEASED'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'ANYWHO_MIN_AGE': '最小年龄',
+                      'ANYWHO_MAX_AGE': '最大年龄',
+                      'ANYWHO_EXCLUDE_DECEASED': '排除已故人员',
+                    };
+                    const defaults: Record<string, string> = {
+                      'ANYWHO_MIN_AGE': '18',
+                      'ANYWHO_MAX_AGE': '99',
+                      'ANYWHO_EXCLUDE_DECEASED': 'true',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || defaults[key], description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || defaults[key]}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {/* 婚姻状况配置 */}
+              <Card className="bg-gradient-to-br from-amber-900/30 to-orange-900/20 border-amber-700/50">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <span className="text-xl">❤️</span>
+                    婚姻状况查询
+                    <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 ml-2">独家功能</Badge>
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Anywho 独家婚姻状况查询配置
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['ANYWHO_MARRIAGE_ENABLED', 'ANYWHO_MARRIAGE_CREDITS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'ANYWHO_MARRIAGE_ENABLED': '启用婚姻查询',
+                      'ANYWHO_MARRIAGE_CREDITS': '婚姻查询额外积分',
+                    };
+                    const defaults: Record<string, string> = {
+                      'ANYWHO_MARRIAGE_ENABLED': 'true',
+                      'ANYWHO_MARRIAGE_CREDITS': '0',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || defaults[key], description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || defaults[key]}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-amber-700/30">
+                    <p className="text-xs text-amber-400/70">
+                      ❤️ 婚姻状况查询是 Anywho 的独家功能<br/>
+                      可查询：单身 / 已婚 / 离异 / 丧偶
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 使用说明 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50 md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-purple-400" />
+                    Anywho 使用说明
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-400">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <p><strong className="text-white">积分计算公式：</strong></p>
+                      <p className="font-mono bg-slate-800 p-2 rounded mt-1">总消耗 = 搜索页数 × 搜索积分 + 详情数 × 详情积分</p>
+                      <p className="mt-3"><strong className="text-white">推荐配置：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>搜索积分：0.5 积分/页</li>
+                        <li>详情积分：0.5 积分/条</li>
+                        <li>最大并发：20（避免触发限流）</li>
+                        <li>缓存天数：30（减少重复请求）</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p><strong className="text-white">数据字段说明：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>姓名、年龄、地址</li>
+                        <li>电话号码（含运营商、最新标记）</li>
+                        <li>邮箱地址</li>
+                        <li><span className="text-amber-400">婚姻状况（独家）</span></li>
+                        <li>婚姻记录数量</li>
+                        <li>是否已故</li>
+                        <li>详情链接 URL</li>
+                      </ul>
+                      <p className="mt-3"><strong className="text-white">注意事项：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>Anywho 仅覆盖美国境内人员</li>
+                        <li>数据来源：AT&T 官方目录</li>
+                        <li>建议启用“排除已故人员”过滤</li>
+                      </ul>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
