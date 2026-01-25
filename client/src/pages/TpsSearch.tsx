@@ -456,19 +456,85 @@ export default function TpsSearch() {
               )}
             </Button>
 
-            {/* 说明 */}
+            {/* 数据优势 */}
+            <Card className="bg-gradient-to-br from-emerald-900/30 to-teal-900/30 border-emerald-700/50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-emerald-500" />
+                  数据优势
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-emerald-300">精准年龄筛选</p>
+                    <p className="text-xs text-muted-foreground">智能过滤，精准定位目标客户群体</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-emerald-300">电话号码验证</p>
+                    <p className="text-xs text-muted-foreground">多维度数据交叉验证，确保可达性</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-emerald-300">实时数据更新</p>
+                    <p className="text-xs text-muted-foreground">数据定期同步，保持信息时效性</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 快速入门 */}
+            <Card className="bg-slate-900/50 border-slate-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Info className="h-5 w-5 text-blue-500" />
+                  快速入门
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">1</div>
+                  <p className="text-sm">选择搜索模式（仅姓名 / 姓名+地点）</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">2</div>
+                  <p className="text-sm">输入姓名列表，每行一个姓名</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">3</div>
+                  <p className="text-sm">点击“开始搜索”，等待结果</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">4</div>
+                  <p className="text-sm">导出 CSV 文档，开始联系客户</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 费用说明 */}
             <Card className="bg-slate-900/50 border-slate-700">
               <CardContent className="pt-4">
                 <h4 className="font-medium mb-2 flex items-center gap-2">
-                  <Info className="h-4 w-4 text-blue-500" />
-                  使用说明
+                  <DollarSign className="h-4 w-4 text-yellow-500" />
+                  费用说明
                 </h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
                   <li>• 每页搜索消耗 {searchCost} 积分</li>
                   <li>• 每条详情消耗 {detailCost} 积分</li>
+                  <li>• 缓存命中的数据免费使用</li>
                   <li>• 搜索结果缓存 30 天</li>
-                  <li>• 支持批量搜索多个姓名</li>
-                  <li>• 数据来源：TruePeopleSearch.com</li>
                 </ul>
               </CardContent>
             </Card>
