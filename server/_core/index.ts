@@ -548,6 +548,7 @@ async function ensureTables() {
       { name: 'reportYear', definition: 'INT' },
       { name: 'isPrimary', definition: 'BOOLEAN DEFAULT FALSE' },
       { name: 'yearBuilt', definition: 'INT' },
+      { name: 'fromCache', definition: 'BOOLEAN DEFAULT FALSE' },
     ];
     
     for (const col of resultsColumnsToAdd) {
