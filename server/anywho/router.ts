@@ -188,7 +188,11 @@ export const anywhoRouter = router({
       });
       
       // 记录用户活动
-      await logUserActivity(userId, "anywho_search", `开始 Anywho 搜索任务: ${task.taskId}`);
+      await logUserActivity({
+        userId,
+        action: "anywho_search",
+        details: `开始 Anywho 搜索任务: ${task.taskId}`
+      });
       
       // 异步执行搜索
       executeAnywhoSearch(task.taskId, task.id, userId, subTasks, input.filters || {}, config);
