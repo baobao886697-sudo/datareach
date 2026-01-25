@@ -440,6 +440,7 @@ async function executeTpsSearchUnifiedQueue(
   const filters = input.filters || {};
   addLog(`📋 过滤条件:`);
   addLog(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
+  if (filters.minPropertyValue && filters.minPropertyValue > 0) addLog(`   • 最低房产价值: $${filters.minPropertyValue.toLocaleString()}`);
   if (filters.excludeTMobile) addLog(`   • 排除运营商: T-Mobile`);
   if (filters.excludeComcast) addLog(`   • 排除运营商: Comcast`);
   if (filters.excludeLandline) addLog(`   • 排除座机号码`);
