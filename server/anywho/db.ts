@@ -216,20 +216,26 @@ export async function failAnywhoSearchTask(taskId: string, errorMessage: string)
 export async function saveAnywhoSearchResults(taskId: number, results: Array<{
   subTaskIndex: number;
   name: string;
+  firstName?: string;
+  lastName?: string;
   searchName: string;
   searchLocation?: string;
-  age?: number;
+  age?: number | null;
   city?: string;
   state?: string;
   location?: string;
+  currentAddress?: string;
   phone?: string;
   phoneType?: string;
   carrier?: string;
-  reportYear?: number;
+  allPhones?: string[];
+  reportYear?: number | null;
   isPrimary?: boolean;
-  propertyValue?: number;
-  yearBuilt?: number;
-  marriageStatus?: string;  // Anywho 特色
+  marriageStatus?: string | null;
+  marriageRecords?: string[];
+  familyMembers?: string[];
+  emails?: string[];
+  isDeceased?: boolean;
   detailLink?: string;
   fromCache?: boolean;
 }>) {
@@ -242,20 +248,26 @@ export async function saveAnywhoSearchResults(taskId: number, results: Array<{
       taskId,
       subTaskIndex: r.subTaskIndex,
       name: r.name,
+      firstName: r.firstName,
+      lastName: r.lastName,
       searchName: r.searchName,
       searchLocation: r.searchLocation,
       age: r.age,
       city: r.city,
       state: r.state,
       location: r.location,
+      currentAddress: r.currentAddress,
       phone: r.phone,
       phoneType: r.phoneType,
       carrier: r.carrier,
+      allPhones: r.allPhones || [],
       reportYear: r.reportYear,
-      isPrimary: r.isPrimary || false,
-      propertyValue: r.propertyValue || 0,
-      yearBuilt: r.yearBuilt,
+      isPrimary: r.isPrimary ?? true,
       marriageStatus: r.marriageStatus,
+      marriageRecords: r.marriageRecords || [],
+      familyMembers: r.familyMembers || [],
+      emails: r.emails || [],
+      isDeceased: r.isDeceased || false,
       detailLink: r.detailLink,
       fromCache: r.fromCache || false,
     }))

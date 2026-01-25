@@ -430,21 +430,22 @@ export const anywhoDetailCache = mysqlTable("anywho_detail_cache", {
     name: string;
     firstName: string;
     lastName: string;
-    age: number;
+    age: number | null;
     city: string;
     state: string;
     location: string;
-    phone: string;
+    currentAddress: string;
+    phone: string;                  // 主号码（最新）
+    allPhones: string[];            // 所有电话号码
     phoneType: string;
     carrier: string;
     reportYear: number | null;
     isPrimary: boolean;
-    propertyValue: number;
-    yearBuilt: number | null;
-    marriageStatus: string | null;  // Anywho 特色：婚姻状况
+    marriageStatus: string | null;  // Single/Married/Divorced/Widowed
+    marriageRecords: string[];      // 婚姻记录列表
     familyMembers: string[];        // 家庭成员
-    employment: string[];           // 就业历史
-    isDeceased: boolean;
+    emails: string[];               // 邮箱列表
+    isDeceased: boolean;            // 是否已故
   }>(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   expiresAt: timestamp("expiresAt").notNull(),
@@ -464,10 +465,10 @@ export const anywhoSearchTasks = mysqlTable("anywho_search_tasks", {
   filters: json("filters").$type<{
     minAge?: number;
     maxAge?: number;
+    excludeDeceased?: boolean;        // 排除已故人员
     includeMarriageStatus?: boolean;
-    includePropertyInfo?: boolean;
     includeFamilyMembers?: boolean;
-    includeEmployment?: boolean;
+    includeEmails?: boolean;
   }>(),
   totalSubTasks: int("totalSubTasks").default(0).notNull(),
   completedSubTasks: int("completedSubTasks").default(0).notNull(),
@@ -494,20 +495,30 @@ export const anywhoSearchResults = mysqlTable("anywho_search_results", {
   taskId: int("taskId").notNull(),
   subTaskIndex: int("subTaskIndex").default(0).notNull(),
   name: varchar("name", { length: 200 }),
+  firstName: varchar("firstName", { length: 100 }),
+  lastName: varchar("lastName", { length: 100 }),
   searchName: varchar("searchName", { length: 200 }),
   searchLocation: varchar("searchLocation", { length: 200 }),
   age: int("age"),
   city: varchar("city", { length: 100 }),
   state: varchar("state", { length: 50 }),
   location: varchar("location", { length: 200 }),
-  phone: varchar("phone", { length: 50 }),
-  phoneType: varchar("phoneType", { length: 50 }),
-  carrier: varchar("carrier", { length: 100 }),
+  currentAddress: varchar("currentAddress", { length: 500 }),
+  // 电话信息
+  phone: varchar("phone", { length: 50 }),           // 主号码（最新）
+  phoneType: varchar("phoneType", { length: 50 }),   // Mobile/Landline/VoIP
+  carrier: varchar("carrier", { length: 100 }),      // 运营商
+  allPhones: json("allPhones").$type<string[]>(),    // 所有电话号码
   reportYear: int("reportYear"),
-  isPrimary: boolean("isPrimary").default(false),
-  propertyValue: int("propertyValue").default(0),
-  yearBuilt: int("yearBuilt"),
-  marriageStatus: varchar("marriageStatus", { length: 50 }),  // Anywho 特色：婚姻状况
+  isPrimary: boolean("isPrimary").default(true),     // 是否为主号码
+  // 婚姻信息
+  marriageStatus: varchar("marriageStatus", { length: 50 }),  // Single/Married/Divorced/Widowed
+  marriageRecords: json("marriageRecords").$type<string[]>(), // 婚姻记录列表
+  // 其他信息
+  familyMembers: json("familyMembers").$type<string[]>(),     // 家庭成员
+  emails: json("emails").$type<string[]>(),                   // 邮箱列表
+  isDeceased: boolean("isDeceased").default(false),           // 是否已故
+  // 链接和缓存
   detailLink: varchar("detailLink", { length: 500 }),
   fromCache: boolean("fromCache").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

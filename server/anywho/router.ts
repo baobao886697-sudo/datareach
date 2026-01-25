@@ -3,6 +3,7 @@
  * 独立模块，方便后期管理和修改
  * 
  * 提供 Anywho 搜索功能的 API 端点
+ * 特色功能：婚姻状况查询、运营商信息、已故排除
  */
 
 import { z } from "zod";
@@ -46,10 +47,10 @@ const SEARCH_CONCURRENCY = ANYWHO_CONFIG.TASK_CONCURRENCY;
 const anywhoFiltersSchema = z.object({
   minAge: z.number().min(0).max(120).optional(),
   maxAge: z.number().min(0).max(120).optional(),
+  excludeDeceased: z.boolean().optional(),        // 排除已故人员
   includeMarriageStatus: z.boolean().optional(),
-  includePropertyInfo: z.boolean().optional(),
   includeFamilyMembers: z.boolean().optional(),
-  includeEmployment: z.boolean().optional(),
+  includeEmails: z.boolean().optional(),
 }).optional();
 
 const anywhoSearchInputSchema = z.object({
@@ -260,7 +261,7 @@ export const anywhoRouter = router({
       return await getUserAnywhoSearchTasks(userId, input.page, input.pageSize);
     }),
 
-  // 导出结果为 CSV
+  // 导出结果为 CSV（完善详细版本）
   exportResults: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -300,51 +301,131 @@ export const anywhoRouter = router({
         page++;
       }
       
-      // 生成 CSV
+      // 完善详细的 CSV 表头
       const headers = [
+        "序号",
         "姓名",
+        "名",
+        "姓",
         "年龄",
         "婚姻状况",
+        "婚姻记录",
         "城市",
         "州",
-        "地址",
-        "电话",
+        "完整地址",
+        "当前住址",
+        "主号码",
+        "主号码标识",
         "电话类型",
         "运营商",
-        "房产价值",
-        "建造年份",
+        "所有电话",
+        "邮箱",
+        "家庭成员",
+        "是否已故",
+        "详情链接",
         "搜索姓名",
         "搜索地点",
+        "数据来源",
+        "获取时间",
       ];
       
-      const rows = allResults.map(r => [
-        r.name || "",
-        r.age || "",
-        r.marriageStatus || "",
-        r.city || "",
-        r.state || "",
-        r.location || "",
-        r.phone || "",
-        r.phoneType || "",
-        r.carrier || "",
-        r.propertyValue || "",
-        r.yearBuilt || "",
-        r.searchName || "",
-        r.searchLocation || "",
-      ]);
+      const rows = allResults.map((r, index) => {
+        // 格式化所有电话
+        const allPhones = r.allPhones ? (Array.isArray(r.allPhones) ? r.allPhones.join("; ") : r.allPhones) : "";
+        // 格式化婚姻记录
+        const marriageRecords = r.marriageRecords ? (Array.isArray(r.marriageRecords) ? r.marriageRecords.join("; ") : r.marriageRecords) : "";
+        // 格式化家庭成员
+        const familyMembers = r.familyMembers ? (Array.isArray(r.familyMembers) ? r.familyMembers.join("; ") : r.familyMembers) : "";
+        // 格式化邮箱
+        const emails = r.emails ? (Array.isArray(r.emails) ? r.emails.join("; ") : r.emails) : "";
+        
+        return [
+          index + 1,                                    // 序号
+          r.name || "",                                 // 姓名
+          r.firstName || "",                            // 名
+          r.lastName || "",                             // 姓
+          r.age || "",                                  // 年龄
+          r.marriageStatus || "",                       // 婚姻状况
+          marriageRecords,                              // 婚姻记录
+          r.city || "",                                 // 城市
+          r.state || "",                                // 州
+          r.location || "",                             // 完整地址
+          r.currentAddress || "",                       // 当前住址
+          r.phone || "",                                // 主号码
+          r.isPrimary ? "是" : "否",                    // 主号码标识
+          r.phoneType || "",                            // 电话类型
+          r.carrier || "",                              // 运营商
+          allPhones,                                    // 所有电话
+          emails,                                       // 邮箱
+          familyMembers,                                // 家庭成员
+          r.isDeceased ? "是" : "否",                   // 是否已故
+          r.detailLink || "",                           // 详情链接
+          r.searchName || "",                           // 搜索姓名
+          r.searchLocation || "",                       // 搜索地点
+          r.fromCache ? "缓存" : "实时获取",            // 数据来源
+          r.createdAt ? new Date(r.createdAt).toLocaleString("zh-CN") : "", // 获取时间
+        ];
+      });
+      
+      // 转义 CSV 特殊字符
+      const escapeCSV = (cell: any): string => {
+        const str = String(cell ?? "");
+        // 如果包含逗号、引号、换行符，需要用引号包裹并转义内部引号
+        if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
       
       const csv = [
-        headers.join(","),
-        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
+        headers.map(escapeCSV).join(","),
+        ...rows.map(row => row.map(escapeCSV).join(",")),
       ].join("\n");
       
-      // 添加 BOM 以支持中文
+      // 添加 BOM 以支持中文（Excel 兼容）
       const csvWithBom = "\uFEFF" + csv;
       
       return {
         csv: csvWithBom,
         filename: `anywho_results_${task.taskId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.csv`,
+        totalRecords: allResults.length,
       };
+    }),
+
+  // 停止任务
+  stopTask: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const task = await getAnywhoSearchTask(input.taskId);
+      
+      if (!task) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "任务不存在",
+        });
+      }
+      
+      if (task.userId !== ctx.user!.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "无权访问此任务",
+        });
+      }
+      
+      if (task.status !== "running") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "只能停止运行中的任务",
+        });
+      }
+      
+      // 标记任务为取消状态
+      const db = await getDb();
+      await db.update(anywhoSearchTasks)
+        .set({ status: "cancelled" })
+        .where(eq(anywhoSearchTasks.taskId, input.taskId));
+      
+      return { success: true, message: "任务已停止" };
     }),
 });
 
@@ -379,6 +460,12 @@ async function executeAnywhoSearch(
     await updateAnywhoSearchTaskProgress(taskId, { logs });
   };
   
+  // 检查任务是否被取消
+  const checkCancelled = async (): Promise<boolean> => {
+    const task = await getAnywhoSearchTask(taskId);
+    return task?.status === "cancelled";
+  };
+  
   try {
     // 阶段1：并发搜索
     await addLog(`开始搜索阶段，共 ${subTasks.length} 个子任务`);
@@ -387,6 +474,12 @@ async function executeAnywhoSearch(
     
     // 分批执行搜索
     for (let i = 0; i < subTasks.length; i += SEARCH_CONCURRENCY) {
+      // 检查是否取消
+      if (await checkCancelled()) {
+        await addLog("任务已被用户取消");
+        return;
+      }
+      
       const batch = subTasks.slice(i, i + SEARCH_CONCURRENCY);
       
       const searchPromises = batch.map(async (subTask, batchIndex) => {
@@ -455,20 +548,27 @@ async function executeAnywhoSearch(
     }
     
     // 阶段3：获取详情
+    let fetchedResults: Array<{ task: DetailTask; detail: AnywhoDetailResult | null }> = [];
+    
     if (tasksToFetch.length > 0) {
       await addLog(`开始获取 ${tasksToFetch.length} 条详情`);
       
-      const { results: fetchedResults, requestCount } = await fetchDetailsInBatch(
+      const { results, requestCount } = await fetchDetailsInBatch(
         tasksToFetch,
         token,
         filters,
         undefined,
         async (completed, total) => {
+          // 检查是否取消
+          if (await checkCancelled()) {
+            throw new Error("任务已被用户取消");
+          }
           const progress = 50 + Math.floor((completed / total) * 45);
           await updateAnywhoSearchTaskProgress(taskId, { progress });
         }
       );
       
+      fetchedResults = results;
       totalDetailPages = requestCount;
       
       // 保存新获取的缓存
@@ -482,87 +582,91 @@ async function executeAnywhoSearch(
       if (newCacheItems.length > 0) {
         await saveAnywhoDetailCache(newCacheItems);
       }
-      
-      // 合并结果
-      const allResults = [
-        ...cachedResults.map(r => ({
-          subTaskIndex: r.task.subTaskIndex,
-          name: r.detail.name,
-          searchName: r.task.searchName,
-          searchLocation: r.task.searchLocation,
-          age: r.detail.age,
-          city: r.detail.city,
-          state: r.detail.state,
-          location: r.detail.location,
-          phone: r.detail.phone,
-          phoneType: r.detail.phoneType,
-          carrier: r.detail.carrier,
-          reportYear: r.detail.reportYear,
-          isPrimary: r.detail.isPrimary,
-          propertyValue: r.detail.propertyValue,
-          yearBuilt: r.detail.yearBuilt,
-          marriageStatus: r.detail.marriageStatus,
-          detailLink: r.task.detailLink,
-          fromCache: true,
-        })),
-        ...fetchedResults
-          .filter(r => r.detail !== null)
-          .map(r => ({
-            subTaskIndex: r.task.subTaskIndex,
-            name: r.detail!.name,
-            searchName: r.task.searchName,
-            searchLocation: r.task.searchLocation,
-            age: r.detail!.age,
-            city: r.detail!.city,
-            state: r.detail!.state,
-            location: r.detail!.location,
-            phone: r.detail!.phone,
-            phoneType: r.detail!.phoneType,
-            carrier: r.detail!.carrier,
-            reportYear: r.detail!.reportYear,
-            isPrimary: r.detail!.isPrimary,
-            propertyValue: r.detail!.propertyValue,
-            yearBuilt: r.detail!.yearBuilt,
-            marriageStatus: r.detail!.marriageStatus,
-            detailLink: r.task.detailLink,
-            fromCache: false,
-          })),
-      ];
-      
-      totalResults = allResults.length;
-      
-      // 保存结果
-      if (allResults.length > 0) {
-        await saveAnywhoSearchResults(taskDbId, allResults);
-      }
-    } else {
-      // 只有缓存结果
-      const allResults = cachedResults.map(r => ({
+    }
+    
+    // 合并结果并应用过滤
+    const allResults = [
+      ...cachedResults.map(r => ({
         subTaskIndex: r.task.subTaskIndex,
         name: r.detail.name,
+        firstName: r.detail.firstName,
+        lastName: r.detail.lastName,
         searchName: r.task.searchName,
         searchLocation: r.task.searchLocation,
         age: r.detail.age,
         city: r.detail.city,
         state: r.detail.state,
         location: r.detail.location,
+        currentAddress: r.detail.currentAddress,
         phone: r.detail.phone,
         phoneType: r.detail.phoneType,
         carrier: r.detail.carrier,
+        allPhones: r.detail.allPhones || [],
         reportYear: r.detail.reportYear,
-        isPrimary: r.detail.isPrimary,
-        propertyValue: r.detail.propertyValue,
-        yearBuilt: r.detail.yearBuilt,
+        isPrimary: true,  // 第一个号码为主号码
         marriageStatus: r.detail.marriageStatus,
+        marriageRecords: r.detail.marriageRecords || [],
+        familyMembers: r.detail.familyMembers || [],
+        emails: r.detail.emails || [],
+        isDeceased: r.detail.isDeceased || false,
         detailLink: r.task.detailLink,
         fromCache: true,
-      }));
-      
-      totalResults = allResults.length;
-      
-      if (allResults.length > 0) {
-        await saveAnywhoSearchResults(taskDbId, allResults);
-      }
+      })),
+      ...fetchedResults
+        .filter(r => r.detail !== null)
+        .map(r => ({
+          subTaskIndex: r.task.subTaskIndex,
+          name: r.detail!.name,
+          firstName: r.detail!.firstName,
+          lastName: r.detail!.lastName,
+          searchName: r.task.searchName,
+          searchLocation: r.task.searchLocation,
+          age: r.detail!.age,
+          city: r.detail!.city,
+          state: r.detail!.state,
+          location: r.detail!.location,
+          currentAddress: r.detail!.currentAddress,
+          phone: r.detail!.phone,
+          phoneType: r.detail!.phoneType,
+          carrier: r.detail!.carrier,
+          allPhones: r.detail!.phones || [],
+          reportYear: r.detail!.reportYear,
+          isPrimary: true,  // 第一个号码为主号码
+          marriageStatus: r.detail!.marriageStatus,
+          marriageRecords: r.detail!.marriageRecords || [],
+          familyMembers: r.detail!.familyMembers || [],
+          emails: r.detail!.emails || [],
+          isDeceased: r.detail!.isDeceased || false,
+          detailLink: r.task.detailLink,
+          fromCache: false,
+        })),
+    ];
+    
+    // 应用过滤条件
+    let filteredResults = allResults;
+    
+    // 排除已故人员
+    if (filters.excludeDeceased) {
+      filteredResults = filteredResults.filter(r => !r.isDeceased);
+      await addLog(`排除已故人员后剩余 ${filteredResults.length} 条`);
+    }
+    
+    // 年龄过滤
+    if (filters.minAge !== undefined || filters.maxAge !== undefined) {
+      filteredResults = filteredResults.filter(r => {
+        if (r.age === null || r.age === undefined) return true;  // 保留年龄未知的
+        if (filters.minAge !== undefined && r.age < filters.minAge) return false;
+        if (filters.maxAge !== undefined && r.age > filters.maxAge) return false;
+        return true;
+      });
+      await addLog(`年龄过滤后剩余 ${filteredResults.length} 条`);
+    }
+    
+    totalResults = filteredResults.length;
+    
+    // 保存结果
+    if (filteredResults.length > 0) {
+      await saveAnywhoSearchResults(taskDbId, filteredResults);
     }
     
     // 计算消耗积分
