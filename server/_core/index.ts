@@ -653,21 +653,37 @@ async function ensureTables() {
         phone VARCHAR(50),
         phoneType VARCHAR(50),
         carrier VARCHAR(100),
-        isPrimaryPhone BOOLEAN DEFAULT FALSE,
         allPhones JSON,
-        email VARCHAR(200),
-        allEmails JSON,
+        reportYear INT,
+        isPrimary BOOLEAN DEFAULT TRUE,
         marriageStatus VARCHAR(50),
         marriageRecords JSON,
-        relatives JSON,
+        familyMembers JSON,
+        emails JSON,
         isDeceased BOOLEAN DEFAULT FALSE,
         detailLink VARCHAR(500),
-        fromCache BOOLEAN DEFAULT FALSE,
+        fromCache BOOLEAN DEFAULT FALSE NOT NULL,
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
         INDEX idx_taskId (taskId)
       )
     `);
     console.log("[Database] Anywho search results table ready");
+    
+    // 修复 anywho_search_results 表结构（如果字段不存在则添加）
+    try {
+      await db.execute(sql`ALTER TABLE anywho_search_results ADD COLUMN IF NOT EXISTS reportYear INT`);
+      await db.execute(sql`ALTER TABLE anywho_search_results ADD COLUMN IF NOT EXISTS isPrimary BOOLEAN DEFAULT TRUE`);
+      await db.execute(sql`ALTER TABLE anywho_search_results ADD COLUMN IF NOT EXISTS familyMembers JSON`);
+      await db.execute(sql`ALTER TABLE anywho_search_results ADD COLUMN IF NOT EXISTS emails JSON`);
+      // 删除旧字段（如果存在）
+      await db.execute(sql`ALTER TABLE anywho_search_results DROP COLUMN IF EXISTS isPrimaryPhone`);
+      await db.execute(sql`ALTER TABLE anywho_search_results DROP COLUMN IF EXISTS email`);
+      await db.execute(sql`ALTER TABLE anywho_search_results DROP COLUMN IF EXISTS allEmails`);
+      await db.execute(sql`ALTER TABLE anywho_search_results DROP COLUMN IF EXISTS relatives`);
+      console.log("[Database] Anywho search results table structure fixed");
+    } catch (e) {
+      console.log("[Database] Anywho search results table structure already correct or migration skipped");
+    }
     
     // 插入默认 Anywho 配置（如果不存在）
     await db.execute(sql`
