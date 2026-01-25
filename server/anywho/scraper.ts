@@ -488,7 +488,11 @@ export function parseDetailPage(html: string): AnywhoDetailResult | null {
     }
     
     // 9. 检查是否已故
-    const isDeceased = /may have passed away|deceased|death record|passed away/i.test(text);
+    // 注意：Anywho 页面模板中包含 "Death Records" 链接，需要更精确的检测
+    // 只有当页面明确显示死亡日期时才认为已故
+    // 格式例如："may have passed away on 07/2006"
+    const deathDatePattern = /may have passed away on \d{2}\/\d{4}/i;
+    const isDeceased = deathDatePattern.test(text);
     
     // 10. 提取星座
     let zodiacSign: string | undefined;
