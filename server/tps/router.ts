@@ -635,6 +635,18 @@ async function executeTpsSearchUnifiedQueue(
       // 按子任务分组保存结果
       const resultsBySubTask = new Map<number, TpsDetailResult[]>();
       
+      // 调试：统计每个子任务收到的原始结果数
+      const rawResultsBySubTask = new Map<number, number>();
+      for (const { task, details } of detailResult.results) {
+        rawResultsBySubTask.set(task.subTaskIndex, (rawResultsBySubTask.get(task.subTaskIndex) || 0) + details.length);
+      }
+      for (const [idx, count] of rawResultsBySubTask) {
+        const subTask = subTasks.find(t => t.index === idx);
+        if (subTask) {
+          addLog(`📊 [调试] 子任务 ${idx + 1} (${subTask.name} @ ${subTask.location || '无地点'}) 收到 ${count} 条原始结果`);
+        }
+      }
+      
       for (const { task, details } of detailResult.results) {
         if (!resultsBySubTask.has(task.subTaskIndex)) {
           resultsBySubTask.set(task.subTaskIndex, []);
