@@ -530,23 +530,28 @@ async function executeTpsSearchUnifiedQueue(
       });
     };
     
-    const startNextSearch = () => {
-      if (searchIndex < searchQueue.length) {
-        const task = searchQueue[searchIndex++];
-        const promise = processSearch(task).then(() => {
-          startNextSearch();
-        });
-        runningSearches.push(promise);
+    // 使用更可靠的并发控制方式
+    const runConcurrentSearches = async () => {
+      const results: Promise<void>[] = [];
+      let currentIndex = 0;
+      
+      const runNext = async (): Promise<void> => {
+        while (currentIndex < searchQueue.length) {
+          const task = searchQueue[currentIndex++];
+          await processSearch(task);
+        }
+      };
+      
+      // 启动指定数量的并发工作器
+      const workers = Math.min(SEARCH_CONCURRENCY, searchQueue.length);
+      for (let i = 0; i < workers; i++) {
+        results.push(runNext());
       }
+      
+      await Promise.all(results);
     };
     
-    // 启动搜索并发
-    const initialSearchBatch = Math.min(SEARCH_CONCURRENCY, searchQueue.length);
-    for (let i = 0; i < initialSearchBatch; i++) {
-      startNextSearch();
-    }
-    
-    await Promise.all(runningSearches);
+    await runConcurrentSearches();
     
     // 增强搜索阶段完成日志
     addLog(`════════ 搜索阶段完成 ════════`);
