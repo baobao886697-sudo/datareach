@@ -550,7 +550,7 @@ export async function fetchDetailsInBatch(
   let filteredOut = 0;
   
   const baseUrl = 'https://www.truepeoplesearch.com';
-  const uniqueLinks = [...new Set(tasks.map(t => t.searchResult.detailLink))];
+  const uniqueLinks = Array.from(new Set(tasks.map(t => t.searchResult.detailLink)));
   
   onProgress(`检查缓存: ${uniqueLinks.length} 个链接...`);
   const cachedMap = await getCachedDetails(uniqueLinks);
@@ -569,7 +569,7 @@ export async function fetchDetailsInBatch(
   // 调试：跟踪每个子任务的链接分配情况
   const subTaskLinkCounts = new Map<number, { cached: number; cachedFiltered: number; toFetch: number; noPhone: number }>();
   
-  for (const [link, linkTasks] of tasksByLink) {
+  for (const [link, linkTasks] of Array.from(tasksByLink)) {
     const cachedArray = cachedMap.get(link);
     const hasValidPhone = cachedArray && cachedArray.length > 0 && cachedArray.some(c => c.phone && c.phone.length >= 10);
     
@@ -611,7 +611,7 @@ export async function fetchDetailsInBatch(
   }
   
   // 输出调试信息（只显示有问题的子任务，避免日志过多）
-  for (const [subTaskIndex, counts] of subTaskLinkCounts) {
+  for (const [subTaskIndex, counts] of Array.from(subTaskLinkCounts)) {
     // 只有当有被过滤的结果时才输出详细日志
     if (counts.cachedFiltered > 0 || counts.noPhone > 0) {
       let msg = `📊 [子任务 ${subTaskIndex + 1}] 缓存: ${counts.cached}`;
@@ -686,9 +686,10 @@ export async function fetchDetailsInBatch(
     const concurrencyPool = new Set<Promise<any>>();
     for (const task of tasksToFetch) {
         if (concurrencyPool.size >= concurrency) {
-            await Promise.race(concurrencyPool);
+            await Promise.race(Array.from(concurrencyPool));
         }
 
+        let promiseRef!: Promise<void>;
         const promise = (async () => {
             const link = task.searchResult.detailLink;
             const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
@@ -713,11 +714,12 @@ export async function fetchDetailsInBatch(
                 completed++;
                 if (completed % 10 === 0 || completed === tasksToFetch.length) {
                     const percent = Math.round((completed / tasksToFetch.length) * 100);
-          onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
+                    onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
                 }
-                concurrencyPool.delete(promise);
+                concurrencyPool.delete(promiseRef);
             }
         })();
+        promiseRef = promise;
         concurrencyPool.add(promise);
     }
     await Promise.all(Array.from(concurrencyPool));

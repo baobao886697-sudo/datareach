@@ -19,6 +19,7 @@ import {
   TpsDetailResult,
   TpsSearchResult,
   DetailTask,
+  DetailTaskWithIndex,
   TPS_CONFIG,
 } from "./scraper";
 import {
@@ -484,7 +485,7 @@ async function executeTpsSearchUnifiedQueue(
     addLog(`📋 阶段一：并发搜索 (${SEARCH_CONCURRENCY} 任务并发 × 25页并发)...`);
     
     // 收集所有详情任务
-    const allDetailTasks: DetailTask[] = [];
+    const allDetailTasks: DetailTaskWithIndex[] = [];
     const subTaskResults: Map<number, { searchResults: TpsSearchResult[]; searchPages: number }> = new Map();
     
     let completedSearches = 0;
@@ -576,7 +577,7 @@ async function executeTpsSearchUnifiedQueue(
     const searchPageCostSoFar = totalSearchPages * searchCost;
     
     // 去重详情链接，计算需要获取的详情数
-    const uniqueDetailLinks = [...new Set(allDetailTasks.map(t => t.searchResult.detailLink))];
+    const uniqueDetailLinks = Array.from(new Set(allDetailTasks.map(t => t.searchResult.detailLink)));
     const estimatedDetailCostRemaining = uniqueDetailLinks.length * detailCost;
     const totalEstimatedCost = searchPageCostSoFar + estimatedDetailCostRemaining;
     
@@ -631,7 +632,7 @@ async function executeTpsSearchUnifiedQueue(
       addLog(`📋 阶段二：统一队列获取详情（${TOTAL_CONCURRENCY} 并发）...`);
       
       // 去重详情链接
-      const uniqueLinks = [...new Set(allDetailTasks.map(t => t.searchResult.detailLink))];
+      const uniqueLinks = Array.from(new Set(allDetailTasks.map(t => t.searchResult.detailLink)));
       addLog(`🔗 去重后 ${uniqueLinks.length} 个唯一详情链接`);
       
       // 统一获取详情
@@ -657,7 +658,7 @@ async function executeTpsSearchUnifiedQueue(
       for (const { task, details } of detailResult.results) {
         rawResultsBySubTask.set(task.subTaskIndex, (rawResultsBySubTask.get(task.subTaskIndex) || 0) + details.length);
       }
-      for (const [idx, count] of rawResultsBySubTask) {
+      for (const [idx, count] of Array.from(rawResultsBySubTask)) {
         const subTask = subTasks.find(t => t.index === idx);
         if (subTask) {
           addLog(`📊 [调试] 子任务 ${idx + 1} (${subTask.name} @ ${subTask.location || '无地点'}) 收到 ${count} 条原始结果`);
@@ -689,7 +690,7 @@ async function executeTpsSearchUnifiedQueue(
       }
       
       // 保存结果到数据库
-      for (const [subTaskIndex, results] of resultsBySubTask) {
+      for (const [subTaskIndex, results] of Array.from(resultsBySubTask)) {
         const subTask = subTasks.find(t => t.index === subTaskIndex);
         if (subTask && results.length > 0) {
           await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
@@ -768,8 +769,8 @@ async function executeTpsSearchUnifiedQueue(
       userId,
       action: 'TPS搜索',
       details: `搜索完成: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${actualCost.toFixed(1)}积分`,
-      ipAddress: null,
-      userAgent: null
+      ipAddress: undefined,
+      userAgent: undefined
     });
     
   } catch (error: any) {
