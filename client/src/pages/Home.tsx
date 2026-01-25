@@ -127,6 +127,8 @@ export default function Home() {
   // 强制登录状态
   const [showForceLogin, setShowForceLogin] = useState(false);
   const [forceLoginMessage, setForceLoginMessage] = useState("");
+  // 内联错误提示状态
+  const [loginError, setLoginError] = useState("");
 
   // 已登录用户自动跳转到仪表盘（保持原有逻辑）
   useEffect(() => {
@@ -146,18 +148,22 @@ export default function Home() {
   // 登录 mutation（支持强制登录）
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: () => {
+      setLoginError("");
       toast.success("登录成功！");
       setShowAuthModal(false);
       setShowForceLogin(false);
       window.location.href = "/dashboard";
     },
     onError: (error) => {
+      const errorMsg = error.message || "登录失败，请检查邮箱和密码";
       if (error.message.includes("其他设备")) {
         setForceLoginMessage(error.message);
         setShowForceLogin(true);
+        setLoginError("账户已在其他设备登录");
         toast.error("账户已在其他设备登录");
       } else {
-        toast.error(error.message || "登录失败");
+        setLoginError(errorMsg);
+        toast.error(errorMsg);
       }
       setIsLoading(false);
     },
@@ -200,6 +206,7 @@ export default function Home() {
 
   const handleAuth = (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError("");
     
     if (!email || !password) {
       toast.error("请填写所有必填字段");
@@ -794,6 +801,16 @@ export default function Home() {
                       )}
                     </Button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* 内联错误提示 */}
+            {loginError && !showForceLogin && authMode === 'login' && (
+              <div className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <p className="text-red-200 text-sm">{loginError}</p>
                 </div>
               </div>
             )}
