@@ -32,8 +32,16 @@ async function db() {
  */
 export async function getTpsConfig() {
   const database = await db();
-  const configs = await database.select().from(tpsConfig).limit(1);
-  const config = configs[0];
+  
+  // 尝试从 tps_config 表获取配置，如果失败则使用默认值
+  let config: any = null;
+  try {
+    const configs = await database.select().from(tpsConfig).limit(1);
+    config = configs[0];
+  } catch (error) {
+    console.error('获取 tps_config 表失败，使用默认配置:', error);
+    // 继续使用默认配置
+  }
   
   // 从 systemConfigs 表获取配置（管理后台配置的位置）
   const [tokenFromSystemConfig, minAgeConfig, maxAgeConfig, searchCreditsConfig, detailCreditsConfig] = await Promise.all([
