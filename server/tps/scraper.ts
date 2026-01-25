@@ -382,16 +382,51 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       state = state || addressMatch[2].trim();
     }
   }
+  // 房产信息 - 使用云端寻踪Pro的正确方法
+  // TPS页面在地址链接的父容器的.dt-sb元素中显示房产价值
   let propertyValue: number | undefined;
   let yearBuilt: number | undefined;
-  const pageText = $('body').text();
-  const propertyMatch = pageText.match(/(?:property|home)\s*value[:\s]*\$?([\d,]+)/i);
-  if (propertyMatch) {
-    propertyValue = parseInt(propertyMatch[1].replace(/,/g, ''), 10);
+  
+  const addressLink = $('a[data-link-to-more="address"]').first();
+  if (addressLink.length) {
+    const addressContainer = addressLink.parent();
+    // 查找所有.dt-sb元素，房产信息可能在其中任何一个
+    addressContainer.find('.dt-sb').each((_, el) => {
+      const text = $(el).text();
+      
+      // 匹配 $xxx,xxx 格式的价格
+      if (!propertyValue) {
+        const priceMatch = text.match(/\$([0-9,]+)/);
+        if (priceMatch) {
+          propertyValue = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+        }
+      }
+      
+      // 匹配 Built 年份
+      if (!yearBuilt) {
+        const builtMatch = text.match(/Built\s*(\d{4})/i);
+        if (builtMatch) {
+          yearBuilt = parseInt(builtMatch[1], 10);
+        }
+      }
+    });
   }
-  const yearBuiltMatch = pageText.match(/(?:year\s*built|built\s*in)[:\s]*(\d{4})/i);
-  if (yearBuiltMatch) {
-    yearBuilt = parseInt(yearBuiltMatch[1], 10);
+  
+  // 备用方法：如果上面没找到，尝试在整个页面搜索
+  if (!propertyValue) {
+    const pageText = $('body').text();
+    // 尝试匹配独立的价格格式 (在地址附近)
+    const priceMatches = pageText.match(/\$([0-9]{1,3}(?:,[0-9]{3})+)(?!\d)/g);
+    if (priceMatches && priceMatches.length > 0) {
+      // 取第一个合理的房产价格（通常在$50,000-$10,000,000之间）
+      for (const match of priceMatches) {
+        const value = parseInt(match.replace(/[$,]/g, ''), 10);
+        if (value >= 50000 && value <= 10000000) {
+          propertyValue = value;
+          break;
+        }
+      }
+    }
   }
   $('.col-12.col-md-6.mb-3').each((_, container) => {
     const $container = $(container);
