@@ -423,11 +423,42 @@ async function executeTpsSearchUnifiedQueue(
   
   // 增强启动日志
   addLog(`═══════════════════════════════════════════════════`);
-  addLog(`🌸 开始 TPS 搜索 (v3.4 增强日志版)`);
-  addLog(`📜 总任务数: ${subTasks.length}`);
-  addLog(`🧵 并发配置: 搜索 ${SEARCH_CONCURRENCY} 任务 × 25页 / 详情 ${TOTAL_CONCURRENCY} 并发`);
-  addLog(`🔍 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名' : '姓名+地点'}`);
+  addLog(`🌸 开始 TPS 搜索 (v3.5 费用透明版)`);
   addLog(`═══════════════════════════════════════════════════`);
+  
+  // 显示搜索配置
+  addLog(`📋 搜索配置:`);
+  addLog(`   • 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名搜索' : '姓名+地点组合搜索'}`);
+  addLog(`   • 搜索姓名: ${input.names.join(', ')}`);
+  if (input.mode === 'nameLocation' && input.locations) {
+    addLog(`   • 搜索地点: ${input.locations.join(', ')}`);
+  }
+  addLog(`   • 搜索组合: ${subTasks.length} 个任务`);
+  
+  // 显示过滤条件
+  const filters = input.filters || {};
+  addLog(`📋 过滤条件:`);
+  addLog(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
+  if (filters.excludeTMobile) addLog(`   • 排除运营商: T-Mobile`);
+  if (filters.excludeComcast) addLog(`   • 排除运营商: Comcast`);
+  if (filters.excludeLandline) addLog(`   • 排除座机号码`);
+  
+  // 显示预估费用
+  const maxPagesPerTask = 25;
+  const estimatedSearchPages = subTasks.length * maxPagesPerTask;
+  const estimatedSearchCost = estimatedSearchPages * searchCost;
+  const estimatedDetailPages = subTasks.length * 50; // 预估每个任务50条详情
+  const estimatedDetailCost = estimatedDetailPages * detailCost;
+  const estimatedTotalCost = estimatedSearchCost + estimatedDetailCost;
+  
+  addLog(`💰 费用预估 (最大值):`);
+  addLog(`   • 搜索页费用: 最多 ${estimatedSearchPages} 页 × ${searchCost} = ${estimatedSearchCost.toFixed(1)} 积分`);
+  addLog(`   • 详情页费用: 预估 ~${estimatedDetailPages} 页 × ${detailCost} = ${estimatedDetailCost.toFixed(1)} 积分`);
+  addLog(`   • 预估总费用: ~${estimatedTotalCost.toFixed(1)} 积分 (实际费用取决于搜索结果)`);
+  addLog(`   💡 提示: 缓存命中的详情不收费，可节省大量积分`);
+  
+  addLog(`═══════════════════════════════════════════════════`);
+  addLog(`🧵 并发配置: 搜索 ${SEARCH_CONCURRENCY} 任务并发 / 详情 ${TOTAL_CONCURRENCY} 并发`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
@@ -715,17 +746,43 @@ async function executeTpsSearchUnifiedQueue(
       creditsUsed: actualCost,
     });
     
-    // 增强完成日志
+    // 增强完成日志 - 让用户清楚知道积分都做了什么
     addLog(`═══════════════════════════════════════════════════`);
     addLog(`🎉 任务完成!`);
     addLog(`═══════════════════════════════════════════════════`);
-    addLog(`📱 总结果数: ${totalResults}`);
-    addLog(`💰 总消耗: ${actualCost.toFixed(1)} 积分`);
-    addLog(`════════ 详细统计 ════════`);
-    addLog(`   搜索页请求: ${totalSearchPages} 页 (费用: ${(totalSearchPages * searchCost).toFixed(1)})`);
-    addLog(`   详情页请求: ${totalDetailPages} 页 (费用: ${(totalDetailPages * detailCost).toFixed(1)})`);
-    addLog(`   缓存命中: ${totalCacheHits} 条 (节省: ${(totalCacheHits * detailCost).toFixed(1)} 积分)`);
-    addLog(`   过滤排除: ${totalFilteredOut} 条`);
+    
+    // 搜索结果摘要
+    addLog(`📊 搜索结果摘要:`);
+    addLog(`   • 有效结果: ${totalResults} 条联系人信息`);
+    addLog(`   • 缓存命中: ${totalCacheHits} 条 (免费获取)`);
+    addLog(`   • 过滤排除: ${totalFilteredOut} 条 (不符合筛选条件)`);
+    
+    // 费用明细
+    const searchPageCost = totalSearchPages * searchCost;
+    const detailPageCost = totalDetailPages * detailCost;
+    const savedByCache = totalCacheHits * detailCost;
+    
+    addLog(`💰 费用明细:`);
+    addLog(`   • 搜索页费用: ${totalSearchPages} 页 × ${searchCost} = ${searchPageCost.toFixed(1)} 积分`);
+    addLog(`   • 详情页费用: ${totalDetailPages} 页 × ${detailCost} = ${detailPageCost.toFixed(1)} 积分`);
+    addLog(`   • 缓存节省: ${totalCacheHits} 条 × ${detailCost} = ${savedByCache.toFixed(1)} 积分`);
+    addLog(`   ────────────────────────────`);
+    addLog(`   • 实际消耗: ${actualCost.toFixed(1)} 积分`);
+    
+    // 费用效率分析
+    addLog(`📈 费用效率:`);
+    if (totalResults > 0) {
+      const costPerResult = actualCost / totalResults;
+      addLog(`   • 每条结果成本: ${costPerResult.toFixed(2)} 积分`);
+    }
+    const cacheHitRate = totalCacheHits > 0 ? ((totalCacheHits / (totalCacheHits + totalDetailPages)) * 100).toFixed(1) : '0';
+    addLog(`   • 缓存命中率: ${cacheHitRate}%`);
+    if (savedByCache > 0) {
+      addLog(`   • 缓存节省: ${savedByCache.toFixed(1)} 积分 (相当于 ${Math.round(savedByCache / actualCost * 100)}% 的实际费用)`);
+    }
+    
+    addLog(`═══════════════════════════════════════════════════`);
+    addLog(`💡 提示: 相同姓名/地点的后续搜索将命中缓存，节省更多积分`);
     addLog(`═══════════════════════════════════════════════════`);
     
     await completeTpsSearchTask(taskDbId, {
