@@ -65,7 +65,6 @@ export default function AnywhoSearch() {
   // 姓名+地点模式的独立输入
   const [citiesInput, setCitiesInput] = useState("");
   const [statesInput, setStatesInput] = useState("");
-  const [zipcodesInput, setZipcodesInput] = useState("");
   
   // 过滤条件 - 新的默认值
   const [filters, setFilters] = useState({
@@ -117,9 +116,8 @@ export default function AnywhoSearch() {
   // 姓名+地点模式的独立列表
   const cities = citiesInput.trim().split("\n").filter(c => c.trim());
   const states = statesInput.trim().split("\n").filter(s => s.trim());
-  const zipcodes = zipcodesInput.trim().split("\n").filter(z => z.trim());
   
-  // 构建地点组合（城市+州+邮编）
+  // 构建地点组合（城市+州）
   const buildLocationCombinations = () => {
     const combos: string[] = [];
     // 如果有城市，使用城市
@@ -137,10 +135,6 @@ export default function AnywhoSearch() {
     } else if (states.length > 0) {
       // 只有州
       states.forEach(state => combos.push(state));
-    }
-    // 如果有邮编，单独添加
-    if (zipcodes.length > 0) {
-      zipcodes.forEach(zip => combos.push(zip));
     }
     return combos;
   };
@@ -183,7 +177,7 @@ export default function AnywhoSearch() {
     }
     
     if (mode === "nameLocation" && locationCombinations.length === 0) {
-      toast.error("姓名+地点模式需要输入至少一个地点条件（城市、州或邮编）");
+      toast.error("姓名+地点模式需要输入至少一个地点条件（城市或州）");
       return;
     }
     
@@ -200,7 +194,6 @@ export default function AnywhoSearch() {
       locations: mode === "nameLocation" ? locationCombinations : undefined,
       cities: mode === "nameLocation" ? cities : undefined,
       states: mode === "nameLocation" ? states : undefined,
-      zipcodes: mode === "nameLocation" ? zipcodes : undefined,
       mode,
       filters,
     });
@@ -322,7 +315,7 @@ export default function AnywhoSearch() {
                         <MapPin className="h-4 w-4" />
                         地点条件（可分开输入，会自动组合）
                       </p>
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
                         {/* 城市 */}
                         <div>
                           <Label htmlFor="cities" className="flex items-center gap-1">
@@ -356,24 +349,6 @@ export default function AnywhoSearch() {
                           />
                           <p className="text-xs text-muted-foreground mt-1">
                             {states.length} 个州
-                          </p>
-                        </div>
-                        
-                        {/* 邮编 */}
-                        <div>
-                          <Label htmlFor="zipcodes" className="flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            邮编 (ZIP)
-                          </Label>
-                          <Textarea
-                            id="zipcodes"
-                            placeholder="10001&#10;90001&#10;60601"
-                            value={zipcodesInput}
-                            onChange={(e) => setZipcodesInput(e.target.value)}
-                            className="mt-2 min-h-[100px] font-mono bg-slate-800/50 text-sm"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {zipcodes.length} 个邮编
                           </p>
                         </div>
                       </div>
