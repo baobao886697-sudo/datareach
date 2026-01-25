@@ -1175,9 +1175,9 @@ export default function Admin() {
                       'TPS_MIN_PHONE_YEAR': '电话最早年份',
                     };
                     const defaults: Record<string, string> = {
-                      'TPS_MIN_AGE': '25',
-                      'TPS_MAX_AGE': '65',
-                      'TPS_MIN_PHONE_YEAR': '2020',
+                      'TPS_MIN_AGE': '50',
+                      'TPS_MAX_AGE': '79',
+                      'TPS_MIN_PHONE_YEAR': '2025',
                     };
                     return (
                       <div key={key} className="space-y-2">

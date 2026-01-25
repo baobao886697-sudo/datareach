@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { 
@@ -38,7 +38,7 @@ export default function TpsSearch() {
   const [namesInput, setNamesInput] = useState("");
   const [locationsInput, setLocationsInput] = useState("");
   
-  // 过滤条件 - 与 EXE 客户端保持一致的默认值
+  // 过滤条件 - 默认值会从后端配置获取
   const [filters, setFilters] = useState({
     minAge: 50,
     maxAge: 79,
@@ -48,6 +48,9 @@ export default function TpsSearch() {
     excludeComcast: false,
     excludeLandline: false,
   });
+  
+  // 从后端配置获取默认年龄范围，实现前后端联动
+  const [ageRangeInitialized, setAgeRangeInitialized] = useState(false);
   
   // 高级选项
   const [showFilters, setShowFilters] = useState(false);
@@ -59,6 +62,18 @@ export default function TpsSearch() {
   
   // 获取 TPS 配置（从后端获取，确保与管理后台同步）
   const { data: tpsConfig } = trpc.tps.getConfig.useQuery();
+  
+  // 从后端配置初始化默认年龄范围，实现前后端联动
+  useEffect(() => {
+    if (tpsConfig && !ageRangeInitialized) {
+      setFilters(prev => ({
+        ...prev,
+        minAge: tpsConfig.defaultMinAge || 50,
+        maxAge: tpsConfig.defaultMaxAge || 79,
+      }));
+      setAgeRangeInitialized(true);
+    }
+  }, [tpsConfig, ageRangeInitialized]);
   
   // 计算预估消耗
   const names = namesInput.trim().split("\n").filter(n => n.trim());

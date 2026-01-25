@@ -1163,7 +1163,22 @@ export const appRouter = router({
 
     // 获取缓存统计
     cacheStats: adminProcedure.query(async () => {
-      return getCacheStats();
+      const stats = await getCacheStats();
+      // 转换为前端期望的格式
+      const hitRate = stats.totalEntries > 0 
+        ? Math.round((stats.totalHits / (stats.totalEntries + stats.totalHits)) * 100) 
+        : 0;
+      return {
+        entries: stats.totalEntries,
+        hitRate: hitRate,
+        memoryUsage: "N/A",  // 数据库缓存无法直接获取内存使用
+        // 保留原始数据以便其他地方使用
+        totalEntries: stats.totalEntries,
+        searchCache: stats.searchCache,
+        personCache: stats.personCache,
+        verificationCache: stats.verificationCache,
+        totalHits: stats.totalHits,
+      };
     }),
 
     // ============ TRC20钱包监控 ============

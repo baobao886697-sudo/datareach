@@ -74,6 +74,8 @@ export const tpsRouter = router({
       detailCost: parseFloat(config.detailCost),
       maxPages: config.maxPages,
       enabled: config.enabled,
+      defaultMinAge: config.defaultMinAge || 50,
+      defaultMaxAge: config.defaultMaxAge || 79,
     };
   }),
 

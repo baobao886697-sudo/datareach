@@ -28,34 +28,55 @@ async function db() {
 
 /**
  * 获取 TPS 配置
+ * 优先从 systemConfigs 表读取配置，实现与管理后台的联动
  */
 export async function getTpsConfig() {
   const database = await db();
   const configs = await database.select().from(tpsConfig).limit(1);
   const config = configs[0];
   
-  // 从 systemConfigs 表获取 Token（管理后台配置的位置）
-  const tokenFromSystemConfig = await getConfig('TPS_SCRAPE_TOKEN');
+  // 从 systemConfigs 表获取配置（管理后台配置的位置）
+  const [tokenFromSystemConfig, minAgeConfig, maxAgeConfig, searchCreditsConfig, detailCreditsConfig] = await Promise.all([
+    getConfig('TPS_SCRAPE_TOKEN'),
+    getConfig('TPS_MIN_AGE'),
+    getConfig('TPS_MAX_AGE'),
+    getConfig('TPS_SEARCH_CREDITS'),
+    getConfig('TPS_DETAIL_CREDITS'),
+  ]);
+  
+  // 解析年龄配置，默认 50-79 岁
+  const defaultMinAge = minAgeConfig ? parseInt(minAgeConfig, 10) : 50;
+  const defaultMaxAge = maxAgeConfig ? parseInt(maxAgeConfig, 10) : 79;
+  
+  // 解析积分配置
+  const searchCost = searchCreditsConfig || "0.3";
+  const detailCost = detailCreditsConfig || "0.3";
   
   if (!config) {
-    // 返回默认配置，优先使用 systemConfigs 中的 Token
+    // 返回默认配置，优先使用 systemConfigs 中的配置
     return {
       id: 0,
-      searchCost: "0.3",
-      detailCost: "0.3",
+      searchCost,
+      detailCost,
       maxConcurrent: 40,
       cacheDays: 30,
       scrapeDoToken: tokenFromSystemConfig || process.env.TPS_SCRAPE_DO_TOKEN || null,
       maxPages: 25,
       batchDelay: 200,
       enabled: true,
+      defaultMinAge,
+      defaultMaxAge,
     };
   }
   
-  // 如果 tpsConfig 表中没有 Token，使用 systemConfigs 中的
+  // 合并 tpsConfig 表和 systemConfigs 表的配置，systemConfigs 优先
   return {
     ...config,
+    searchCost: searchCreditsConfig || config.searchCost,
+    detailCost: detailCreditsConfig || config.detailCost,
     scrapeDoToken: config.scrapeDoToken || tokenFromSystemConfig || process.env.TPS_SCRAPE_DO_TOKEN || null,
+    defaultMinAge: minAgeConfig ? defaultMinAge : (config.defaultMinAge || 50),
+    defaultMaxAge: maxAgeConfig ? defaultMaxAge : (config.defaultMaxAge || 79),
   };
 }
 
@@ -434,6 +455,7 @@ export async function logCreditChange(
 
 /**
  * 记录 API 调用
+ * 同时更新 API 统计表用于系统监控
  */
 export async function logApi(data: {
   userId: number;
@@ -444,8 +466,11 @@ export async function logApi(data: {
   success: boolean;
   errorMessage?: string;
   creditsUsed?: number;
+  responseTime?: number;
 }) {
   const database = await db();
+  
+  // 记录详细 API 日志
   await database.insert(apiLogs).values({
     userId: data.userId,
     apiType: data.apiType,
@@ -456,4 +481,14 @@ export async function logApi(data: {
     errorMessage: data.errorMessage,
     creditsUsed: data.creditsUsed || 0,
   });
+  
+  // 同时更新 API 统计表（用于系统监控页面）
+  try {
+    const { updateApiStats } = await import("../db");
+    const apiName = `${data.apiType}:${data.endpoint}`;
+    await updateApiStats(apiName, data.success, data.creditsUsed || 0, data.responseTime || 0);
+  } catch (e) {
+    // 统计更新失败不影响主流程
+    console.error("Failed to update API stats:", e);
+  }
 }
