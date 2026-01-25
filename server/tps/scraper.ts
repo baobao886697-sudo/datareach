@@ -535,6 +535,11 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
  * - 与搜索页过滤逻辑保持一致
  */
 export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
+  // 已故人员检查 - 与云端寻踪Pro保持一致
+  if ((result as any).isDeceased) {
+    return false;
+  }
+  
   // 数据完整性验证：必须有电话号码
   if (!result.phone || result.phone.length < 10) {
     return false;
