@@ -629,16 +629,20 @@ export function parseDetailPage(html: string): AnywhoDetailResult | null {
       }
     }
     
-    // 4. 提取电话号码和运营商信息 - 增强版
-    // 格式: "757-944-8735\nPortsmouth, VA•T-Mobile"
-    const phoneInfoList: Array<{phone: string; carrier: string; phoneType: string}> = [];
+    // 4. 提取电话号码和运营商信息 - 增强版（含归属地）
+    // 格式: "706-773-2626\nWest Point, GA•T-Mobile"
+    const phoneInfoList: Array<{phone: string; carrier: string; phoneType: string; location: string; locationState: string}> = [];
     
-    // 匹配电话号码后面跟着的运营商信息
-    const phoneCarrierPattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})[\s\n]*[^\d]*?•\s*(T-Mobile|Verizon\s*(?:Wireless)?|AT&T|Sprint|Cricket|Metro|US Cellular|Comcast|Xfinity|Spectrum|CenturyLink|Frontier|Windstream|TPX Communications|Bandwidth|Level 3|Lumen)/gi;
-    let pcMatch;
-    while ((pcMatch = phoneCarrierPattern.exec(text)) !== null) {
-      const phone = pcMatch[1].replace(/[-.]/, '').replace(/\D/g, '');
-      const carrier = pcMatch[2].trim();
+    // 匹配电话号码、归属地和运营商信息
+    // 格式: 706-773-2626\nWest Point, GA•T-Mobile
+    const phoneFullPattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})[\s\n]+([A-Za-z\s]+),\s*([A-Z]{2})•(T-Mobile|Verizon\s*(?:Wireless)?|AT&T(?:\s*Southeast)?|Sprint|Cricket|Metro|US Cellular|Comcast|Xfinity|Spectrum|CenturyLink|Frontier|Windstream|TPX Communications|Bandwidth|Level 3|Lumen)/gi;
+    let pfMatch;
+    while ((pfMatch = phoneFullPattern.exec(text)) !== null) {
+      const phone = pfMatch[1].replace(/[-.]/, '').replace(/\D/g, '');
+      const locationCity = pfMatch[2].trim();
+      const locationState = pfMatch[3].trim();
+      const carrier = pfMatch[4].trim().replace(/\s*Southeast$/i, ''); // 移除 "Southeast" 后缀
+      const location = `${locationCity}, ${locationState}`;
       
       // 根据运营商推断电话类型
       let phoneType = 'Unknown';
@@ -655,18 +659,45 @@ export function parseDetailPage(html: string): AnywhoDetailResult | null {
       }
       
       if (phone.length === 10 && !phoneInfoList.some(p => p.phone === phone)) {
-        phoneInfoList.push({ phone, carrier, phoneType });
+        phoneInfoList.push({ phone, carrier, phoneType, location, locationState });
       }
     }
     
-    // 如果没有匹配到带运营商的电话，尝试普通电话提取
+    // 如果没有匹配到完整格式，尝试旧的匹配方式（只匹配运营商）
+    if (phoneInfoList.length === 0) {
+      const phoneCarrierPattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})[\s\n]*[^\d]*?•\s*(T-Mobile|Verizon\s*(?:Wireless)?|AT&T|Sprint|Cricket|Metro|US Cellular|Comcast|Xfinity|Spectrum|CenturyLink|Frontier|Windstream|TPX Communications|Bandwidth|Level 3|Lumen)/gi;
+      let pcMatch;
+      while ((pcMatch = phoneCarrierPattern.exec(text)) !== null) {
+        const phone = pcMatch[1].replace(/[-.]/, '').replace(/\D/g, '');
+        const carrier = pcMatch[2].trim();
+        
+        let phoneType = 'Unknown';
+        const mobileCarriers = ['T-Mobile', 'Verizon', 'Verizon Wireless', 'AT&T', 'Sprint', 'Cricket', 'Metro', 'US Cellular'];
+        const landlineCarriers = ['Comcast', 'Xfinity', 'Spectrum', 'CenturyLink', 'Frontier', 'Windstream'];
+        const voipCarriers = ['Bandwidth', 'Level 3', 'Lumen', 'TPX Communications'];
+        
+        if (mobileCarriers.some(c => carrier.toLowerCase().includes(c.toLowerCase()))) {
+          phoneType = 'Mobile';
+        } else if (landlineCarriers.some(c => carrier.toLowerCase().includes(c.toLowerCase()))) {
+          phoneType = 'Landline';
+        } else if (voipCarriers.some(c => carrier.toLowerCase().includes(c.toLowerCase()))) {
+          phoneType = 'VoIP';
+        }
+        
+        if (phone.length === 10 && !phoneInfoList.some(p => p.phone === phone)) {
+          phoneInfoList.push({ phone, carrier, phoneType, location: '', locationState: '' });
+        }
+      }
+    }
+    
+    // 如果还是没有匹配到，尝试普通电话提取
     if (phoneInfoList.length === 0) {
       const phonePattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})/g;
       let phoneMatch;
       while ((phoneMatch = phonePattern.exec(text)) !== null) {
         const phone = phoneMatch[1].replace(/[-.]/, '').replace(/\D/g, '');
         if (phone.length === 10 && !phoneInfoList.some(p => p.phone === phone)) {
-          phoneInfoList.push({ phone, carrier: '', phoneType: 'Unknown' });
+          phoneInfoList.push({ phone, carrier: '', phoneType: 'Unknown', location: '', locationState: '' });
         }
       }
     }
@@ -724,8 +755,41 @@ export function parseDetailPage(html: string): AnywhoDetailResult | null {
     const deathDatePattern = /may have passed away on \d{2}\/\d{4}/i;
     const isDeceased = deathDatePattern.test(text);
     
-    // 获取主要电话信息
-    const primaryPhone = phoneInfoList[0] || { phone: '', carrier: '', phoneType: 'Unknown' };
+    // 9. 智能选择主号码（优先 Mobile + 地址匹配）
+    // 选择策略:
+    // 1. 优先: Mobile 类型 + 与当前地址同州的号码
+    // 2. 次选: 任意 Mobile 类型号码
+    // 3. 备选: 与当前地址同州的任意号码
+    // 4. 最后: 第一个号码
+    let primaryPhone = { phone: '', carrier: '', phoneType: 'Unknown', location: '', locationState: '' };
+    
+    if (phoneInfoList.length > 0) {
+      // 尝试找到 Mobile + 同州的号码
+      const mobileAndSameState = phoneInfoList.find(p => 
+        p.phoneType === 'Mobile' && p.locationState === state
+      );
+      
+      if (mobileAndSameState) {
+        primaryPhone = mobileAndSameState;
+      } else {
+        // 尝试找到任意 Mobile 类型
+        const anyMobile = phoneInfoList.find(p => p.phoneType === 'Mobile');
+        
+        if (anyMobile) {
+          primaryPhone = anyMobile;
+        } else {
+          // 尝试找到同州的任意号码
+          const sameState = phoneInfoList.find(p => p.locationState === state);
+          
+          if (sameState) {
+            primaryPhone = sameState;
+          } else {
+            // 使用第一个号码
+            primaryPhone = phoneInfoList[0];
+          }
+        }
+      }
+    }
     
     // 解析名字
     const nameParts = name.split(' ');
