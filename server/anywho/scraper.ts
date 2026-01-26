@@ -621,23 +621,29 @@ export function hasNextPage(html: string, currentPage: number): boolean {
 /**
  * 仅搜索模式 - 支持双年龄搜索
  * 同时搜索多个年龄段以获取完整数据
+ * 
+ * @param name 搜索姓名
+ * @param location 搜索地点
+ * @param maxPages 每个年龄段的最大页数
+ * @param apiKey Scrape.do API Key
+ * @param ageRanges 需要搜索的年龄段数组
+ * @param onLog 日志回调函数
  */
 export async function searchOnly(
   name: string,
   location: string | undefined,
+  maxPages: number,
   apiKey: string,
-  maxPages: number = 10,
   ageRanges: AnywhoAgeRange[] = ['31-60', '61-80'],
   onLog?: (message: string) => void
 ): Promise<{
   results: AnywhoSearchResult[];
-  totalPages: number;
-  totalApiCalls: number;
+  pagesSearched: number;
+  ageRangesSearched: AnywhoAgeRange[];
 }> {
   const log = onLog || console.log;
   const allResults: AnywhoSearchResult[] = [];
-  let totalPages = 0;
-  let totalApiCalls = 0;
+  let pagesSearched = 0;
   
   log(`[Anywho] 开始双年龄搜索: ${name}, 地点: ${location || '全国'}, 年龄段: ${ageRanges.join(', ')}, 每段最大页数: ${maxPages}`);
   
@@ -654,7 +660,7 @@ export async function searchOnly(
       
       try {
         const html = await fetchWithScrapeApi(url, apiKey);
-        totalApiCalls++;
+        pagesSearched++;
         
         const pageResults = parseSearchResults(html);
         log(`[Anywho] [${ageRange}] 第 ${page} 页找到 ${pageResults.length} 条结果`);
@@ -678,7 +684,6 @@ export async function searchOnly(
           // 检查是否有下一页
           hasMore = hasNextPage(html, page);
           page++;
-          totalPages++;
         }
       } catch (error) {
         log(`[Anywho] [${ageRange}] 第 ${page} 页抓取失败: ${error}`);
@@ -694,12 +699,12 @@ export async function searchOnly(
     log(`[Anywho] 年龄段 ${ageRange} 搜索完成，累计 ${allResults.length} 条结果`);
   }
   
-  log(`[Anywho] 双年龄搜索完成: 共 ${allResults.length} 条结果, ${totalApiCalls} 次 API 调用`);
+  log(`[Anywho] 双年龄搜索完成: 共 ${allResults.length} 条结果, ${pagesSearched} 页`);
   
   return {
     results: allResults,
-    totalPages,
-    totalApiCalls,
+    pagesSearched,
+    ageRangesSearched: ageRanges,
   };
 }
 
@@ -711,19 +716,19 @@ export async function searchOnly(
 export async function fullSearch(
   name: string,
   location: string | undefined,
+  maxPages: number,
   apiKey: string,
-  maxPages: number = 5,
   ageRanges: AnywhoAgeRange[] = ['31-60', '61-80'],
   onLog?: (message: string) => void
 ): Promise<{
   results: AnywhoDetailResult[];
-  totalPages: number;
-  totalApiCalls: number;
+  pagesSearched: number;
+  ageRangesSearched: AnywhoAgeRange[];
 }> {
   const log = onLog || console.log;
   
   // 先执行搜索
-  const searchResult = await searchOnly(name, location, apiKey, maxPages, ageRanges, onLog);
+  const searchResult = await searchOnly(name, location, maxPages, apiKey, ageRanges, onLog);
   
   // 将搜索结果转换为详情结果
   const detailResults = searchResult.results.map(convertSearchResultToDetail);
@@ -732,8 +737,8 @@ export async function fullSearch(
   
   return {
     results: detailResults,
-    totalPages: searchResult.totalPages,
-    totalApiCalls: searchResult.totalApiCalls,
+    pagesSearched: searchResult.pagesSearched,
+    ageRangesSearched: searchResult.ageRangesSearched,
   };
 }
 
@@ -744,16 +749,16 @@ export async function fullSearch(
 export async function searchAndFetchDetails(
   name: string,
   location: string | undefined,
+  maxPages: number,
   apiKey: string,
-  maxPages: number = 5,
   maxDetails: number = 50,
   ageRanges: AnywhoAgeRange[] = ['31-60', '61-80'],
   onLog?: (message: string) => void
 ): Promise<{
   results: AnywhoDetailResult[];
-  totalPages: number;
-  totalApiCalls: number;
+  pagesSearched: number;
+  ageRangesSearched: AnywhoAgeRange[];
 }> {
   // 由于 CAPTCHA 问题，直接使用 fullSearch
-  return fullSearch(name, location, apiKey, maxPages, ageRanges, onLog);
+  return fullSearch(name, location, maxPages, apiKey, ageRanges, onLog);
 }
