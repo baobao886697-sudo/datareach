@@ -630,12 +630,12 @@ export function parseDetailPage(html: string): AnywhoDetailResult | null {
     }
     
     // 4. 提取电话号码和运营商信息 - 增强版（含归属地）
-    // 格式: "706-773-2626\nWest Point, GA•T-Mobile"
+    // 实际格式: "706-773-2626\nWest Point, GA\n•\nT-Mobile"
     const phoneInfoList: Array<{phone: string; carrier: string; phoneType: string; location: string; locationState: string}> = [];
     
     // 匹配电话号码、归属地和运营商信息
-    // 格式: 706-773-2626\nWest Point, GA•T-Mobile
-    const phoneFullPattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})[\s\n]+([A-Za-z\s]+),\s*([A-Z]{2})•(T-Mobile|Verizon\s*(?:Wireless)?|AT&T(?:\s*Southeast)?|Sprint|Cricket|Metro|US Cellular|Comcast|Xfinity|Spectrum|CenturyLink|Frontier|Windstream|TPX Communications|Bandwidth|Level 3|Lumen)/gi;
+    // 实际格式: 706-773-2626\nWest Point, GA\n•\nT-Mobile (归属地和运营商之间有换行符和•)
+    const phoneFullPattern = /(\d{3}[-.]?\d{3}[-.]?\d{4})[\s\n]+([A-Za-z\s]+),\s*([A-Z]{2})[\s\n]*•[\s\n]*(T-Mobile|Verizon\s*(?:Wireless)?|AT&T(?:\s*Southeast)?|Sprint|Cricket|Metro|US Cellular|Comcast|Xfinity|Spectrum|CenturyLink|Frontier|Windstream|TPX Communications|Bandwidth|Level 3|Lumen)/gi;
     let pfMatch;
     while ((pfMatch = phoneFullPattern.exec(text)) !== null) {
       const phone = pfMatch[1].replace(/[-.]/, '').replace(/\D/g, '');
