@@ -494,7 +494,15 @@ export function parseSearchResults(html: string): AnywhoSearchResult[] {
     const stateAbbr = STATE_ABBR_MAP[stateName.toLowerCase()] || stateName.toUpperCase();
     
     // 检查是否已存在（去重）
-    const fullDetailLink = `${ANYWHO_CONFIG.BASE_URL}${person.link}`;
+    // 处理 link 格式：可能是相对路径 /people/... 或完整 URL http://www.anywho.com/people/...
+    let fullDetailLink: string;
+    if (person.link.startsWith('http://') || person.link.startsWith('https://')) {
+      // 如果是完整 URL，统一使用 https
+      fullDetailLink = person.link.replace('http://', 'https://');
+    } else {
+      // 如果是相对路径，拼接 BASE_URL
+      fullDetailLink = `${ANYWHO_CONFIG.BASE_URL}${person.link}`;
+    }
     const existingIndex = results.findIndex(r => r.detailLink === fullDetailLink);
     
     if (existingIndex === -1) {
