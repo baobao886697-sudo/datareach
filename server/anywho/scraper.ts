@@ -19,7 +19,7 @@ export const ANYWHO_CONFIG = {
   TOTAL_CONCURRENCY: 10,  // 总并发数
   TASK_CONCURRENCY: 4,    // 搜索任务并发数
   MAX_PAGES: 5,           // 最大搜索页数
-  BATCH_DELAY: 300,       // 批次间延迟(ms)（优化后）
+  BATCH_DELAY: 200,       // 批次间延迟(ms)（高性能模式）
   REQUEST_TIMEOUT: 120000, // 请求超时(ms)
 };
 
