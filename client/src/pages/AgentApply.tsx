@@ -5,13 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Crown, CheckCircle, Users, Wallet, TrendingUp, Shield } from "lucide-react";
 
 export default function AgentApply() {
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   
@@ -30,28 +30,17 @@ export default function AgentApply() {
   const submitApplication = trpc.agent.submitApplication.useMutation({
     onSuccess: () => {
       setSubmitted(true);
-      toast({
-        title: "申请已提交",
-        description: "我们会尽快审核您的申请，请耐心等待",
-      });
+      toast.success("申请已提交，我们会尽快审核您的申请");
     },
     onError: (error) => {
-      toast({
-        title: "提交失败",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast.error(error.message || "提交失败");
     },
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.email || !formData.phone) {
-      toast({
-        title: "请填写必填项",
-        description: "姓名、邮箱和手机号为必填项",
-        variant: "destructive",
-      });
+      toast.error("请填写必填项：姓名、邮箱和手机号");
       return;
     }
     setIsSubmitting(true);

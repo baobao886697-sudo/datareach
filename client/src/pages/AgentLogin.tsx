@@ -4,13 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Crown, Eye, EyeOff } from "lucide-react";
 
 export default function AgentLogin() {
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   
@@ -24,29 +23,18 @@ export default function AgentLogin() {
       // 存储代理token
       localStorage.setItem("agent_token", data.token);
       localStorage.setItem("agent_info", JSON.stringify(data.agent));
-      toast({
-        title: "登录成功",
-        description: `欢迎回来，${data.agent.name}`,
-      });
+      toast.success(`欢迎回来，${data.agent.name}`);
       setLocation("/agent-portal");
     },
     onError: (error) => {
-      toast({
-        title: "登录失败",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast.error(error.message || "登录失败");
     },
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.email || !formData.password) {
-      toast({
-        title: "请填写完整",
-        description: "邮箱和密码不能为空",
-        variant: "destructive",
-      });
+      toast.error("请填写邮箱和密码");
       return;
     }
     setIsLoading(true);

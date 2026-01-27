@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { 
   Crown, 
@@ -56,7 +56,7 @@ const levelColors: Record<string, string> = {
 
 export default function AgentPortal() {
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
+
   const [activeTab, setActiveTab] = useState("dashboard");
   const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
 
@@ -106,10 +106,7 @@ export default function AgentPortal() {
     if (!agentInfo) return;
     const link = `${window.location.origin}/?ref=${agentInfo.inviteCode}`;
     navigator.clipboard.writeText(link);
-    toast({
-      title: "已复制",
-      description: "邀请链接已复制到剪贴板",
-    });
+    toast.success("邀请链接已复制到剪贴板");
   };
 
   if (!agentInfo) {
@@ -574,44 +571,29 @@ function WithdrawSection({
   withdrawalsData: any;
   refetchWithdrawals: () => void;
 }) {
-  const { toast } = useToast();
+
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
 
   const submitWithdraw = trpc.agent.submitWithdrawal.useMutation({
     onSuccess: () => {
-      toast({
-        title: "提现申请已提交",
-        description: "请等待管理员审核",
-      });
+      toast.success("提现申请已提交，请等待管理员审核");
       setWithdrawAmount("");
       refetchWithdrawals();
     },
     onError: (error) => {
-      toast({
-        title: "提现失败",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast.error(error.message || "提现失败");
     },
   });
 
   const handleWithdraw = () => {
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount < 50) {
-      toast({
-        title: "金额错误",
-        description: "最低提现金额为 50 USDT",
-        variant: "destructive",
-      });
+      toast.error("最低提现金额为 50 USDT");
       return;
     }
     if (!walletAddress) {
-      toast({
-        title: "请填写钱包地址",
-        description: "请输入您的 USDT TRC20 钱包地址",
-        variant: "destructive",
-      });
+      toast.error("请输入您的 USDT TRC20 钱包地址");
       return;
     }
     submitWithdraw.mutate({ amount, walletAddress });
