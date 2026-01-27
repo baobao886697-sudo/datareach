@@ -107,7 +107,18 @@ export async function createContext(
         createdAt: new Date(),
         updatedAt: new Date(),
         role: "admin",
-      } as User & { role: string };
+        // 代理系统字段
+        inviterId: null,
+        inviteCode: null,
+        isAgent: false,
+        agentLevel: "normal",
+        agentBalance: "0",
+        agentFrozenBalance: "0",
+        agentTotalEarned: "0",
+        agentWalletAddress: null,
+        agentAppliedAt: null,
+        firstChargeRewarded: false,
+      } as unknown as User & { role: string };
     } else {
       // 检查普通用户session
       const sessionCookie = cookies.get(COOKIE_NAME);
