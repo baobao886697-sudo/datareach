@@ -15,6 +15,14 @@ import { ParticleNetwork } from "@/components/ParticleNetwork";
 // 预设积分选项：5000/10000/20000/50000 积分（对应 50/100/200/500 USDT）
 const PRESET_AMOUNTS = [5000, 10000, 20000, 50000];
 
+// 阶梯优惠规则显示配置（用于横幅展示）
+const BONUS_DISPLAY_TIERS = [
+  { label: '100+', percent: 2 },
+  { label: '200+', percent: 4 },
+  { label: '500+', percent: 8 },
+  { label: '1000+', percent: 10 },
+];
+
 export default function Recharge() {
   const { user } = useAuth();
   const search = useSearch();
@@ -56,10 +64,14 @@ export default function Recharge() {
   const creditsPerUsdt = rechargeConfig?.creditsPerUsdt || 100;
   const minRechargeCredits = rechargeConfig?.minRechargeCredits || 5000;
   const bonusTiers = rechargeConfig?.bonusTiers || [
-    { minUsdt: 1000, bonusPercent: 20 },
-    { minUsdt: 500, bonusPercent: 15 },
-    { minUsdt: 200, bonusPercent: 8 },
-    { minUsdt: 100, bonusPercent: 3 },
+    { minUsdt: 10000, bonusPercent: 15 },
+    { minUsdt: 5000, bonusPercent: 14 },
+    { minUsdt: 3000, bonusPercent: 12 },
+    { minUsdt: 1000, bonusPercent: 10 },
+    { minUsdt: 500, bonusPercent: 8 },
+    { minUsdt: 300, bonusPercent: 6 },
+    { minUsdt: 200, bonusPercent: 4 },
+    { minUsdt: 100, bonusPercent: 2 },
     { minUsdt: 0, bonusPercent: 0 },
   ];
   
@@ -198,24 +210,15 @@ export default function Recharge() {
                   <p className="text-sm text-slate-300">充得越多，送得越多！</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-xs text-slate-400">100+ USDT</p>
-                  <p className="text-lg font-bold text-green-400">+3%</p>
-                </div>
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-xs text-slate-400">200+ USDT</p>
-                  <p className="text-lg font-bold text-green-400">+8%</p>
-                </div>
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-xs text-slate-400">500+ USDT</p>
-                  <p className="text-lg font-bold text-green-400">+15%</p>
-                </div>
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-xs text-slate-400">1000+ USDT</p>
-                  <p className="text-lg font-bold text-green-400">+20%</p>
-                </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {BONUS_DISPLAY_TIERS.map((tier) => (
+                  <div key={tier.label} className="bg-slate-900/50 rounded-lg p-2">
+                    <p className="text-xs text-slate-400">{tier.label} USDT</p>
+                    <p className="text-lg font-bold text-green-400">+{tier.percent}%</p>
+                  </div>
+                ))}
               </div>
+              <p className="text-xs text-slate-400 mt-2 text-center">*最高可享15%赠送，详情请查看完整优惠规则</p>
             </div>
 
             <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl p-6">

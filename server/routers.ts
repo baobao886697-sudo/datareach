@@ -679,13 +679,17 @@ export const appRouter = router({
         // 计算需要支付的 USDT 金额
         const baseAmount = input.credits / creditsPerUsdt;
         
-        // 阶梯优惠规则：根据USDT金额计算赠送比例
+        // 阶梯优惠规则：根据USDT金额计算赠送比例（保守方案）
         const bonusTiers = [
-          { minUsdt: 1000, bonusPercent: 20 },
-          { minUsdt: 500, bonusPercent: 15 },
-          { minUsdt: 200, bonusPercent: 8 },
-          { minUsdt: 100, bonusPercent: 3 },
-          { minUsdt: 0, bonusPercent: 0 },
+          { minUsdt: 10000, bonusPercent: 15 },  // 10000+ USDT: 15%
+          { minUsdt: 5000, bonusPercent: 14 },   // 5000-9999 USDT: 14%
+          { minUsdt: 3000, bonusPercent: 12 },   // 3000-4999 USDT: 12%
+          { minUsdt: 1000, bonusPercent: 10 },   // 1000-2999 USDT: 10%
+          { minUsdt: 500, bonusPercent: 8 },     // 500-999 USDT: 8%
+          { minUsdt: 300, bonusPercent: 6 },     // 300-499 USDT: 6%
+          { minUsdt: 200, bonusPercent: 4 },     // 200-299 USDT: 4%
+          { minUsdt: 100, bonusPercent: 2 },     // 100-199 USDT: 2%
+          { minUsdt: 0, bonusPercent: 0 },       // 50-99 USDT: 无赠送
         ];
         
         // 查找适用的优惠档位
@@ -759,13 +763,17 @@ export const appRouter = router({
       const creditsPerUsdtStr = await getConfig('CREDITS_PER_USDT');
       const minRechargeCreditsStr = await getConfig('MIN_RECHARGE_CREDITS');
       
-      // 阶梯优惠规则：根据USDT金额给予不同比例的赠送
+      // 阶梯优惠规则：根据USDT金额给予不同比例的赠送（保守方案）
       const bonusTiers = [
-        { minUsdt: 1000, bonusPercent: 20 },  // 1000+ USDT: 20% 赠送
-        { minUsdt: 500, bonusPercent: 15 },   // 500-999 USDT: 15% 赠送
-        { minUsdt: 200, bonusPercent: 8 },    // 200-499 USDT: 8% 赠送
-        { minUsdt: 100, bonusPercent: 3 },    // 100-199 USDT: 3% 赠送
-        { minUsdt: 0, bonusPercent: 0 },      // 50-99 USDT: 无赠送
+        { minUsdt: 10000, bonusPercent: 15 },  // 10000+ USDT: 15%
+        { minUsdt: 5000, bonusPercent: 14 },   // 5000-9999 USDT: 14%
+        { minUsdt: 3000, bonusPercent: 12 },   // 3000-4999 USDT: 12%
+        { minUsdt: 1000, bonusPercent: 10 },   // 1000-2999 USDT: 10%
+        { minUsdt: 500, bonusPercent: 8 },     // 500-999 USDT: 8%
+        { minUsdt: 300, bonusPercent: 6 },     // 300-499 USDT: 6%
+        { minUsdt: 200, bonusPercent: 4 },     // 200-299 USDT: 4%
+        { minUsdt: 100, bonusPercent: 2 },     // 100-199 USDT: 2%
+        { minUsdt: 0, bonusPercent: 0 },       // 50-99 USDT: 无赠送
       ];
       
       return {
