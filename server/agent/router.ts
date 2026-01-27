@@ -358,22 +358,34 @@ export const agentRouter = router({
       };
     }),
 
-  // 提交代理申请
+  // 提交代理申请（简化版：只需邮箱和钱包地址）
   submitApplication: publicProcedure
     .input(z.object({
-      name: z.string().min(1, "请输入姓名"),
+      name: z.string().optional(),
       email: z.string().email("请输入有效邮箱"),
-      phone: z.string().min(1, "请输入手机号"),
+      phone: z.string().optional(),
       wechat: z.string().optional(),
       company: z.string().optional(),
       experience: z.string().optional(),
       channels: z.string().optional(),
       expectedUsers: z.string().optional(),
-      walletAddress: z.string().optional(),
+      walletAddress: z.string().min(1, "请输入USDT收款地址"),
     }))
     .mutation(async ({ input }) => {
       try {
-        await createAgentApplication(input);
+        // 检查邮箱是否已注册用户端账号
+        const existingUser = await getUserByEmail(input.email);
+        if (!existingUser) {
+          throw new Error("该邮箱未注册用户端账号，请先注册后再申请代理");
+        }
+        if (existingUser.isAgent) {
+          throw new Error("您已经是代理了，无需重复申请");
+        }
+        await createAgentApplication({
+          ...input,
+          name: existingUser.name || input.email.split('@')[0],
+          phone: input.phone || '',
+        });
         return { success: true, message: "申请已提交，请等待审核" };
       } catch (error: any) {
         throw new TRPCError({ code: "BAD_REQUEST", message: error.message });

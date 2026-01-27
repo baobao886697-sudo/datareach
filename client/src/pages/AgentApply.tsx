@@ -3,11 +3,11 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { Crown, CheckCircle, Users, Wallet, TrendingUp, Shield } from "lucide-react";
+import { Crown, CheckCircle, Users, Wallet, TrendingUp, Shield, AlertCircle, Info } from "lucide-react";
 
 export default function AgentApply() {
   const [, setLocation] = useLocation();
@@ -16,21 +16,14 @@ export default function AgentApply() {
   const [submitted, setSubmitted] = useState(false);
   
   const [formData, setFormData] = useState({
-    name: "",
     email: "",
-    phone: "",
-    wechat: "",
-    company: "",
-    experience: "",
-    channels: "",
-    expectedUsers: "",
     walletAddress: "",
   });
 
   const submitApplication = trpc.agent.submitApplication.useMutation({
     onSuccess: () => {
       setSubmitted(true);
-      toast.success("申请已提交，我们会尽快审核您的申请");
+      toast.success("申请已提交，请等待管理员审核");
     },
     onError: (error) => {
       toast.error(error.message || "提交失败");
@@ -39,13 +32,22 @@ export default function AgentApply() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.email || !formData.phone) {
-      toast.error("请填写必填项：姓名、邮箱和手机号");
+    if (!formData.email) {
+      toast.error("请填写您的用户端邮箱");
+      return;
+    }
+    if (!formData.walletAddress) {
+      toast.error("请填写您的USDT收款地址");
       return;
     }
     setIsSubmitting(true);
     try {
-      await submitApplication.mutateAsync(formData);
+      await submitApplication.mutateAsync({
+        name: "",
+        email: formData.email,
+        phone: "",
+        walletAddress: formData.walletAddress,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -61,12 +63,17 @@ export default function AgentApply() {
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">申请已提交</h2>
             <p className="text-slate-400 mb-6">
-              感谢您的申请！我们的团队会在 1-3 个工作日内审核您的资料。
-              审核通过后，您将收到邮件通知。
+              感谢您的申请！管理员会尽快审核您的资料。
+              审核通过后，您可以使用用户端账号登录代理后台。
             </p>
-            <Button onClick={() => setLocation("/")} variant="outline">
-              返回首页
-            </Button>
+            <div className="space-y-3">
+              <Button onClick={() => setLocation("/agent-portal/login")} className="w-full bg-gradient-to-r from-purple-500 to-pink-500">
+                前往代理登录
+              </Button>
+              <Button onClick={() => setLocation("/")} variant="outline" className="w-full">
+                返回首页
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -165,28 +172,28 @@ export default function AgentApply() {
                 <tbody className="text-white">
                   <tr className="border-b border-slate-700/50">
                     <td className="py-2">
-                      <span className="text-yellow-500">创始代理</span>
+                      <span className="text-yellow-500">👑 创始代理</span>
                     </td>
                     <td className="text-center">15%</td>
                     <td className="text-center">5%</td>
                   </tr>
                   <tr className="border-b border-slate-700/50">
                     <td className="py-2">
-                      <span className="text-amber-500">金牌代理</span>
+                      <span className="text-amber-500">🥇 金牌代理</span>
                     </td>
                     <td className="text-center">12%</td>
                     <td className="text-center">4%</td>
                   </tr>
                   <tr className="border-b border-slate-700/50">
                     <td className="py-2">
-                      <span className="text-slate-300">银牌代理</span>
+                      <span className="text-slate-300">🥈 银牌代理</span>
                     </td>
                     <td className="text-center">10%</td>
                     <td className="text-center">3%</td>
                   </tr>
                   <tr>
                     <td className="py-2">
-                      <span className="text-slate-400">普通代理</span>
+                      <span className="text-cyan-400">⭐ 普通代理</span>
                     </td>
                     <td className="text-center">8%</td>
                     <td className="text-center">2%</td>
@@ -199,135 +206,79 @@ export default function AgentApply() {
           {/* Right: Application Form */}
           <Card className="bg-slate-800/50 border-slate-700">
             <CardHeader>
-              <CardTitle className="text-white">代理申请表</CardTitle>
-              <CardDescription>
-                请填写以下信息，我们会尽快审核您的申请
+              <CardTitle className="text-white text-2xl">代理申请</CardTitle>
+              <CardDescription className="text-base">
+                填写以下信息，提交后等待管理员审核
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name" className="text-white">
-                      姓名 <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="您的真实姓名"
-                      className="bg-slate-900/50 border-slate-600"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone" className="text-white">
-                      手机号 <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="您的手机号码"
-                      className="bg-slate-900/50 border-slate-600"
-                    />
-                  </div>
-                </div>
+              {/* 重要提示 */}
+              <Alert className="mb-6 bg-amber-500/10 border-amber-500/50">
+                <Info className="h-4 w-4 text-amber-500" />
+                <AlertDescription className="text-amber-200">
+                  <strong>重要提示：</strong>请使用您在 DataReach 用户端注册的邮箱申请。
+                  如果还没有账号，请先<a href="/" className="text-amber-400 underline hover:text-amber-300">注册用户端账号</a>。
+                </AlertDescription>
+              </Alert>
 
+              <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-white">
-                    邮箱 <span className="text-red-500">*</span>
+                  <Label htmlFor="email" className="text-white text-base">
+                    用户端邮箱 <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="email"
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="用于接收审核通知"
-                    className="bg-slate-900/50 border-slate-600"
+                    placeholder="请输入您在用户端注册的邮箱"
+                    className="bg-slate-900/50 border-slate-600 h-12 text-base"
                   />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="wechat" className="text-white">微信号</Label>
-                    <Input
-                      id="wechat"
-                      value={formData.wechat}
-                      onChange={(e) => setFormData({ ...formData, wechat: e.target.value })}
-                      placeholder="方便联系"
-                      className="bg-slate-900/50 border-slate-600"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="company" className="text-white">公司/团队</Label>
-                    <Input
-                      id="company"
-                      value={formData.company}
-                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                      placeholder="所属公司或团队"
-                      className="bg-slate-900/50 border-slate-600"
-                    />
-                  </div>
+                  <p className="text-slate-500 text-sm">
+                    审核通过后，您将使用此邮箱登录代理后台
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="experience" className="text-white">推广经验</Label>
-                  <Textarea
-                    id="experience"
-                    value={formData.experience}
-                    onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
-                    placeholder="请简述您的推广经验，如：社群运营、自媒体、销售团队等"
-                    className="bg-slate-900/50 border-slate-600 min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="channels" className="text-white">推广渠道</Label>
-                  <Textarea
-                    id="channels"
-                    value={formData.channels}
-                    onChange={(e) => setFormData({ ...formData, channels: e.target.value })}
-                    placeholder="您计划通过哪些渠道推广？如：微信群、公众号、抖音、线下等"
-                    className="bg-slate-900/50 border-slate-600 min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="expectedUsers" className="text-white">预期用户量</Label>
-                  <Input
-                    id="expectedUsers"
-                    value={formData.expectedUsers}
-                    onChange={(e) => setFormData({ ...formData, expectedUsers: e.target.value })}
-                    placeholder="预计每月能带来多少新用户"
-                    className="bg-slate-900/50 border-slate-600"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="walletAddress" className="text-white">
-                    USDT 收款地址 (TRC20)
+                  <Label htmlFor="walletAddress" className="text-white text-base">
+                    USDT 收款地址 (TRC20) <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="walletAddress"
                     value={formData.walletAddress}
                     onChange={(e) => setFormData({ ...formData, walletAddress: e.target.value })}
-                    placeholder="用于接收佣金，可稍后填写"
-                    className="bg-slate-900/50 border-slate-600 font-mono text-sm"
+                    placeholder="T..."
+                    className="bg-slate-900/50 border-slate-600 h-12 text-base font-mono"
                   />
+                  <p className="text-slate-500 text-sm">
+                    用于接收佣金提现，请确保地址正确
+                  </p>
                 </div>
 
                 <Button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-600 hover:to-amber-600 text-black font-semibold"
                   disabled={isSubmitting}
+                  className="w-full h-12 text-lg bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
                 >
                   {isSubmitting ? "提交中..." : "提交申请"}
                 </Button>
 
-                <p className="text-xs text-slate-500 text-center">
-                  提交申请即表示您同意我们的代理协议和隐私政策
+                <p className="text-center text-slate-500 text-sm">
+                  提交后请耐心等待管理员审核
                 </p>
               </form>
+
+              {/* 已有代理账号 */}
+              <div className="mt-8 pt-6 border-t border-slate-700 text-center">
+                <p className="text-slate-400 mb-3">已是代理？</p>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setLocation("/agent-portal/login")}
+                  className="w-full"
+                >
+                  登录代理后台
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
