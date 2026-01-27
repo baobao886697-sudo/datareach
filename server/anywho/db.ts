@@ -79,6 +79,8 @@ export async function getAnywhoConfig() {
     scrapeDoToken: config.scrapeDoToken || tokenFromSystemConfig || process.env.ANYWHO_SCRAPE_DO_TOKEN || null,
     defaultMinAge: minAgeConfig ? defaultMinAge : (config.defaultMinAge || 18),
     defaultMaxAge: maxAgeConfig ? defaultMaxAge : (config.defaultMaxAge || 99),
+    // 强制使用代码中的 maxPages 配置，确保前后端一致
+    maxPages: 4,
   };
 }
 
