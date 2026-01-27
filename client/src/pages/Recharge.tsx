@@ -31,6 +31,7 @@ export default function Recharge() {
   const initialAmount = params.get("amount");
   
   const [credits, setCredits] = useState(initialAmount ? Number(initialAmount) : 5000);
+  const [customUsdt, setCustomUsdt] = useState<string>("");  // 自定义USDT金额输入
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   
@@ -262,18 +263,37 @@ export default function Recharge() {
                 })}
               </div>
 
-              {/* 自定义金额 */}
+              {/* 自定义USDT金额 */}
               <div className="space-y-2 mb-6">
-                <Label className="text-slate-400">自定义积分数量（最低 {minRechargeCredits.toLocaleString()} 积分）</Label>
-                <Input
-                  type="number"
-                  value={credits}
-                  onChange={(e) => setCredits(Math.max(minRechargeCredits, parseInt(e.target.value) || minRechargeCredits))}
-                  min={minRechargeCredits}
-                  step={1000}
-                  className="bg-slate-800/50 border-slate-700 text-white h-12"
-                  disabled={isCreating}
-                />
+                <Label className="text-slate-400">自定义充值金额（最低 50 USDT）</Label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    value={customUsdt}
+                    placeholder="输入USDT金额"
+                    onFocus={() => setCustomUsdt("")}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCustomUsdt(value);
+                      const usdtValue = parseFloat(value) || 0;
+                      if (usdtValue >= 50) {
+                        setCredits(Math.floor(usdtValue * creditsPerUsdt));
+                      }
+                    }}
+                    onBlur={() => {
+                      const usdtValue = parseFloat(customUsdt) || 0;
+                      if (usdtValue > 0 && usdtValue < 50) {
+                        setCustomUsdt("50");
+                        setCredits(50 * creditsPerUsdt);
+                      }
+                    }}
+                    min={50}
+                    step={10}
+                    className="bg-slate-800/50 border-slate-700 text-white h-12 pr-16"
+                    disabled={isCreating}
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-yellow-400 font-medium">USDT</span>
+                </div>
               </div>
 
               {/* 费用明细 */}
