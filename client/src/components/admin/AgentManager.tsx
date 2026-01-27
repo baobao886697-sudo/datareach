@@ -139,6 +139,17 @@ export function AgentManager() {
     },
   });
 
+  // 初始化代理配置
+  const initSettingsMutation = trpc.admin.agent.initSettings.useMutation({
+    onSuccess: () => {
+      toast.success('配置已初始化');
+      refetchSettings();
+    },
+    onError: (error) => {
+      toast.error(error.message || '初始化失败');
+    },
+  });
+
   // 处理等级修改
   const handleSetLevel = () => {
     if (!selectedAgent || !newLevel) return;
@@ -611,6 +622,19 @@ export function AgentManager() {
               {settingsLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12" />)}
+                </div>
+              ) : Object.keys(settingsData || {}).length === 0 ? (
+                <div className="text-center py-12">
+                  <Settings className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+                  <p className="text-slate-400 mb-4">佣金配置未初始化</p>
+                  <Button
+                    onClick={() => initSettingsMutation.mutate()}
+                    disabled={initSettingsMutation.isPending}
+                    className="bg-amber-500 hover:bg-amber-600"
+                  >
+                    {initSettingsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    初始化配置
+                  </Button>
                 </div>
               ) : (
                 <div className="grid gap-4">
