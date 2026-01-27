@@ -122,7 +122,10 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [inviteCode, setInviteCode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('ref') || params.get('invite') || '';
+  });
   const [userName, setUserName] = useState("");
   
   // 强制登录状态
@@ -138,14 +141,7 @@ export default function Home() {
     }
   }, [loading, isAuthenticated, setLocation]);
 
-  // 从 URL 获取邀请码
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('ref') || params.get('invite');
-    if (code) {
-      setInviteCode(code);
-    }
-  }, []);
+  // 邀请码已在useState初始化时从URL获取
 
   // 数据源轮播
   useEffect(() => {
