@@ -64,7 +64,7 @@ export async function getAnywhoConfig() {
       maxConcurrent: 20,
       cacheDays: 180,
       scrapeDoToken: tokenFromSystemConfig || process.env.ANYWHO_SCRAPE_DO_TOKEN || null,
-      maxPages: 10,
+      maxPages: 4,
       batchDelay: 300,
       enabled: true,
       defaultMinAge,

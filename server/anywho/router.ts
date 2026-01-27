@@ -92,7 +92,7 @@ export const anywhoRouter = router({
     .query(async ({ input }) => {
       const config = await getAnywhoConfig();
       const searchCost = parseFloat(config.searchCost);
-      const maxPages = config.maxPages || 10;
+      const maxPages = config.maxPages || 4;
       
       // 计算子任务数
       let subTaskCount = 0;
@@ -158,7 +158,7 @@ export const anywhoRouter = router({
       // 检查用户积分
       const userCredits = await getUserCredits(userId);
       const searchCost = parseFloat(config.searchCost);
-      const maxPages = config.maxPages || 10;
+      const maxPages = config.maxPages || 4;
       
       // 计算子任务
       let subTasks: Array<{ name: string; location?: string }> = [];
@@ -464,7 +464,7 @@ async function executeAnywhoSearch(
 ) {
   const token = config.scrapeDoToken;
   const searchCost = parseFloat(config.searchCost);
-  const maxPages = config.maxPages || 10;
+  const maxPages = config.maxPages || 4;
   
   let totalSearchPages = 0;
   let totalResults = 0;
