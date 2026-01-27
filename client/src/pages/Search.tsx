@@ -658,62 +658,159 @@ export default function Search() {
                   )}
                 </div>
 
-                {/* 搜索模式选择器 */}
-                <div className="space-y-3">
+                {/* 搜索模式选择器 - 全新设计 */}
+                <div className="space-y-4">
                   <Label className="text-slate-300 flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-slate-500" />
-                    搜索模式
+                    <Zap className="h-4 w-4 text-yellow-400" />
+                    <span className="font-semibold">搜索模式选择</span>
+                    <span className="text-xs text-slate-500 ml-2">根据需求选择合适的搜索方式</span>
                   </Label>
-                  <div className="grid grid-cols-2 gap-3">
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 模糊搜索卡片 */}
                     <button
                       type="button"
                       onClick={() => setSearchMode('fuzzy')}
-                      className={`relative p-4 rounded-xl border transition-all text-left ${
+                      className={`relative p-5 rounded-2xl border-2 transition-all text-left overflow-hidden ${
                         searchMode === 'fuzzy'
-                          ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
-                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                          ? 'bg-gradient-to-br from-cyan-500/20 via-blue-500/15 to-teal-500/20 border-cyan-400 shadow-lg shadow-cyan-500/20'
+                          : 'bg-slate-800/50 border-slate-700 hover:border-cyan-500/50 hover:bg-slate-800'
                       }`}
                     >
-                      <div className="text-lg font-bold">模糊搜索</div>
-                      <div className="text-xs opacity-70">便宜、大批量</div>
-                      <div className="text-xs opacity-50 mt-1">搜索费 {FUZZY_SEARCH_COST} + {FUZZY_PHONE_COST_PER_PERSON}/条</div>
+                      {/* 推荐标签 */}
+                      <div className="absolute top-3 right-3">
+                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-cyan-500/30 text-cyan-300 border border-cyan-500/50">
+                          💰 性价比之选
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center">
+                          <Database className="h-6 w-6 text-cyan-400" />
+                        </div>
+                        <div>
+                          <div className="text-xl font-bold text-cyan-400">模糊搜索</div>
+                          <div className="text-xs text-cyan-300/70">Fuzzy Search</div>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-2 mb-3">
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-cyan-400 flex-shrink-0" />
+                          <span>大批量数据采集，成本低廉</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-cyan-400 flex-shrink-0" />
+                          <span>适合广泛撰网、市场调研</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-cyan-400 flex-shrink-0" />
+                          <span>缓存数据，快速返回结果</span>
+                        </div>
+                      </div>
+                      
+                      <div className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-400">积分费用</span>
+                          <span className="text-sm font-bold text-cyan-400">
+                            {FUZZY_SEARCH_COST} + {FUZZY_PHONE_COST_PER_PERSON}/条
+                          </span>
+                        </div>
+                      </div>
                     </button>
+                    
+                    {/* 精准搜索卡片 */}
                     <button
                       type="button"
                       onClick={() => setSearchMode('exact')}
-                      className={`relative p-4 rounded-xl border transition-all text-left ${
+                      className={`relative p-5 rounded-2xl border-2 transition-all text-left overflow-hidden ${
                         searchMode === 'exact'
-                          ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'
+                          ? 'bg-gradient-to-br from-purple-500/20 via-pink-500/15 to-violet-500/20 border-purple-400 shadow-lg shadow-purple-500/20'
+                          : 'bg-slate-800/50 border-slate-700 hover:border-purple-500/50 hover:bg-slate-800'
                       }`}
                     >
-                      <div className="text-lg font-bold">精准搜索</div>
-                      <div className="text-xs opacity-70">实时、高质量</div>
-                      <div className="text-xs opacity-50 mt-1">搜索费 {EXACT_SEARCH_COST} + {EXACT_PHONE_COST_PER_PERSON}/条</div>
+                      {/* 推荐标签 */}
+                      <div className="absolute top-3 right-3">
+                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-purple-500/30 text-purple-300 border border-purple-500/50">
+                          ⭐ 高质量之选
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 flex items-center justify-center">
+                          <Target className="h-6 w-6 text-purple-400" />
+                        </div>
+                        <div>
+                          <div className="text-xl font-bold text-purple-400">精准搜索</div>
+                          <div className="text-xs text-purple-300/70">Exact Search</div>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-2 mb-3">
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                          <span>实时数据，电话号码更准确</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                          <span>适合重点客户、精准营销</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-300">
+                          <CheckCircle2 className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                          <span>无结果时退还搜索费用</span>
+                        </div>
+                      </div>
+                      
+                      <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-400">积分费用</span>
+                          <span className="text-sm font-bold text-purple-400">
+                            {EXACT_SEARCH_COST} + {EXACT_PHONE_COST_PER_PERSON}/条
+                          </span>
+                        </div>
+                      </div>
                     </button>
                   </div>
-                  {/* 动态积分费用提示 */}
-                  <div className={`p-3 rounded-lg border transition-all ${
+                  
+                  {/* 当前模式详细说明 */}
+                  <div className={`p-4 rounded-xl border transition-all ${
                     searchMode === 'fuzzy' 
-                      ? 'bg-cyan-500/10 border-cyan-500/30' 
-                      : 'bg-purple-500/10 border-purple-500/30'
+                      ? 'bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30' 
+                      : 'bg-gradient-to-r from-purple-500/10 to-pink-500/10 border-purple-500/30'
                   }`}>
-                    <div className="flex items-center gap-2">
-                      <Coins className={`h-4 w-4 ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`} />
-                      <span className={`text-sm font-medium ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`}>
-                        当前模式积分费用
+                    <div className="flex items-center gap-2 mb-2">
+                      <Coins className={`h-5 w-5 ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`} />
+                      <span className={`text-sm font-bold ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`}>
+                        {searchMode === 'fuzzy' ? '模糊搜索' : '精准搜索'} - 积分预估
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="p-2 rounded-lg bg-slate-800/50">
+                        <p className="text-xs text-slate-500">搜索费</p>
+                        <p className={`text-lg font-bold ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`}>
+                          {searchMode === 'fuzzy' ? FUZZY_SEARCH_COST : EXACT_SEARCH_COST}
+                        </p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-800/50">
+                        <p className="text-xs text-slate-500">每条数据</p>
+                        <p className={`text-lg font-bold ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`}>
+                          {searchMode === 'fuzzy' ? FUZZY_PHONE_COST_PER_PERSON : EXACT_PHONE_COST_PER_PERSON}
+                        </p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-800/50">
+                        <p className="text-xs text-slate-500">预估总计</p>
+                        <p className={`text-lg font-bold ${searchMode === 'fuzzy' ? 'text-cyan-400' : 'text-purple-400'}`}>
+                          {creditEstimate.totalCost}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-3 text-center">
                       {searchMode === 'fuzzy' 
-                        ? `搜索费 ${FUZZY_SEARCH_COST} 积分 + 每条数据 ${FUZZY_PHONE_COST_PER_PERSON} 积分 = 预估 ${creditEstimate.totalCost} 积分`
-                        : `搜索费 ${EXACT_SEARCH_COST} 积分 + 每条数据 ${EXACT_PHONE_COST_PER_PERSON} 积分 = 预估 ${creditEstimate.totalCost} 积分`
+                        ? '💡 模糊搜索适合大批量数据采集，性价比高，推荐新用户使用'
+                        : '💡 精准搜索使用实时数据，电话号码更准确，无结果时退还搜索费'
                       }
                     </p>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    💡 精准模式使用实时数据，电话号码更准确，但成本更高。
-                  </p>
                 </div>
 
                 {/* 电话验证 */}
@@ -843,20 +940,49 @@ export default function Search() {
               )}
             </div>
 
-            {/* 费用说明 */}
-            <div className="relative p-4 rounded-xl bg-cyan-500/5 border border-cyan-500/20">
-              <div className="flex items-start gap-3">
-                <Info className="h-5 w-5 text-cyan-400 shrink-0 mt-0.5" />
-                <div className="text-sm text-slate-400">
-                  <p className="text-cyan-400 font-medium mb-2">费用说明</p>
-                  <ul className="space-y-1">
-                    <li>• 搜索费用：每次搜索 {searchMode === 'fuzzy' ? FUZZY_SEARCH_COST : EXACT_SEARCH_COST} 积分</li>
-                    <li>• 数据获取：每条结果 {searchMode === 'fuzzy' ? FUZZY_PHONE_COST_PER_PERSON : EXACT_PHONE_COST_PER_PERSON} 积分</li>
-                    <li>• 电话验证：免费</li>
-                    <li>• 实际消耗可能因结果数量有所浮动</li>
-                    {searchMode === 'exact' && <li className="text-purple-400">• 精准搜索无结果时退还搜索费用</li>}
+            {/* 搜索模式对比说明 */}
+            <div className="relative p-4 rounded-xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700">
+              <div className="flex items-center gap-2 mb-4">
+                <Info className="h-5 w-5 text-yellow-400" />
+                <span className="font-bold text-white">模糊搜索 vs 精准搜索</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {/* 模糊搜索说明 */}
+                <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Database className="h-4 w-4 text-cyan-400" />
+                    <span className="font-bold text-cyan-400">模糊搜索</span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-slate-400">
+                    <li>• 搜索费: {FUZZY_SEARCH_COST} 积分</li>
+                    <li>• 每条数据: {FUZZY_PHONE_COST_PER_PERSON} 积分</li>
+                    <li>• 数据来源: 缓存数据库</li>
+                    <li>• 适用场景: 大批量采集</li>
+                    <li className="text-cyan-300">• 特点: 性价比高</li>
                   </ul>
                 </div>
+                
+                {/* 精准搜索说明 */}
+                <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Target className="h-4 w-4 text-purple-400" />
+                    <span className="font-bold text-purple-400">精准搜索</span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-slate-400">
+                    <li>• 搜索费: {EXACT_SEARCH_COST} 积分</li>
+                    <li>• 每条数据: {EXACT_PHONE_COST_PER_PERSON} 积分</li>
+                    <li>• 数据来源: 实时查询</li>
+                    <li>• 适用场景: 精准营销</li>
+                    <li className="text-purple-300">• 特点: 无结果退款</li>
+                  </ul>
+                </div>
+              </div>
+              
+              <div className="mt-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                <p className="text-xs text-yellow-300 text-center">
+                  💡 新用户推荐使用「模糊搜索」，性价比更高；重点客户推荐「精准搜索」，数据更准确
+                </p>
               </div>
             </div>
 
@@ -883,6 +1009,63 @@ export default function Search() {
                       <CheckCircle2 className="h-3 w-3 text-cyan-400" />
                       <span>导出 CSV 报表</span>
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* LinkedIn 核心优势 - 突出卖点 */}
+            <div className="relative p-4 rounded-xl bg-gradient-to-br from-amber-900/30 via-orange-900/20 to-yellow-900/30 border border-amber-500/50">
+              <div className="flex items-center gap-2 mb-4">
+                <Star className="h-5 w-5 text-amber-400" />
+                <span className="font-bold golden-rainbow-title">LinkedIn 核心优势</span>
+              </div>
+              
+              <div className="space-y-3">
+                {/* 优势1: 双验证电话 */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                    <Shield className="h-4 w-4 text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-amber-300 text-sm">双验证电话号码</p>
+                    <p className="text-xs text-slate-400">多数据源交叉验证，电话准确率更高</p>
+                  </div>
+                </div>
+                
+                {/* 优势2: 用户年龄数据 */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <Calendar className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-emerald-300 text-sm flex items-center gap-2">
+                      用户年龄数据
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200">独家</span>
+                    </p>
+                    <p className="text-xs text-slate-400">精准筛选目标年龄段，提升营销效率</p>
+                  </div>
+                </div>
+                
+                {/* 优势3: 专业人士数据库 */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
+                  <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                    <Briefcase className="h-4 w-4 text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-purple-300 text-sm">专业人士数据库</p>
+                    <p className="text-xs text-slate-400">覆盖全球商业精英，职位信息完整</p>
+                  </div>
+                </div>
+                
+                {/* 优势4: 灵活搜索模式 */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
+                  <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                    <Zap className="h-4 w-4 text-cyan-400" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-cyan-300 text-sm">灵活搜索模式</p>
+                    <p className="text-xs text-slate-400">模糊/精准双模式，满足不同需求</p>
                   </div>
                 </div>
               </div>
