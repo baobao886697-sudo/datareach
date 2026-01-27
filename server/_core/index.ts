@@ -714,6 +714,7 @@ async function ensureTables() {
       { name: 'agentTotalEarned', definition: 'DECIMAL(10,2) DEFAULT 0' },
       { name: 'agentWalletAddress', definition: 'VARCHAR(100) DEFAULT NULL' },
       { name: 'agentAppliedAt', definition: 'TIMESTAMP NULL' },
+      { name: 'agentApprovedAt', definition: 'TIMESTAMP NULL' },
     ];
     
     for (const col of agentColumnsToAdd) {
