@@ -36,9 +36,52 @@ import {
   generateInviteCode,
 } from "../agentDb";
 import { logAdmin } from "../db";
+import { verifyAgentToken as verifyAgentTokenAuth, getAgentTokenFromContext, getAuthenticatedAgentId } from "./agentAuth";
 
 // JWT密钥
 const AGENT_JWT_SECRET = process.env.AGENT_JWT_SECRET || process.env.JWT_SECRET || 'agent-secret-key-change-in-production';
+
+// 代理认证中间件 - 验证代理JWT token
+interface AgentContext {
+  agentUser: {
+    userId: number;
+    email: string;
+    isAgent: boolean;
+    agentLevel: string;
+  } | null;
+}
+
+async function verifyAgentToken(token: string): Promise<AgentContext['agentUser']> {
+  try {
+    const decoded = jwt.verify(token, AGENT_JWT_SECRET) as any;
+    if (!decoded.userId || !decoded.isAgent) {
+      return null;
+    }
+    // 验证用户是否仍然是代理
+    const user = await getUserById(decoded.userId);
+    if (!user || !user.isAgent) {
+      return null;
+    }
+    return {
+      userId: decoded.userId,
+      email: decoded.email,
+      isAgent: true,
+      agentLevel: user.agentLevel || 'normal',
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+// 从请求头获取代理token
+function getAgentTokenFromHeader(ctx: any): string | null {
+  const authHeader = ctx.req?.headers?.authorization || ctx.req?.headers?.['x-agent-token'];
+  if (!authHeader) return null;
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+  return authHeader;
+}
 
 // 获取数据库实例
 function getDb() {
@@ -427,39 +470,22 @@ export const agentRouter = router({
   // ============ 代理后台接口（需要代理token） ============
 
   // 获取仪表盘数据
-  getDashboard: publicProcedure
-    .input(z.object({ token: z.string().optional() }).optional())
-    .query(async ({ ctx, input }) => {
-      // 从header或input获取token
-      const token = (ctx as any).req?.headers?.['x-agent-token'] || input?.token || 
-                    (typeof localStorage !== 'undefined' ? localStorage.getItem('agent_token') : null);
-      
-      // 简化处理：从ctx获取用户信息（如果已登录）
-      const user = (ctx as any).user;
-      if (!user?.isAgent) {
-        // 尝试从token验证
-        if (!token) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
-        }
-        try {
-          const decoded = verifyAgentToken(token);
-          const agentUser = await getUserById(decoded.userId);
-          if (!agentUser?.isAgent) {
-            throw new TRPCError({ code: "UNAUTHORIZED", message: "代理身份验证失败" });
-          }
-          return await getAgentDashboardData(agentUser.id);
-        } catch (e) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
-        }
-      }
-      
-      return await getAgentDashboardData(user.id);
-    }),
+  getDashboard: publicProcedure.query(async ({ ctx }) => {
+    try {
+      const agentId = await getAuthenticatedAgentId(ctx);
+      return await getAgentDashboardData(agentId);
+    } catch (e) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
+    }
+  }),
 
   // 获取团队数据
-  getTeam: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.user?.isAgent) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "您还不是代理" });
+  getTeam: publicProcedure.query(async ({ ctx }) => {
+    let agentId: number;
+    try {
+      agentId = await getAuthenticatedAgentId(ctx);
+    } catch (e) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
     }
     
     const db = getDb();
@@ -472,7 +498,7 @@ export const agentRouter = router({
       createdAt: users.createdAt,
     })
       .from(users)
-      .where(eq(users.inviterId, ctx.user.id))
+      .where(eq(users.inviterId, agentId))
       .orderBy(desc(users.createdAt))
       .limit(50);
     
@@ -496,12 +522,12 @@ export const agentRouter = router({
     const enrichedLevel1 = await Promise.all(level1Users.map(async (user) => {
       const rechargeResult = await db.execute(sql`
         SELECT COALESCE(SUM(orderAmount), 0) as total FROM agent_commissions 
-        WHERE fromUserId = ${user.id} AND agentId = ${ctx.user!.id}
+        WHERE fromUserId = ${user.id} AND agentId = ${agentId}
       `);
       const commissionResult = await db.execute(sql`
         SELECT COALESCE(SUM(commissionAmount + COALESCE(bonusAmount, 0)), 0) as total 
         FROM agent_commissions 
-        WHERE fromUserId = ${user.id} AND agentId = ${ctx.user!.id}
+        WHERE fromUserId = ${user.id} AND agentId = ${agentId}
       `);
       
       return {
@@ -531,9 +557,12 @@ export const agentRouter = router({
   }),
 
   // 获取佣金明细
-  getCommissions: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.user?.isAgent) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "您还不是代理" });
+  getCommissions: publicProcedure.query(async ({ ctx }) => {
+    let agentId: number;
+    try {
+      agentId = await getAuthenticatedAgentId(ctx);
+    } catch (e) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
     }
     
     const db = getDb();
@@ -541,7 +570,7 @@ export const agentRouter = router({
       SELECT ac.*, u.email as fromUserEmail
       FROM agent_commissions ac
       LEFT JOIN users u ON ac.fromUserId = u.id
-      WHERE ac.agentId = ${ctx.user.id}
+      WHERE ac.agentId = ${agentId}
       ORDER BY ac.createdAt DESC
       LIMIT 100
     `);
@@ -560,12 +589,15 @@ export const agentRouter = router({
   }),
 
   // 获取提现记录
-  getWithdrawals: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.user?.isAgent) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "您还不是代理" });
+  getWithdrawals: publicProcedure.query(async ({ ctx }) => {
+    let agentId: number;
+    try {
+      agentId = await getAuthenticatedAgentId(ctx);
+    } catch (e) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
     }
     
-    const result = await getAgentWithdrawals(ctx.user.id, 1, 50);
+    const result = await getAgentWithdrawals(agentId, 1, 50);
     
     const withdrawals = result.withdrawals.map((w: any) => ({
       id: w.withdrawalId,
@@ -579,18 +611,21 @@ export const agentRouter = router({
   }),
 
   // 申请提现
-  submitWithdrawal: protectedProcedure
+  submitWithdrawal: publicProcedure
     .input(z.object({
       amount: z.number().min(50, "最低提现金额为50 USDT"),
       walletAddress: z.string().min(1, "请输入钱包地址"),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.user?.isAgent) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "您还不是代理" });
+      let agentId: number;
+      try {
+        agentId = await getAuthenticatedAgentId(ctx);
+      } catch (e) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
       }
       
       const result = await createWithdrawal(
-        ctx.user.id,
+        agentId,
         input.amount,
         input.walletAddress,
         'TRC20'
@@ -604,13 +639,16 @@ export const agentRouter = router({
     }),
 
   // 更新钱包地址
-  updateWalletAddress: protectedProcedure
+  updateWalletAddress: publicProcedure
     .input(z.object({
       walletAddress: z.string().min(1, "请输入钱包地址"),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.user?.isAgent) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "您还不是代理" });
+      let agentId: number;
+      try {
+        agentId = await getAuthenticatedAgentId(ctx);
+      } catch (e) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
       }
       
       // 验证TRC20地址格式
@@ -621,7 +659,7 @@ export const agentRouter = router({
       const db = getDb();
       await db.update(users)
         .set({ agentWalletAddress: input.walletAddress })
-        .where(eq(users.id, ctx.user.id));
+        .where(eq(users.id, agentId));
       
       return { success: true, message: "钱包地址已更新" };
     }),

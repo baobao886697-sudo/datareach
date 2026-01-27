@@ -62,13 +62,17 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       fetch(input, init) {
-        // 获取管理员token并添加到请求头
+        // 获取管理员token和代理token并添加到请求头
         const adminToken = localStorage.getItem("adminToken");
+        const agentToken = localStorage.getItem("agent_token");
         const headers: Record<string, string> = {
           ...(init?.headers as Record<string, string> || {}),
         };
         if (adminToken) {
           headers["x-admin-token"] = adminToken;
+        }
+        if (agentToken) {
+          headers["x-agent-token"] = agentToken;
         }
         
         return globalThis.fetch(input, {
