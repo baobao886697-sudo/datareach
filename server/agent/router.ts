@@ -135,7 +135,7 @@ export const agentRouter = router({
   }),
 
   // 申请成为代理
-  apply: protectedProcedure.mutation(async ({ ctx }) => {
+  applyAgent: protectedProcedure.mutation(async ({ ctx }) => {
     if (!ctx.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });
     }

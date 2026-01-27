@@ -66,7 +66,7 @@ export default function AgentCenter() {
   );
 
   // 申请成为代理
-  const applyMutation = trpc.agent.apply.useMutation({
+  const applyMutation = trpc.agent.applyAgent.useMutation({
     onSuccess: () => {
       toast.success('恭喜！您已成功成为代理');
       refetchAgent();
