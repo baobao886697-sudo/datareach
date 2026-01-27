@@ -14,7 +14,8 @@ import {
   User, Coins, Search, RefreshCw, Key, Ban, UserCheck,
   Clock, Mail, Calendar, Activity, CreditCard, History,
   AlertTriangle, CheckCircle, XCircle, Send, Eye,
-  Download, Filter, TrendingUp, TrendingDown, ArrowUpDown
+  Download, Filter, TrendingUp, TrendingDown, ArrowUpDown,
+  Crown, Link, Unlink
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,7 @@ export function UserDetailDialog({ userId, open, onOpenChange, onRefresh }: User
   const [newPassword, setNewPassword] = useState("");
   const [messageTitle, setMessageTitle] = useState("");
   const [messageContent, setMessageContent] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   
   // 积分报表筛选状态（新增）
   const [creditFilterType, setCreditFilterType] = useState<string>("all");
@@ -144,6 +146,12 @@ export function UserDetailDialog({ userId, open, onOpenChange, onRefresh }: User
       toast.error(error.message || "操作失败");
     },
   });
+
+  // 获取代理列表（用于分配代理）
+  const { data: agentsList } = trpc.adminAgent.list.useQuery(
+    { page: 1, limit: 100 },
+    { enabled: !!userId && open && activeTab === "info" }
+  );
 
   const sendMessageMutation = trpc.admin.sendMessage.useMutation({
     onSuccess: () => {
@@ -453,6 +461,97 @@ export function UserDetailDialog({ userId, open, onOpenChange, onRefresh }: User
                       >
                         强制下线
                       </Button>
+                    </CardContent>
+                  </Card>
+
+                  {/* 代理分配 */}
+                  <Card className="bg-slate-800/50 border-slate-700">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Crown className="h-4 w-4 text-yellow-400" />
+                        代理分配
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {user.inviterId ? (
+                        <div className="space-y-2">
+                          <div className="text-sm text-slate-400">
+                            当前上级代理: <span className="text-purple-400">{(user as any).agentEmail || `ID: ${user.inviterId}`}</span>
+                          </div>
+                          <Button
+                            onClick={() => {
+                              if (confirm('确定要移除该用户的代理关联吗？')) {
+                                // 调用移除代理API
+                                fetch('/api/trpc/adminAgent.removeUserFromAgent', {
+                                  method: 'POST',
+                                  headers: { 
+                                    'Content-Type': 'application/json',
+                                    'x-admin-token': localStorage.getItem('adminToken') || ''
+                                  },
+                                  body: JSON.stringify({ json: { userId: user.id } })
+                                }).then(res => res.json()).then(data => {
+                                  if (data.result?.data?.json?.success) {
+                                    toast.success('已移除代理关联');
+                                    refetch();
+                                    onRefresh?.();
+                                  } else {
+                                    toast.error(data.error?.json?.message || '操作失败');
+                                  }
+                                });
+                              }
+                            }}
+                            variant="outline"
+                            className="w-full border-red-500 text-red-400 hover:bg-red-500/10"
+                          >
+                            <Unlink className="h-4 w-4 mr-2" />移除代理关联
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="text-sm text-slate-400">当前无上级代理</div>
+                          <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                            <SelectTrigger className="bg-slate-900 border-slate-600">
+                              <SelectValue placeholder="选择代理" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-800 border-slate-700">
+                              {agentsList?.agents?.map((agent: any) => (
+                                <SelectItem key={agent.id} value={agent.id.toString()}>
+                                  {agent.email} ({agent.agentLevel})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            onClick={() => {
+                              if (!selectedAgentId) {
+                                toast.error('请选择代理');
+                                return;
+                              }
+                              fetch('/api/trpc/adminAgent.assignUserToAgent', {
+                                method: 'POST',
+                                headers: { 
+                                  'Content-Type': 'application/json',
+                                  'x-admin-token': localStorage.getItem('adminToken') || ''
+                                },
+                                body: JSON.stringify({ json: { userId: user.id, agentId: parseInt(selectedAgentId) } })
+                              }).then(res => res.json()).then(data => {
+                                if (data.result?.data?.json?.success) {
+                                  toast.success('已分配代理');
+                                  setSelectedAgentId('');
+                                  refetch();
+                                  onRefresh?.();
+                                } else {
+                                  toast.error(data.error?.json?.message || '操作失败');
+                                }
+                              });
+                            }}
+                            disabled={!selectedAgentId}
+                            className="w-full bg-purple-500 hover:bg-purple-600"
+                          >
+                            <Link className="h-4 w-4 mr-2" />分配代理
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </div>

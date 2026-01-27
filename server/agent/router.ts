@@ -511,23 +511,37 @@ export const agentRouter = router({
     
     // 计算每个用户的充值和佣金
     const enrichedLevel1 = await Promise.all(level1Users.map(async (user) => {
-      const rechargeResult = await db.execute(sql`
-        SELECT COALESCE(SUM(orderAmount), 0) as total FROM agent_commissions 
-        WHERE fromUserId = ${user.id} AND agentId = ${agentId}
-      `);
-      const commissionResult = await db.execute(sql`
-        SELECT COALESCE(SUM(commissionAmount + COALESCE(bonusAmount, 0)), 0) as total 
-        FROM agent_commissions 
-        WHERE fromUserId = ${user.id} AND agentId = ${agentId}
-      `);
+      let totalRecharge = '0.00';
+      let commission = '0.00';
+      
+      try {
+        const rechargeResult = await db.execute(sql`
+          SELECT COALESCE(SUM(orderAmount), 0) as total FROM agent_commissions 
+          WHERE fromUserId = ${user.id} AND agentId = ${agentId}
+        `);
+        totalRecharge = parseFloat((rechargeResult[0] as any[])[0]?.total || '0').toFixed(2);
+      } catch (e) {
+        // 如果查询失败，使用默认值
+      }
+      
+      try {
+        const commissionResult = await db.execute(sql`
+          SELECT COALESCE(SUM(COALESCE(commissionAmount, 0) + COALESCE(bonusAmount, 0)), 0) as total 
+          FROM agent_commissions 
+          WHERE fromUserId = ${user.id} AND agentId = ${agentId}
+        `);
+        commission = parseFloat((commissionResult[0] as any[])[0]?.total || '0').toFixed(2);
+      } catch (e) {
+        // 如果查询失败，使用默认值
+      }
       
       return {
         id: user.id,
         displayName: getUserDisplayName(user.name, user.email),
         email: maskEmail(user.email), // 脱敏邮箱
         createdAt: new Date(user.createdAt).toLocaleDateString('zh-CN'),
-        totalRecharge: parseFloat((rechargeResult[0] as any[])[0]?.total || '0').toFixed(2),
-        commission: parseFloat((commissionResult[0] as any[])[0]?.total || '0').toFixed(2),
+        totalRecharge,
+        commission,
       };
     }));
     
@@ -1160,5 +1174,167 @@ export const adminAgentRouter = router({
         page,
         limit,
       };
+    }),
+
+  // 获取代理下属用户列表（管理员查看）
+  getAgentUsers: adminProcedure
+    .input(z.object({
+      agentId: z.number(),
+      page: z.number().optional(),
+      limit: z.number().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const page = input.page || 1;
+      const limit = input.limit || 20;
+      const offset = (page - 1) * limit;
+      
+      // 获取一级用户（直推）
+      const level1Result = await db.execute(sql`
+        SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt,
+               COALESCE((SELECT SUM(orderAmount) FROM agent_commissions WHERE fromUserId = u.id AND agentId = ${input.agentId}), 0) as totalRecharge,
+               COALESCE((SELECT SUM(commissionAmount + COALESCE(bonusAmount, 0)) FROM agent_commissions WHERE fromUserId = u.id AND agentId = ${input.agentId}), 0) as totalCommission
+        FROM users u
+        WHERE u.inviterId = ${input.agentId}
+        ORDER BY u.createdAt DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+      
+      // 获取一级用户总数
+      const level1CountResult = await db.execute(sql`
+        SELECT COUNT(*) as total FROM users WHERE inviterId = ${input.agentId}
+      `);
+      
+      // 获取二级用户（间推）
+      const level1Ids = (level1Result[0] as any[]).map(u => u.id);
+      let level2Users: any[] = [];
+      let level2Total = 0;
+      
+      if (level1Ids.length > 0) {
+        const level2Result = await db.execute(sql`
+          SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt, u.inviterId,
+                 (SELECT email FROM users WHERE id = u.inviterId) as inviterEmail
+          FROM users u
+          WHERE u.inviterId IN (${sql.raw(level1Ids.join(','))})
+          ORDER BY u.createdAt DESC
+          LIMIT 50
+        `);
+        level2Users = (level2Result[0] as any[]);
+        
+        const level2CountResult = await db.execute(sql`
+          SELECT COUNT(*) as total FROM users WHERE inviterId IN (${sql.raw(level1Ids.join(','))})
+        `);
+        level2Total = (level2CountResult[0] as any[])[0]?.total || 0;
+      }
+      
+      return {
+        level1Users: (level1Result[0] as any[]).map(u => ({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          credits: u.credits,
+          status: u.status,
+          createdAt: u.createdAt,
+          totalRecharge: parseFloat(u.totalRecharge || '0').toFixed(2),
+          totalCommission: parseFloat(u.totalCommission || '0').toFixed(2),
+        })),
+        level1Total: (level1CountResult[0] as any[])[0]?.total || 0,
+        level2Users: level2Users.map(u => ({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          credits: u.credits,
+          status: u.status,
+          createdAt: u.createdAt,
+          inviterId: u.inviterId,
+          inviterEmail: u.inviterEmail,
+        })),
+        level2Total,
+        page,
+        limit,
+      };
+    }),
+
+  // 将用户分配给代理（手动绑定邀请关系）
+  assignUserToAgent: adminProcedure
+    .input(z.object({
+      userId: z.number(),
+      agentId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      
+      // 检查用户是否存在
+      const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!user[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+      }
+      
+      // 检查代理是否存在
+      const agent = await db.select().from(users).where(and(eq(users.id, input.agentId), eq(users.isAgent, true))).limit(1);
+      if (!agent[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "代理不存在" });
+      }
+      
+      // 检查用户是否已经有上级
+      if (user[0].inviterId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "该用户已经有上级代理，无法重复分配" });
+      }
+      
+      // 检查用户是否是代理本人
+      if (input.userId === input.agentId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "不能将代理分配给自己" });
+      }
+      
+      // 更新用户的邀请人
+      await db.update(users).set({
+        inviterId: input.agentId,
+      }).where(eq(users.id, input.userId));
+      
+      await logAdmin(
+        (ctx as any).adminUser?.username || 'admin',
+        'assign_user_to_agent',
+        'user',
+        input.userId.toString(),
+        { agentId: input.agentId, agentEmail: agent[0].email }
+      );
+      
+      return { success: true, message: `已将用户分配给代理 ${agent[0].email}` };
+    }),
+
+  // 移除用户的代理关联
+  removeUserFromAgent: adminProcedure
+    .input(z.object({
+      userId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      
+      // 检查用户是否存在
+      const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!user[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+      }
+      
+      if (!user[0].inviterId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "该用户没有上级代理" });
+      }
+      
+      const oldAgentId = user[0].inviterId;
+      
+      // 移除邀请关系
+      await db.update(users).set({
+        inviterId: null,
+      }).where(eq(users.id, input.userId));
+      
+      await logAdmin(
+        (ctx as any).adminUser?.username || 'admin',
+        'remove_user_from_agent',
+        'user',
+        input.userId.toString(),
+        { oldAgentId }
+      );
+      
+      return { success: true, message: "已移除用户的代理关联" };
     }),
 });

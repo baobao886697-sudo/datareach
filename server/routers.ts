@@ -1958,6 +1958,9 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+
+  // ============ 代理管理独立路由 ============
+  adminAgent: adminAgentRouter,
 });
 
 export type AppRouter = typeof appRouter;

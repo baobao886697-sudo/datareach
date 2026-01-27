@@ -530,6 +530,7 @@ export default function Admin() {
                       <TableHead className="text-slate-400">邮箱</TableHead>
                       <TableHead className="text-slate-400">姓名</TableHead>
                       <TableHead className="text-slate-400">积分</TableHead>
+                      <TableHead className="text-slate-400">上级代理</TableHead>
                       <TableHead className="text-slate-400">状态</TableHead>
                       <TableHead className="text-slate-400">注册时间</TableHead>
                       <TableHead className="text-slate-400">操作</TableHead>
@@ -551,6 +552,13 @@ export default function Admin() {
                           <span className="font-mono text-yellow-400">
                             {u.credits?.toLocaleString() || 0}
                           </span>
+                        </TableCell>
+                        <TableCell>
+                          {u.agentEmail ? (
+                            <span className="text-purple-400 text-sm">{u.agentEmail}</span>
+                          ) : (
+                            <span className="text-slate-500 text-sm">无</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           {u.status === "active" ? (

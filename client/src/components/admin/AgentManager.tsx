@@ -57,6 +57,9 @@ export function AgentManager() {
   
   // 查看佣金明细
   const [commissionsDialogOpen, setCommissionsDialogOpen] = useState(false);
+  
+  // 查看代理下属用户
+  const [usersDialogOpen, setUsersDialogOpen] = useState(false);
 
   // 获取代理列表
   const { data: agentsData, isLoading: agentsLoading, refetch: refetchAgents } = trpc.admin.agent.list.useQuery({
@@ -518,6 +521,18 @@ export function AgentManager() {
                                 title="查看佣金明细"
                               >
                                 <Eye className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedAgent(agent);
+                                  setUsersDialogOpen(true);
+                                }}
+                                className="text-purple-400 hover:text-purple-300"
+                                title="查看下属用户"
+                              >
+                                <Users className="w-4 h-4" />
                               </Button>
                             </div>
                           </TableCell>
@@ -1038,6 +1053,13 @@ export function AgentManager() {
         </DialogContent>
       </Dialog>
 
+      {/* 查看代理下属用户弹窗 */}
+      <AgentUsersDialog 
+        open={usersDialogOpen} 
+        onOpenChange={setUsersDialogOpen} 
+        agent={selectedAgent} 
+      />
+
       {/* 查看佣金明细弹窗 */}
       <Dialog open={commissionsDialogOpen} onOpenChange={setCommissionsDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-800 max-w-3xl">
@@ -1106,6 +1128,117 @@ export function AgentManager() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// 代理下属用户弹窗组件
+function AgentUsersDialog({ open, onOpenChange, agent }: { open: boolean; onOpenChange: (open: boolean) => void; agent: any }) {
+  const { data: usersData, isLoading } = trpc.adminAgent.getAgentUsers.useQuery(
+    { agentId: agent?.id, page: 1, limit: 50 },
+    { enabled: !!agent?.id && open }
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-slate-900 border-slate-800 max-w-4xl max-h-[80vh] overflow-auto">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2">
+            <Users className="w-5 h-5 text-purple-400" />
+            代理下属用户
+          </DialogTitle>
+          <DialogDescription className="text-slate-400">
+            代理: {agent?.email} | 直推: {usersData?.level1Total || 0}人 | 间推: {usersData?.level2Total || 0}人
+          </DialogDescription>
+        </DialogHeader>
+        
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+          </div>
+        ) : (
+          <Tabs defaultValue="level1" className="w-full">
+            <TabsList className="bg-slate-800">
+              <TabsTrigger value="level1">直推用户 ({usersData?.level1Total || 0})</TabsTrigger>
+              <TabsTrigger value="level2">间推用户 ({usersData?.level2Total || 0})</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="level1" className="mt-4">
+              {usersData?.level1Users?.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">暂无直推用户</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-700">
+                      <TableHead className="text-slate-400">ID</TableHead>
+                      <TableHead className="text-slate-400">邮箱</TableHead>
+                      <TableHead className="text-slate-400">姓名</TableHead>
+                      <TableHead className="text-slate-400">积分</TableHead>
+                      <TableHead className="text-slate-400">累计充值</TableHead>
+                      <TableHead className="text-slate-400">贡献佣金</TableHead>
+                      <TableHead className="text-slate-400">注册时间</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {usersData?.level1Users?.map((user: any) => (
+                      <TableRow key={user.id} className="border-slate-700">
+                        <TableCell className="text-slate-500">{user.id}</TableCell>
+                        <TableCell className="text-white">{user.email}</TableCell>
+                        <TableCell className="text-slate-300">{user.name || '-'}</TableCell>
+                        <TableCell className="text-yellow-400">{user.credits}</TableCell>
+                        <TableCell className="text-green-400">${user.totalRecharge}</TableCell>
+                        <TableCell className="text-cyan-400">${user.totalCommission}</TableCell>
+                        <TableCell className="text-slate-400 text-xs">
+                          {new Date(user.createdAt).toLocaleDateString('zh-CN')}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+            
+            <TabsContent value="level2" className="mt-4">
+              {usersData?.level2Users?.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">暂无间推用户</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-700">
+                      <TableHead className="text-slate-400">ID</TableHead>
+                      <TableHead className="text-slate-400">邮箱</TableHead>
+                      <TableHead className="text-slate-400">姓名</TableHead>
+                      <TableHead className="text-slate-400">积分</TableHead>
+                      <TableHead className="text-slate-400">上级邮箱</TableHead>
+                      <TableHead className="text-slate-400">注册时间</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {usersData?.level2Users?.map((user: any) => (
+                      <TableRow key={user.id} className="border-slate-700">
+                        <TableCell className="text-slate-500">{user.id}</TableCell>
+                        <TableCell className="text-white">{user.email}</TableCell>
+                        <TableCell className="text-slate-300">{user.name || '-'}</TableCell>
+                        <TableCell className="text-yellow-400">{user.credits}</TableCell>
+                        <TableCell className="text-purple-400">{user.inviterEmail}</TableCell>
+                        <TableCell className="text-slate-400 text-xs">
+                          {new Date(user.createdAt).toLocaleDateString('zh-CN')}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
+        
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

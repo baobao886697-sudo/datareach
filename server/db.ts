@@ -114,20 +114,37 @@ export async function clearUserDevice(userId: number): Promise<void> {
   await db.update(users).set({ currentDeviceId: null, currentDeviceLoginAt: null }).where(eq(users.id, userId));
 }
 
-export async function getAllUsers(page: number = 1, limit: number = 20, search?: string): Promise<{ users: User[]; total: number }> {
+export async function getAllUsers(page: number = 1, limit: number = 20, search?: string): Promise<{ users: (User & { agentEmail?: string | null })[]; total: number }> {
   const db = await getDb();
   if (!db) return { users: [], total: 0 };
   const offset = (page - 1) * limit;
-  let query = db.select().from(users);
-  let countQuery = db.select({ count: sql<number>`count(*)` }).from(users);
+  
+  // 使用原生SQL查询以获取代理信息
+  let whereClause = '';
   if (search) {
-    const cond = or(like(users.email, `%${search}%`), like(users.name, `%${search}%`));
-    query = query.where(cond) as typeof query;
-    countQuery = countQuery.where(cond) as typeof countQuery;
+    whereClause = `WHERE u.email LIKE '%${search.replace(/'/g, "''")}%' OR u.name LIKE '%${search.replace(/'/g, "''")}%'`;
   }
-  const result = await query.orderBy(desc(users.createdAt)).limit(limit).offset(offset);
-  const countResult = await countQuery;
-  return { users: result, total: countResult[0]?.count || 0 };
+  
+  const result = await db.execute(sql.raw(`
+    SELECT u.*, 
+           (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
+    FROM users u
+    ${whereClause}
+    ORDER BY u.createdAt DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `));
+  
+  const countResult = await db.execute(sql.raw(`
+    SELECT COUNT(*) as count FROM users u ${whereClause}
+  `));
+  
+  return { 
+    users: (result[0] as any[]).map(u => ({
+      ...u,
+      agentEmail: u.agentEmail || null,
+    })), 
+    total: (countResult[0] as any[])[0]?.count || 0 
+  };
 }
 
 export async function updateUserStatus(userId: number, status: "active" | "disabled"): Promise<void> {
