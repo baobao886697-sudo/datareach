@@ -155,17 +155,17 @@ export default function AnywhoSearch() {
   
   const ageRangeCount = determineAgeRangeCount(filters.minAge, filters.maxAge);
   
-  // 预估消耗计算 - 混合模式（搜索页 + 详情页）
+  // 预估消耗计算 - 从后端配置获取参数
   const estimatedSearches = mode === "nameOnly" 
     ? names.length 
     : names.length * Math.max(locationCombinations.length, 1);
-  const maxPages = 10;  // Anywho 每个年龄段最大页数
-  const avgResultsPerSearch = 15;  // 预估每个搜索平均结果数（筛选后）
+  // 从后端配置获取 maxPages，确保前后端一致
+  const maxPages = anywhoConfig?.maxPages || 4;
   // 搜索页费用 = 任务数 × 每任务页数 × 年龄段数量
   const estimatedSearchPageCost = estimatedSearches * maxPages * ageRangeCount * searchCost;
-  // 详情页费用 = 预估结果数 × 单页费用（混合模式：获取运营商、电话类型、婚姻状况）
-  const estimatedDetailResults = estimatedSearches * avgResultsPerSearch;
-  const estimatedDetailPageCost = estimatedDetailResults * searchCost;  // 详情页与搜索页同价
+  // 详情页费用预估（基于搜索页数量，每页约 10 条结果，过滤后约 50%）
+  const estimatedDetailResults = estimatedSearches * maxPages * ageRangeCount * 5;
+  const estimatedDetailPageCost = estimatedDetailResults * detailCost;
   const estimatedCost = estimatedSearchPageCost + estimatedDetailPageCost;
   
   // 提交搜索
@@ -184,6 +184,14 @@ export default function AnywhoSearch() {
   });
   
   const handleSearch = () => {
+    // 检查 Anywho 功能是否启用
+    if (anywhoConfig && !anywhoConfig.enabled) {
+      toast.error("Anywho 搜索功能暂时不可用", {
+        description: "请联系管理员或稍后再试",
+      });
+      return;
+    }
+    
     if (names.length === 0) {
       toast.error("请输入至少一个姓名");
       return;
@@ -570,7 +578,7 @@ export default function AnywhoSearch() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">详情页费用</span>
-                  <span>~{estimatedDetailResults} 条 × {searchCost} = {estimatedDetailPageCost.toFixed(1)}</span>
+                  <span>~{estimatedDetailResults} 条 × {detailCost} = {estimatedDetailPageCost.toFixed(1)}</span>
                 </div>
                 <div className="border-t border-slate-700 pt-3">
                   <div className="flex justify-between">
