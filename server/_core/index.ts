@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import { startUsdtMonitor } from "../services/usdtMonitor";
 // Apollo Webhook 已移除，使用 Apify 同步获取数据
 import { startOrderExpirationChecker } from "../services/orderExpiration";
+import { startCommissionSettlement } from "../services/commissionSettlement";
 import { getDbSync } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -900,6 +901,10 @@ async function startServer() {
       // 启动订单过期检查服务（每5分钟检查一次）
       startOrderExpirationChecker(5 * 60 * 1000);
       console.log("[Background] Order expiration checker started");
+      
+      // 启动佣金自动结算服务（每小时检查一次）
+      startCommissionSettlement(60 * 60 * 1000);
+      console.log("[Background] Commission settlement service started");
     }
   });
 }
