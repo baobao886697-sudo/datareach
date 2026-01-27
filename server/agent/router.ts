@@ -7,7 +7,7 @@ import { TRPCError } from "@trpc/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
-import { adminProcedure } from "../_core/trpc";
+import { verifyAdminToken, getAdminTokenFromHeader } from "../_core/adminAuth";
 import { getDbSync, getUserByEmail, getUserById } from "../db";
 import { users, agentCommissions, agentWithdrawals } from "../../drizzle/schema";
 import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
@@ -758,6 +758,27 @@ async function getAgentDashboardData(agentId: number) {
 }
 
 // ============ 管理员代理路由 ============
+
+// 管理员权限检查 - 使用独立的管理员token验证
+const adminProcedure = publicProcedure.use(({ ctx, next }) => {
+  const adminToken = getAdminTokenFromHeader(ctx.req.headers as Record<string, string | string[] | undefined>);
+  
+  if (!adminToken) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "需要管理员登录" });
+  }
+  
+  const payload = verifyAdminToken(adminToken);
+  if (!payload) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "管理员Token无效或已过期" });
+  }
+  
+  return next({ 
+    ctx: {
+      ...ctx,
+      adminUser: payload,
+    }
+  });
+});
 
 export const adminAgentRouter = router({
   // 获取所有代理列表
