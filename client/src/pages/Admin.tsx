@@ -18,7 +18,7 @@ import {
   Database, AlertTriangle, CheckCircle, XCircle, Clock,
   Eye, Edit, Ban, UserCheck, Wallet, Copy, ExternalLink,
   Save, Trash2, Activity, Server, Zap, Megaphone, Mail,
-  BarChart3, MessageSquare, UserSearch
+  BarChart3, MessageSquare, UserSearch, Crown
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserDetailDialog } from "@/components/admin/UserDetailDialog";
@@ -27,6 +27,7 @@ import { SystemMonitor } from "@/components/admin/SystemMonitor";
 import { OrderDetailDialog } from "@/components/admin/OrderDetailDialog";
 import { BulkMessageDialog } from "@/components/admin/BulkMessageDialog";
 import { FeedbackManager } from "@/components/admin/FeedbackManager";
+import { AgentManager } from "@/components/admin/AgentManager";
 
 export default function Admin() {
   const [, setLocation] = useLocation();
@@ -275,6 +276,7 @@ export default function Admin() {
             { id: "logs", label: "系统日志", icon: FileText },
             { id: "tps", label: "TPS 配置", icon: UserSearch },
             { id: "anywho", label: "Anywho 配置", icon: Search },
+            { id: "agents", label: "代理管理", icon: Crown },
             { id: "settings", label: "系统配置", icon: Settings },
           ].map((item) => (
             <button
@@ -1484,6 +1486,11 @@ export default function Admin() {
               </Card>
             </div>
           </div>
+        )}
+
+        {/* ============ 代理管理 ============ */}
+        {activeTab === "agents" && (
+          <AgentManager />
         )}
 
         {/* ============ 系统配置 ============ */}

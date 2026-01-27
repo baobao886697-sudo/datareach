@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Search, History, CreditCard, Shield, Wallet, Target, User, Settings, Coins, MessageCircle, Linkedin, Rocket, UserCircle, Users, UserSearch, SearchCheck, Star, Sparkles } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Search, History, CreditCard, Shield, Wallet, Target, User, Settings, Coins, MessageCircle, Linkedin, Rocket, UserCircle, Users, UserSearch, SearchCheck, Star, Sparkles, Crown } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -38,6 +38,7 @@ const menuItems: Array<{ icon: React.ComponentType<{ className?: string }>; labe
   { icon: Rocket, label: "正在开发", path: "/roadmap" },
   { icon: History, label: "历史记录", path: "/history" },
   { icon: Wallet, label: "积分充值", path: "/recharge" },
+  { icon: Crown, label: "代理中心", path: "/agent", isNew: true },
   { icon: MessageCircle, label: "联系我们", path: "/feedback" },
   { icon: Shield, label: "管理后台", path: "/admin", adminOnly: true },
 ];

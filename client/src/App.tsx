@@ -33,6 +33,7 @@ import Anywho from "./pages/Anywho";
 import AnywhoSearch from "./pages/AnywhoSearch";
 import AnywhoTask from "./pages/AnywhoTask";
 import AnywhoHistory from "./pages/AnywhoHistory";
+import AgentCenter from "./pages/AgentCenter";
 
 function Router() {
   return (
@@ -60,6 +61,7 @@ function Router() {
       <Route path="/anywho" component={AnywhoSearch} />
       <Route path="/anywho/task/:taskId" component={AnywhoTask} />
       <Route path="/anywho/history" component={AnywhoHistory} />
+      <Route path="/agent" component={AgentCenter} />
       <Route path="/anywho/intro" component={Anywho} />
       <Route path="/about" component={About} />
       <Route path="/privacy" component={Privacy} />

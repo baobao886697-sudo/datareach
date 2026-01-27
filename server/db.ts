@@ -51,13 +51,20 @@ export async function getDb() {
 
 // ============ 用户相关 ============
 
-export async function createUser(email: string, passwordHash: string, name?: string): Promise<User | undefined> {
+export async function createUser(email: string, passwordHash: string, name?: string, inviterId?: number): Promise<User | undefined> {
   const db = await getDb();
   if (!db) return undefined;
   const openId = crypto.randomBytes(16).toString('hex');
   // 注册赠送100积分
   const REGISTER_BONUS_CREDITS = 100;
-  await db.insert(users).values({ openId, email, passwordHash, credits: REGISTER_BONUS_CREDITS, name: name || null });
+  await db.insert(users).values({ 
+    openId, 
+    email, 
+    passwordHash, 
+    credits: REGISTER_BONUS_CREDITS, 
+    name: name || null,
+    inviterId: inviterId || null,
+  });
   return getUserByEmail(email);
 }
 
@@ -281,6 +288,17 @@ export async function confirmRechargeOrder(orderId: string, txId: string, receiv
   if (!order || order.status !== "pending") return false;
   await db.update(rechargeOrders).set({ status: "paid", txId, receivedAmount, paidAt: new Date() }).where(eq(rechargeOrders.orderId, orderId));
   await addCredits(order.userId, order.credits, "recharge", `充值订单 ${orderId}`, orderId);
+  
+  // 计算并创建代理佣金
+  try {
+    const { calculateAndCreateCommission } = await import("./agentDb");
+    const orderAmount = parseFloat(order.amount);
+    await calculateAndCreateCommission(orderId, order.userId, orderAmount);
+  } catch (error) {
+    console.error("[代理佣金] 计算失败:", error);
+    // 佣金计算失败不影响订单确认
+  }
+  
   return true;
 }
 

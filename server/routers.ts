@@ -19,6 +19,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { tpsRouter } from "./tps/router";
 import { anywhoRouter } from "./anywho/router";
+import { agentRouter, adminAgentRouter } from "./agent/router";
 import { sendPasswordResetEmail } from "./services/email";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
@@ -139,6 +140,7 @@ export const appRouter = router({
   system: systemRouter,
   tps: tpsRouter,  // TruePeopleSearch 路由
   anywho: anywhoRouter,  // Anywho 路由
+  agent: agentRouter,  // 代理系统路由
 
   // ============ 认证路由 ============
   auth: router({
@@ -157,6 +159,7 @@ export const appRouter = router({
           email: z.string().email("请输入有效的邮箱地址"),
           password: z.string().min(8, "密码至少8位"),
           name: z.string().optional(),
+          inviteCode: z.string().optional(), // 邀请码
         })
       )
       .mutation(async ({ input }) => {
@@ -165,8 +168,18 @@ export const appRouter = router({
           throw new TRPCError({ code: "CONFLICT", message: "该邮箱已被注册" });
         }
 
+        // 验证邀请码
+        let inviterId: number | undefined;
+        if (input.inviteCode) {
+          const { findUserByInviteCode } = await import("./agentDb");
+          const inviter = await findUserByInviteCode(input.inviteCode);
+          if (inviter && inviter.isAgent) {
+            inviterId = inviter.id;
+          }
+        }
+
         const passwordHash = await bcrypt.hash(input.password, 12);
-        const user = await createUser(input.email, passwordHash, input.name);
+        const user = await createUser(input.email, passwordHash, input.name, inviterId);
 
         if (!user) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "注册失败" });
@@ -1774,6 +1787,9 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return getCreditAnomalies(input?.threshold || 1000);
       }),
+
+    // ============ 代理管理 ============
+    agent: adminAgentRouter,
   }),
 
   // ============ 用户端公告和消息 API ============

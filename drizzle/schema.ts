@@ -20,6 +20,18 @@ export const users = mysqlTable("users", {
   // 单设备锁定
   currentDeviceId: varchar("currentDeviceId", { length: 100 }),
   currentDeviceLoginAt: timestamp("currentDeviceLoginAt"),
+  // 代理系统字段
+  inviterId: int("inviterId"),                          // 邀请人ID
+  inviteCode: varchar("inviteCode", { length: 20 }).unique(), // 邀请码
+  isAgent: boolean("isAgent").default(false),           // 是否是代理
+  agentLevel: mysqlEnum("agentLevel", ["normal", "silver", "gold", "founder"]).default("normal"), // 代理等级
+  agentBalance: decimal("agentBalance", { precision: 10, scale: 2 }).default("0"), // 代理可提现余额(USDT)
+  agentFrozenBalance: decimal("agentFrozenBalance", { precision: 10, scale: 2 }).default("0"), // 冻结中佣金(USDT)
+  agentTotalEarned: decimal("agentTotalEarned", { precision: 12, scale: 2 }).default("0"), // 累计收益(USDT)
+  agentAppliedAt: timestamp("agentAppliedAt"),          // 申请成为代理时间
+  agentApprovedAt: timestamp("agentApprovedAt"),        // 审核通过时间
+  agentWalletAddress: varchar("agentWalletAddress", { length: 100 }), // 代理收款地址
+  // 时间戳
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -526,3 +538,75 @@ export const anywhoSearchResults = mysqlTable("anywho_search_results", {
 
 export type AnywhoSearchResult = typeof anywhoSearchResults.$inferSelect;
 export type InsertAnywhoSearchResult = typeof anywhoSearchResults.$inferInsert;
+
+
+// ==================== 代理系统模块 ====================
+
+// 代理佣金记录表
+export const agentCommissions = mysqlTable("agent_commissions", {
+  id: int("id").autoincrement().primaryKey(),
+  agentId: int("agentId").notNull(),                    // 代理ID
+  fromUserId: int("fromUserId").notNull(),              // 来源用户ID
+  orderId: varchar("orderId", { length: 32 }).notNull(), // 关联充值订单
+  orderAmount: decimal("orderAmount", { precision: 10, scale: 2 }).notNull(), // 订单金额(USDT)
+  commissionLevel: mysqlEnum("commissionLevel", ["level1", "level2"]).notNull(), // 一级/二级
+  commissionRate: decimal("commissionRate", { precision: 5, scale: 2 }).notNull(), // 佣金比例
+  commissionAmount: decimal("commissionAmount", { precision: 10, scale: 2 }).notNull(), // 佣金金额(USDT)
+  bonusType: varchar("bonusType", { length: 20 }),      // 额外奖励类型: first_charge, activity
+  bonusAmount: decimal("bonusAmount", { precision: 10, scale: 2 }).default("0"), // 额外奖励金额
+  status: mysqlEnum("status", ["pending", "settled", "withdrawn"]).default("pending").notNull(),
+  settledAt: timestamp("settledAt"),                    // 结算时间
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentCommission = typeof agentCommissions.$inferSelect;
+export type InsertAgentCommission = typeof agentCommissions.$inferInsert;
+
+// 代理提现申请表
+export const agentWithdrawals = mysqlTable("agent_withdrawals", {
+  id: int("id").autoincrement().primaryKey(),
+  withdrawalId: varchar("withdrawalId", { length: 32 }).notNull().unique(),
+  agentId: int("agentId").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(), // 提现金额(USDT)
+  walletAddress: varchar("walletAddress", { length: 100 }).notNull(), // 提现地址
+  network: varchar("network", { length: 20 }).default("TRC20").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "paid"]).default("pending").notNull(),
+  adminNote: text("adminNote"),
+  txId: varchar("txId", { length: 100 }),               // 打款交易ID
+  processedBy: varchar("processedBy", { length: 50 }),
+  processedAt: timestamp("processedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentWithdrawal = typeof agentWithdrawals.$inferSelect;
+export type InsertAgentWithdrawal = typeof agentWithdrawals.$inferInsert;
+
+// 代理统计表 (按月汇总)
+export const agentStats = mysqlTable("agent_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  agentId: int("agentId").notNull(),
+  month: varchar("month", { length: 7 }).notNull(),     // YYYY-MM
+  totalUsers: int("totalUsers").default(0).notNull(),   // 本月新增用户
+  totalRecharge: decimal("totalRecharge", { precision: 12, scale: 2 }).default("0").notNull(), // 本月团队充值
+  level1Commission: decimal("level1Commission", { precision: 10, scale: 2 }).default("0").notNull(), // 一级佣金
+  level2Commission: decimal("level2Commission", { precision: 10, scale: 2 }).default("0").notNull(), // 二级佣金
+  bonusCommission: decimal("bonusCommission", { precision: 10, scale: 2 }).default("0").notNull(),  // 额外奖励
+  totalCommission: decimal("totalCommission", { precision: 10, scale: 2 }).default("0").notNull(),  // 总佣金
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AgentStat = typeof agentStats.$inferSelect;
+export type InsertAgentStat = typeof agentStats.$inferInsert;
+
+// 代理配置表
+export const agentSettings = mysqlTable("agent_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  settingKey: varchar("settingKey", { length: 50 }).notNull().unique(),
+  settingValue: text("settingValue").notNull(),
+  description: text("description"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AgentSetting = typeof agentSettings.$inferSelect;
+export type InsertAgentSetting = typeof agentSettings.$inferInsert;

@@ -7,7 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { 
   Loader2, Mail, Lock, User, Eye, EyeOff, ArrowRight, Gift, CheckCircle,
-  Shield, Zap, Star, Network, Database, Globe, Layers, Award, TrendingUp
+  Shield, Zap, Star, Network, Database, Globe, Layers, Award, TrendingUp, UserPlus
 } from "lucide-react";
 import { ParticleNetwork } from "@/components/ParticleNetwork";
 
@@ -33,6 +33,16 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+
+  // 从 URL 获取邀请码
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('ref') || params.get('invite');
+    if (code) {
+      setInviteCode(code);
+    }
+  }, []);
 
   // 保持原有的注册逻辑不变
   const registerMutation = trpc.auth.register.useMutation({
@@ -58,7 +68,7 @@ export default function Register() {
       return;
     }
 
-    registerMutation.mutate({ email, password, name: name || undefined });
+    registerMutation.mutate({ email, password, name: name || undefined, inviteCode: inviteCode || undefined });
   };
 
   // 密码强度检测（保持原有逻辑）
@@ -283,6 +293,28 @@ export default function Register() {
                       {passwordStrength.text}
                     </span>
                   </div>
+                )}
+              </div>
+
+              {/* 邀请码输入框 */}
+              <div className="space-y-2">
+                <Label htmlFor="inviteCode" className="text-slate-300 font-medium">邀请码（可选）</Label>
+                <div className="relative">
+                  <UserPlus className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
+                  <Input
+                    id="inviteCode"
+                    type="text"
+                    placeholder="输入邀请码享受专属服务"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                    className="pl-12 h-14 bg-slate-800/50 border-slate-700 focus:border-purple-500 focus:ring-purple-500/20 text-white placeholder:text-slate-500 rounded-xl text-base uppercase"
+                  />
+                  {inviteCode && (
+                    <CheckCircle className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-green-400" />
+                  )}
+                </div>
+                {inviteCode && (
+                  <p className="text-xs text-green-400 mt-1">✨ 您将绑定专属顾问，享受优质服务</p>
                 )}
               </div>
 
