@@ -1191,9 +1191,9 @@ export const adminAgentRouter = router({
       
       // 获取一级用户（直推）
       const level1Result = await db.execute(sql`
-        SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt,
-               COALESCE((SELECT SUM(orderAmount) FROM agent_commissions WHERE fromUserId = u.id AND agentId = ${input.agentId}), 0) as totalRecharge,
-               COALESCE((SELECT SUM(commissionAmount + COALESCE(bonusAmount, 0)) FROM agent_commissions WHERE fromUserId = u.id AND agentId = ${input.agentId}), 0) as totalCommission
+        SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt as createdAt,
+               COALESCE((SELECT SUM(order_amount) FROM agent_commissions WHERE from_user_id = u.id AND agent_id = ${input.agentId}), 0) as totalRecharge,
+               COALESCE((SELECT SUM(commission_amount + COALESCE(bonus_amount, 0)) FROM agent_commissions WHERE from_user_id = u.id AND agent_id = ${input.agentId}), 0) as totalCommission
         FROM users u
         WHERE u.inviterId = ${input.agentId}
         ORDER BY u.createdAt DESC
@@ -1212,7 +1212,7 @@ export const adminAgentRouter = router({
       
       if (level1Ids.length > 0) {
         const level2Result = await db.execute(sql`
-          SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt, u.inviterId,
+          SELECT u.id, u.email, u.name, u.credits, u.status, u.createdAt as createdAt, u.inviterId,
                  (SELECT email FROM users WHERE id = u.inviterId) as inviterEmail
           FROM users u
           WHERE u.inviterId IN (${sql.raw(level1Ids.join(','))})
