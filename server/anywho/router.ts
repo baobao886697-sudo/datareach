@@ -39,7 +39,8 @@ import {
   saveAnywhoDetailCache,
   deductCredits,
   getUserCredits,
-
+  freezeCreditsAnywho,
+  settleCreditsAnywho,
   logApi,
 } from "./db";
 import { getDb, logUserActivity } from "../db";
@@ -155,9 +156,9 @@ export const anywhoRouter = router({
         });
       }
       
-      // 检查用户积分
-      const userCredits = await getUserCredits(userId);
+      // 获取积分配置
       const searchCost = parseFloat(config.searchCost);
+      const detailCost = parseFloat(config.detailCost || config.searchCost);
       const maxPages = config.maxPages || 4;
       
       // 计算子任务
@@ -173,12 +174,28 @@ export const anywhoRouter = router({
         }
       }
       
-      // 预估最小消耗（只需搜索页费用）
-      const minEstimatedCost = subTasks.length * searchCost;
-      if (userCredits < minEstimatedCost) {
+      // 根据用户年龄过滤设置确定需要搜索的年龄段数量
+      const minAge = input.filters?.minAge ?? 50;
+      const maxAge = input.filters?.maxAge ?? 79;
+      const ageRanges = determineAgeRanges(minAge, maxAge);
+      const ageRangeCount = ageRanges.length;
+      
+      // ==================== 预扣费机制：计算最大预估费用 ====================
+      // 搜索页费用：子任务数 × 每任务最大页数 × 年龄段数量 × 单价
+      const maxSearchPages = subTasks.length * maxPages * ageRangeCount;
+      const maxSearchCost = maxSearchPages * searchCost;
+      // 详情页费用：预估每个搜索结果都需要获取详情（保守估计）
+      const estimatedResults = subTasks.length * 10 * ageRangeCount; // 每个子任务预估10条结果
+      const maxDetailCost = estimatedResults * detailCost;
+      // 总预估费用
+      const maxEstimatedCost = maxSearchCost + maxDetailCost;
+      
+      // 检查用户积分是否足够预扣
+      const userCredits = await getUserCredits(userId);
+      if (userCredits < maxEstimatedCost) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `积分不足，需要至少 ${minEstimatedCost.toFixed(1)} 积分`,
+          message: `积分不足，预估最大消耗 ${maxEstimatedCost.toFixed(1)} 积分，当前余额 ${userCredits} 积分`,
         });
       }
       
@@ -192,26 +209,44 @@ export const anywhoRouter = router({
         maxPages,
       });
       
+      // ==================== 预扣费机制：执行预扣 ====================
+      const freezeResult = await freezeCreditsAnywho(userId, maxEstimatedCost, task.taskId);
+      if (!freezeResult.success) {
+        // 预扣失败，更新任务状态并抛出错误
+        await updateAnywhoSearchTaskProgress(task.taskId, {
+          status: "insufficient_credits",
+          logs: [{ timestamp: new Date().toISOString(), message: `积分不足: ${freezeResult.message}` }],
+        });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: freezeResult.message,
+        });
+      }
+      
       // 更新任务状态
       await updateAnywhoSearchTaskProgress(task.taskId, {
         status: "running",
         totalSubTasks: subTasks.length,
-        logs: [{ timestamp: new Date().toISOString(), message: "任务开始执行" }],
+        logs: [
+          { timestamp: new Date().toISOString(), message: "任务开始执行" },
+          { timestamp: new Date().toISOString(), message: `✅ 已预扣 ${freezeResult.frozenAmount.toFixed(1)} 积分，余额 ${freezeResult.balanceAfter.toFixed(1)} 积分` },
+        ],
       });
       
       // 记录用户活动
       await logUserActivity({
         userId,
         action: "anywho_search",
-        details: `开始 Anywho 搜索任务: ${task.taskId}`
+        details: `开始 Anywho 搜索任务: ${task.taskId}，预扣 ${freezeResult.frozenAmount.toFixed(1)} 积分`
       });
       
-      // 异步执行搜索
-      executeAnywhoSearch(task.taskId, task.id, userId, subTasks, input.filters || {}, config);
+      // 异步执行搜索（传递预扣金额）
+      executeAnywhoSearch(task.taskId, task.id, userId, subTasks, input.filters || {}, config, freezeResult.frozenAmount);
       
       return {
         taskId: task.taskId,
         message: "搜索任务已提交",
+        frozenCredits: freezeResult.frozenAmount,
       };
     }),
 
@@ -453,6 +488,8 @@ export const anywhoRouter = router({
 /**
  * 异步执行搜索任务 - 新版本
  * 直接从搜索结果页提取数据，不访问详情页
+ * 
+ * @param frozenAmount 预扣积分金额，用于任务完成后结算
  */
 async function executeAnywhoSearch(
   taskId: string,
@@ -460,10 +497,12 @@ async function executeAnywhoSearch(
   userId: number,
   subTasks: Array<{ name: string; location?: string }>,
   filters: AnywhoFilters,
-  config: any
+  config: any,
+  frozenAmount: number = 0
 ) {
   const token = config.scrapeDoToken;
   const searchCost = parseFloat(config.searchCost);
+  const detailCost = parseFloat(config.detailCost || config.searchCost);
   const maxPages = config.maxPages || 4;
   
   let totalSearchPages = 0;
@@ -879,19 +918,18 @@ async function executeAnywhoSearch(
       console.log(`[saveResults] 没有结果需要保存, filteredResults.length=${filteredResults.length}`);
     }
     
-    // 计算消耗积分（搜索页 + 详情页）
-    const detailCost = parseFloat(config.detailCost || config.searchCost);  // 详情页费用
+    // ==================== 预扣费机制：计算实际消耗并结算 ====================
     const creditsUsed = (totalSearchPages * searchCost) + (totalDetailPages * detailCost);
     
-    // 扣除积分并记录日志
-    await deductCredits(userId, creditsUsed, taskId, `Anywho 搜索: ${totalResults} 条结果`);
+    // 结算退还多扣的积分
+    const settlement = await settleCreditsAnywho(userId, frozenAmount, creditsUsed, taskId);
     
     // 完成任务
     await completeAnywhoSearchTask(taskId, {
       totalResults,
       creditsUsed: creditsUsed.toFixed(2),
       searchPageRequests: totalSearchPages,
-      detailPageRequests: totalDetailPages,  // 混合模式：记录详情页请求数
+      detailPageRequests: totalDetailPages,
       cacheHits: 0,
     });
     
@@ -905,15 +943,20 @@ async function executeAnywhoSearch(
     await addLog(`   • 有效结果: ${totalResults} 条联系人`);
     await addLog(`   • 已过滤: ${totalFilteredOut} 条`);
     
-    // 费用明细
+    // 费用明细（预扣费机制）
     const searchCredits = totalSearchPages * searchCost;
     const detailCredits = totalDetailPages * detailCost;
     
-    await addLog(`💰 费用明细:`);
+    await addLog(`💰 费用结算:`);
+    await addLog(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
     await addLog(`   • 搜索费用: ${searchCredits.toFixed(1)} 积分`);
     await addLog(`   • 详情费用: ${detailCredits.toFixed(1)} 积分`);
     await addLog(`   ──────────────────────────────`);
     await addLog(`   • 实际消耗: ${creditsUsed.toFixed(1)} 积分`);
+    if (settlement.refundAmount > 0) {
+      await addLog(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
+    }
+    await addLog(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
     if (totalResults > 0) {
       const costPerResult = creditsUsed / totalResults;
       await addLog(`   • 每条成本: ${costPerResult.toFixed(2)} 积分`);
@@ -922,7 +965,20 @@ async function executeAnywhoSearch(
     
   } catch (error: any) {
     console.error(`[Anywho] 任务 ${taskId} 执行失败:`, error);
+    
+    // ==================== 预扣费机制：失败时结算退还 ====================
+    // 计算已消耗的积分（搜索页 + 详情页）
+    const actualCost = (totalSearchPages * searchCost) + (totalDetailPages * detailCost);
+    const settlement = await settleCreditsAnywho(userId, frozenAmount, actualCost, taskId);
+    
     await failAnywhoSearchTask(taskId, error.message || "未知错误");
     await addLog(`❗ 搜索失败: ${error.message}`);
+    await addLog(`💰 失败结算:`);
+    await addLog(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
+    await addLog(`   • 已消耗: ${actualCost.toFixed(1)} 积分`);
+    if (settlement.refundAmount > 0) {
+      await addLog(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
+    }
+    await addLog(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
   }
 }

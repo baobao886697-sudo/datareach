@@ -514,3 +514,152 @@ export async function logApi(data: {
     creditsUsed: data.creditsUsed ?? 0,
   });
 }
+
+
+// ==================== 预扣费机制 ====================
+
+/**
+ * 预扣积分（冻结）
+ * 在任务开始前预扣最大预估费用，确保任务能够完整执行
+ * 
+ * @param userId 用户ID
+ * @param amount 预扣金额
+ * @param taskId 关联的任务ID
+ * @returns 预扣结果
+ */
+export async function freezeCreditsAnywho(
+  userId: number,
+  amount: number,
+  taskId: string
+): Promise<{
+  success: boolean;
+  frozenAmount: number;
+  balanceAfter: number;
+  message: string;
+}> {
+  const database = await db();
+  const roundedAmount = Math.ceil(amount * 10) / 10; // 保留一位小数
+  
+  // 获取当前余额
+  const user = await database.select({ credits: users.credits })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  
+  const currentCredits = user[0]?.credits || 0;
+  
+  // 检查余额是否足够
+  if (currentCredits < roundedAmount) {
+    return {
+      success: false,
+      frozenAmount: 0,
+      balanceAfter: currentCredits,
+      message: `积分不足，需要 ${roundedAmount} 积分，当前余额 ${currentCredits} 积分`,
+    };
+  }
+  
+  const balanceAfter = currentCredits - roundedAmount;
+  
+  // 扣除积分（预扣）
+  await database.update(users)
+    .set({
+      credits: sql`credits - ${roundedAmount}`,
+    })
+    .where(eq(users.id, userId));
+  
+  // 记录预扣日志
+  await logCreditChange({
+    userId,
+    amount: -roundedAmount,
+    balanceAfter,
+    type: 'search',
+    description: `Anywho搜索预扣 [${taskId}] - 预估最大消耗`,
+    relatedTaskId: taskId,
+  });
+  
+  console.log(`[Anywho] 预扣积分: userId=${userId}, amount=${roundedAmount}, balanceAfter=${balanceAfter}, taskId=${taskId}`);
+  
+  return {
+    success: true,
+    frozenAmount: roundedAmount,
+    balanceAfter,
+    message: `已预扣 ${roundedAmount} 积分`,
+  };
+}
+
+/**
+ * 结算积分（退还多扣部分）
+ * 任务完成后，根据实际消耗结算，退还多扣的积分
+ * 
+ * @param userId 用户ID
+ * @param frozenAmount 预扣金额
+ * @param actualCost 实际消耗
+ * @param taskId 关联的任务ID
+ * @returns 结算结果
+ */
+export async function settleCreditsAnywho(
+  userId: number,
+  frozenAmount: number,
+  actualCost: number,
+  taskId: string
+): Promise<{
+  success: boolean;
+  refundAmount: number;
+  actualCost: number;
+  newBalance: number;
+  message: string;
+}> {
+  const database = await db();
+  const roundedActualCost = Math.ceil(actualCost * 10) / 10; // 保留一位小数
+  const refundAmount = Math.max(0, frozenAmount - roundedActualCost);
+  
+  // 获取当前余额
+  const user = await database.select({ credits: users.credits })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  
+  const currentCredits = user[0]?.credits || 0;
+  
+  if (refundAmount > 0) {
+    // 退还多扣的积分
+    const newBalance = currentCredits + refundAmount;
+    
+    await database.update(users)
+      .set({
+        credits: sql`credits + ${refundAmount}`,
+      })
+      .where(eq(users.id, userId));
+    
+    // 记录退还日志
+    await logCreditChange({
+      userId,
+      amount: refundAmount, // 正数表示退还
+      balanceAfter: newBalance,
+      type: 'refund',
+      description: `Anywho搜索结算退还 [${taskId}] - 预扣 ${frozenAmount} 实际 ${roundedActualCost}`,
+      relatedTaskId: taskId,
+    });
+    
+    console.log(`[Anywho] 结算退还: userId=${userId}, frozenAmount=${frozenAmount}, actualCost=${roundedActualCost}, refund=${refundAmount}, newBalance=${newBalance}, taskId=${taskId}`);
+    
+    return {
+      success: true,
+      refundAmount,
+      actualCost: roundedActualCost,
+      newBalance,
+      message: `已退还 ${refundAmount} 积分`,
+    };
+  } else {
+    // 无需退还（实际消耗等于或超过预扣）
+    console.log(`[Anywho] 结算完成（无需退还）: userId=${userId}, frozenAmount=${frozenAmount}, actualCost=${roundedActualCost}, taskId=${taskId}`);
+    
+    return {
+      success: true,
+      refundAmount: 0,
+      actualCost: roundedActualCost,
+      newBalance: currentCredits,
+      message: `实际消耗 ${roundedActualCost} 积分，无需退还`,
+    };
+  }
+}
