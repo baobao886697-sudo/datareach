@@ -623,8 +623,12 @@ export function parseDetailPage(html: string, detailLink: string): SpfDetailResu
       result.age = age;
       result.birthYear = birthYear;
       
-      // 婚姻状态
-      const marriedMatch = currentBg.html()?.match(/Married to\s*<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/i);
+      // 婚姻状态 - 增强解析逻辑
+      const currentBgHtml = currentBg.html() || '';
+      const currentBgText = currentBg.text().toLowerCase();
+      
+      // 模式 1: "Married to <a>..."
+      const marriedMatch = currentBgHtml.match(/Married to\s*<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/i);
       if (marriedMatch) {
         result.maritalStatus = 'Married';
         result.spouseLink = marriedMatch[1];
@@ -632,8 +636,27 @@ export function parseDetailPage(html: string, detailLink: string): SpfDetailResu
         if (result.spouseLink && !result.spouseLink.startsWith('http')) {
           result.spouseLink = `https://www.searchpeoplefree.com${result.spouseLink}`;
         }
-      } else if (currentBg.text().toLowerCase().includes('single')) {
+      } 
+      // 模式 2: 纯文本 "Married" 或 "married"
+      else if (currentBgText.includes('married') && !currentBgText.includes('unmarried')) {
+        result.maritalStatus = 'Married';
+        // 尝试从文本中提取配偶名字
+        const spouseTextMatch = currentBgHtml.match(/Married(?:\s+to)?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+        if (spouseTextMatch && spouseTextMatch[1]) {
+          result.spouseName = spouseTextMatch[1].trim();
+        }
+      }
+      // 模式 3: "Single" 或 "single"
+      else if (currentBgText.includes('single')) {
         result.maritalStatus = 'Single';
+      }
+      // 模式 4: "Divorced" 或 "divorced"
+      else if (currentBgText.includes('divorced')) {
+        result.maritalStatus = 'Divorced';
+      }
+      // 模式 5: "Widowed" 或 "widowed"
+      else if (currentBgText.includes('widowed')) {
+        result.maritalStatus = 'Widowed';
       }
       
       // 主邮箱
@@ -1007,6 +1030,12 @@ export async function searchAndGetDetails(
                 phone: detailResult.phone || searchResult.phone,
                 phoneType: detailResult.phoneType || searchResult.phoneType,
               };
+              
+              // 详情页获取后再次应用年龄过滤（因为详情页可能更新了年龄）
+              if (!applyFilters(mergedResult, filters)) {
+                console.log(`[SPF] 详情页后过滤: ${mergedResult.name}, 年龄 ${mergedResult.age} 不符合条件`);
+                continue;
+              }
               
               results.push(mergedResult);
               console.log(`[SPF] 详情页数据合并成功: ${mergedResult.name}, 婚姻: ${mergedResult.maritalStatus}, 邮箱: ${mergedResult.email}`);
