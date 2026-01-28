@@ -1393,9 +1393,29 @@ export async function getApiStatistics(days: number = 30): Promise<{
     totalCredits: number;
     avgResponseTime: number;
   };
+  // 新增：前端兼容字段
+  totalCalls: number;
+  successRate: number;
+  avgResponseTime: number;
+  errorCount: number;
+  byEndpoint: Array<{
+    endpoint: string;
+    calls: number;
+    success: number;
+    errors: number;
+    avgTime: number;
+  }>;
 }> {
   const db = await getDb();
-  if (!db) return { daily: [], summary: { totalCalls: 0, totalSuccess: 0, totalErrors: 0, totalCredits: 0, avgResponseTime: 0 } };
+  if (!db) return { 
+    daily: [], 
+    summary: { totalCalls: 0, totalSuccess: 0, totalErrors: 0, totalCredits: 0, avgResponseTime: 0 },
+    totalCalls: 0,
+    successRate: 0,
+    avgResponseTime: 0,
+    errorCount: 0,
+    byEndpoint: []
+  };
   
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -1416,7 +1436,41 @@ export async function getApiStatistics(days: number = 30): Promise<{
     summary.avgResponseTime = Math.round(totalResponseTime / summary.totalCalls);
   }
   
-  return { daily, summary };
+  // 按API名称分组统计
+  const endpointMap = new Map<string, { calls: number; success: number; errors: number; totalTime: number }>();
+  daily.forEach(stat => {
+    const apiName = stat.apiName || 'unknown';
+    const existing = endpointMap.get(apiName) || { calls: 0, success: 0, errors: 0, totalTime: 0 };
+    existing.calls += stat.callCount || 0;
+    existing.success += stat.successCount || 0;
+    existing.errors += stat.errorCount || 0;
+    existing.totalTime += (stat.avgResponseTime || 0) * (stat.callCount || 0);
+    endpointMap.set(apiName, existing);
+  });
+  
+  const byEndpoint = Array.from(endpointMap.entries()).map(([endpoint, data]) => ({
+    endpoint,
+    calls: data.calls,
+    success: data.success,
+    errors: data.errors,
+    avgTime: data.calls > 0 ? Math.round(data.totalTime / data.calls) : 0
+  })).sort((a, b) => b.calls - a.calls);
+  
+  // 计算成功率
+  const successRate = summary.totalCalls > 0 
+    ? Math.round((summary.totalSuccess / summary.totalCalls) * 100) 
+    : 0;
+  
+  return { 
+    daily, 
+    summary,
+    // 前端兼容字段
+    totalCalls: summary.totalCalls,
+    successRate,
+    avgResponseTime: summary.avgResponseTime,
+    errorCount: summary.totalErrors,
+    byEndpoint
+  };
 }
 
 // ============ 订单退款 ============
