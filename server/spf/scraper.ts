@@ -20,18 +20,16 @@ const SCRAPE_MAX_RETRIES = 3;    // 最多重试 3 次
 /**
  * 使用 Scrape.do API 获取页面（带超时和重试）
  * 
- * 关键参数说明:
- * - render=true: 启用无头浏览器渲染 JavaScript
+ * 关键参数说明 (根据 Scrape.do 技术支持建议):
  * - super=true: 使用住宅代理，提高成功率
  * - geoCode=us: 使用美国 IP
- * - blockResources=false: 【关键】必须加载 CSS/图片等资源，否则 SPF 返回 502
- * - customWait=5000: 页面加载后等待 5 秒
+ * 
+ * 注意: SearchPeopleFree 不支持 render=true，Scrape.do 会直接返回完整数据
  */
 async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   const encodedUrl = encodeURIComponent(url);
-  // 【关键修复】blockResources=false 是 SearchPeopleFree 必需的参数
-  // 没有这个参数，API 会返回 502 错误
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&render=true&super=true&geoCode=us&blockResources=false&customWait=5000&timeout=${SCRAPE_TIMEOUT_MS}`;
+  // 根据 Scrape.do 技术支持建议：不使用 render=true，数据会在原始响应中返回
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us`;
   
   let lastError: Error | null = null;
   
