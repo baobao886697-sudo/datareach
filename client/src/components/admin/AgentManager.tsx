@@ -232,7 +232,13 @@ export function AgentManager() {
 
   // 处理提现审核
   const handleProcessWithdrawal = (action: 'approve' | 'reject' | 'paid') => {
-    if (!selectedWithdrawal) return;
+    console.log('handleProcessWithdrawal called with action:', action);
+    console.log('selectedWithdrawal:', selectedWithdrawal);
+    console.log('withdrawalId:', selectedWithdrawal?.withdrawal?.withdrawalId || selectedWithdrawal?.withdrawalId);
+    if (!selectedWithdrawal) {
+      console.log('selectedWithdrawal is null, returning');
+      return;
+    }
     processWithdrawalMutation.mutate({
       withdrawalId: selectedWithdrawal.withdrawal?.withdrawalId || selectedWithdrawal.withdrawalId,
       action,
