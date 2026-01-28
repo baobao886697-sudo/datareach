@@ -276,6 +276,7 @@ export default function Admin() {
             { id: "logs", label: "系统日志", icon: FileText },
             { id: "tps", label: "TPS 配置", icon: UserSearch },
             { id: "anywho", label: "Anywho 配置", icon: Search },
+            { id: "spf", label: "SPF 配置", icon: UserSearch },
             { id: "agents", label: "代理管理", icon: Crown },
             { id: "settings", label: "系统配置", icon: Settings },
           ].map((item) => (
@@ -1487,6 +1488,257 @@ export default function Admin() {
                         <li>Anywho 仅覆盖美国境内人员</li>
                         <li>数据来源：AT&T 官方目录</li>
                         <li>建议启用“排除已故人员”过滤</li>
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ============ SPF 配置 ============ */}
+        {activeTab === "spf" && (
+          <div className="relative space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <UserSearch className="w-5 h-5 text-yellow-400" />
+                  <span className="text-sm text-yellow-400">SearchPeopleFree</span>
+                </div>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                  SPF 配置
+                </h1>
+                <p className="text-slate-400 mt-1">管理 SearchPeopleFree 搜索功能的配置（含邮箱、婚姻状态等独家数据）</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* 积分消耗配置 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Coins className="h-5 w-5 text-yellow-400" />
+                    积分消耗配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    设置 SPF 搜索的积分消耗
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['SPF_SEARCH_CREDITS', 'SPF_DETAIL_CREDITS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'SPF_SEARCH_CREDITS': '搜索页消耗（积分/页）',
+                      'SPF_DETAIL_CREDITS': '详情页消耗（积分/条）',
+                    };
+                    const defaults: Record<string, string> = {
+                      'SPF_SEARCH_CREDITS': '0.4',
+                      'SPF_DETAIL_CREDITS': '0.4',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || defaults[key], description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || defaults[key]}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-yellow-700/30">
+                    <p className="text-xs text-yellow-400/70">
+                      ✨ SPF 含邮箱、婚姻状态等独家数据，建议定价略高于 TPS
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* API 配置 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Server className="h-5 w-5 text-blue-400" />
+                    API 配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    Scrape.do API 设置
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['SPF_SCRAPE_TOKEN', 'SPF_MAX_CONCURRENT', 'SPF_CACHE_DAYS'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'SPF_SCRAPE_TOKEN': 'Scrape.do API Token',
+                      'SPF_MAX_CONCURRENT': '最大并发数',
+                      'SPF_CACHE_DAYS': '缓存天数',
+                    };
+                    const defaults: Record<string, string> = {
+                      'SPF_SCRAPE_TOKEN': '***已配置***',
+                      'SPF_MAX_CONCURRENT': '30',
+                      'SPF_CACHE_DAYS': '30',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || '', description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={key === 'SPF_SCRAPE_TOKEN' && config?.value ? '***已配置***' : (config?.value || defaults[key])}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {/* 过滤配置 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Target className="h-5 w-5 text-green-400" />
+                    默认过滤配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    搜索结果的默认过滤条件
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['SPF_MIN_AGE', 'SPF_MAX_AGE', 'SPF_MIN_PHONE_YEAR'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'SPF_MIN_AGE': '最小年龄',
+                      'SPF_MAX_AGE': '最大年龄',
+                      'SPF_MIN_PHONE_YEAR': '电话最早年份',
+                    };
+                    const defaults: Record<string, string> = {
+                      'SPF_MIN_AGE': '50',
+                      'SPF_MAX_AGE': '79',
+                      'SPF_MIN_PHONE_YEAR': '2025',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || defaults[key], description: config?.description || undefined })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || defaults[key]}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {/* 独家数据亮点 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-yellow-400" />
+                    SPF 独家数据亮点
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-400">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">✉️ 电子邮箱</span>
+                      <p className="text-xs mt-1">TPS/FPS 无此数据</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">💍 婚姻状态</span>
+                      <p className="text-xs mt-1">单身/已婚/离异</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">📞 电话类型</span>
+                      <p className="text-xs mt-1">座机/手机区分</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">📅 确认日期</span>
+                      <p className="text-xs mt-1">数据新鲜度指标</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">👤 配偶信息</span>
+                      <p className="text-xs mt-1">配偶姓名+链接</p>
+                    </div>
+                    <div className="bg-slate-800/50 p-2 rounded border border-yellow-700/20">
+                      <span className="text-yellow-400">💼 就业状态</span>
+                      <p className="text-xs mt-1">工作信息</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 使用说明 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30 md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-purple-400" />
+                    SPF 使用说明
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-400">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <p><strong className="text-white">积分计算公式：</strong></p>
+                      <p className="font-mono bg-slate-800 p-2 rounded mt-1">总消耗 = 搜索页数 × 搜索积分 + 详情数 × 详情积分</p>
+                      <p className="mt-3"><strong className="text-white">推荐配置：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>搜索积分：0.4 积分/页（含独家数据）</li>
+                        <li>详情积分：0.4 积分/条</li>
+                        <li>最大并发：30（避免触发限流）</li>
+                        <li>缓存天数：30（减少重复请求）</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p><strong className="text-white">数据字段说明：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>姓名、年龄、地址</li>
+                        <li>电话号码（含类型标记）</li>
+                        <li><span className="text-yellow-400">电子邮箱（独家）</span></li>
+                        <li><span className="text-yellow-400">婚姻状态（独家）</span></li>
+                        <li><span className="text-yellow-400">配偶信息（独家）</span></li>
+                        <li><span className="text-yellow-400">就业状态（独家）</span></li>
+                        <li>数据确认日期</li>
+                      </ul>
+                      <p className="mt-3"><strong className="text-white">注意事项：</strong></p>
+                      <ul className="list-disc list-inside space-y-1 mt-1">
+                        <li>SPF 仅覆盖美国境内人员</li>
+                        <li>邮箱数据可能部分遮蔽</li>
+                        <li>建议与 TPS 配合使用交叉验证</li>
                       </ul>
                     </div>
                   </div>

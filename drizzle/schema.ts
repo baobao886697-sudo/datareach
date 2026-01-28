@@ -633,3 +633,157 @@ export const agentApplications = mysqlTable("agent_applications", {
 
 export type AgentApplication = typeof agentApplications.$inferSelect;
 export type InsertAgentApplication = typeof agentApplications.$inferInsert;
+
+
+// ==================== SearchPeopleFree (SPF) 模块 ====================
+
+// SPF 配置表
+export const spfConfig = mysqlTable("spf_config", {
+  id: int("id").autoincrement().primaryKey(),
+  searchCost: decimal("searchCost", { precision: 10, scale: 2 }).default("0.3").notNull(), // 每搜索页消耗积分
+  detailCost: decimal("detailCost", { precision: 10, scale: 2 }).default("0.3").notNull(), // 每详情页消耗积分
+  maxConcurrent: int("maxConcurrent").default(40).notNull(), // 最大并发数
+  cacheDays: int("cacheDays").default(180).notNull(), // 缓存天数
+  scrapeDoToken: varchar("scrapeDoToken", { length: 100 }), // Scrape.do API Token
+  maxPages: int("maxPages").default(25).notNull(), // 最大搜索页数
+  batchDelay: int("batchDelay").default(200).notNull(), // 批次间延迟(ms)
+  enabled: boolean("enabled").default(true).notNull(), // 是否启用
+  defaultMinAge: int("defaultMinAge").default(50).notNull(), // 默认最小年龄
+  defaultMaxAge: int("defaultMaxAge").default(79).notNull(), // 默认最大年龄
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SpfConfig = typeof spfConfig.$inferSelect;
+export type InsertSpfConfig = typeof spfConfig.$inferInsert;
+
+// SPF 详情页缓存表
+export const spfDetailCache = mysqlTable("spf_detail_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  detailLink: varchar("detailLink", { length: 500 }).notNull().unique(),
+  data: json("data").$type<{
+    name: string;
+    firstName: string;
+    lastName: string;
+    age: number;
+    birthYear: string;          // 出生年份范围 "1976 or 1975"
+    city: string;
+    state: string;
+    location: string;
+    phone: string;
+    phoneType: string;          // "Home/LandLine" / "Wireless"
+    carrier: string;
+    reportYear: number | null;
+    isPrimary: boolean;
+    // SPF 独特字段
+    email: string;              // 电子邮件
+    maritalStatus: string;      // 婚姻状态
+    spouseName: string;         // 配偶姓名
+    spouseLink: string;         // 配偶链接
+    employment: string;         // 就业状态
+    confirmedDate: string;      // 数据确认日期
+    latitude: number | null;    // 纬度
+    longitude: number | null;   // 经度
+    propertyValue: number;
+    yearBuilt: number | null;
+    isDeceased: boolean;
+  }>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+});
+
+export type SpfDetailCache = typeof spfDetailCache.$inferSelect;
+export type InsertSpfDetailCache = typeof spfDetailCache.$inferInsert;
+
+// SPF 搜索任务表
+export const spfSearchTasks = mysqlTable("spf_search_tasks", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: varchar("taskId", { length: 32 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  mode: mysqlEnum("mode", ["nameOnly", "nameLocation"]).default("nameOnly").notNull(),
+  names: json("names").$type<string[]>().notNull(),
+  locations: json("locations").$type<string[]>(),
+  filters: json("filters").$type<{
+    minAge?: number;
+    maxAge?: number;
+    minYear?: number;
+    minPropertyValue?: number;
+    excludeTMobile?: boolean;
+    excludeComcast?: boolean;
+    excludeLandline?: boolean;
+    excludeWireless?: boolean;  // SPF 独特：可排除手机
+  }>(),
+  totalSubTasks: int("totalSubTasks").default(0).notNull(),
+  completedSubTasks: int("completedSubTasks").default(0).notNull(),
+  totalResults: int("totalResults").default(0).notNull(),
+  searchPageRequests: int("searchPageRequests").default(0).notNull(),
+  detailPageRequests: int("detailPageRequests").default(0).notNull(),
+  cacheHits: int("cacheHits").default(0).notNull(),
+  creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits"]).default("pending").notNull(),
+  progress: int("progress").default(0).notNull(),
+  logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+});
+
+export type SpfSearchTask = typeof spfSearchTasks.$inferSelect;
+export type InsertSpfSearchTask = typeof spfSearchTasks.$inferInsert;
+
+// SPF 搜索结果表（包含独特字段）
+export const spfSearchResults = mysqlTable("spf_search_results", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: int("taskId").notNull(),
+  subTaskIndex: int("subTaskIndex").default(0).notNull(),
+  
+  // 基础字段
+  name: varchar("name", { length: 200 }),
+  firstName: varchar("firstName", { length: 100 }),
+  lastName: varchar("lastName", { length: 100 }),
+  searchName: varchar("searchName", { length: 200 }),
+  searchLocation: varchar("searchLocation", { length: 200 }),
+  age: int("age"),
+  birthYear: varchar("birthYear", { length: 20 }),        // ★ 出生年份 "1976 or 1975"
+  city: varchar("city", { length: 100 }),
+  state: varchar("state", { length: 50 }),
+  location: varchar("location", { length: 200 }),
+  
+  // 电话信息
+  phone: varchar("phone", { length: 50 }),
+  phoneType: varchar("phoneType", { length: 50 }),        // ★ "Home/LandLine" / "Wireless"
+  carrier: varchar("carrier", { length: 100 }),
+  allPhones: json("allPhones").$type<Array<{
+    number: string;
+    type: string;
+  }>>(),                                                   // 所有电话及类型
+  reportYear: int("reportYear"),
+  isPrimary: boolean("isPrimary").default(true),
+  
+  // ★ SPF 独特字段
+  email: varchar("email", { length: 200 }),               // ★ 电子邮件
+  allEmails: json("allEmails").$type<string[]>(),         // 所有邮箱
+  maritalStatus: varchar("maritalStatus", { length: 50 }), // ★ 婚姻状态
+  spouseName: varchar("spouseName", { length: 200 }),     // ★ 配偶姓名
+  spouseLink: varchar("spouseLink", { length: 500 }),     // ★ 配偶链接
+  employment: varchar("employment", { length: 200 }),     // ★ 就业状态
+  confirmedDate: varchar("confirmedDate", { length: 50 }), // ★ 数据确认日期
+  latitude: decimal("latitude", { precision: 10, scale: 6 }), // ★ 纬度
+  longitude: decimal("longitude", { precision: 10, scale: 6 }), // ★ 经度
+  
+  // 其他信息
+  familyMembers: json("familyMembers").$type<string[]>(),
+  associates: json("associates").$type<string[]>(),
+  businesses: json("businesses").$type<string[]>(),       // ★ 关联企业
+  propertyValue: int("propertyValue").default(0),
+  yearBuilt: int("yearBuilt"),
+  isDeceased: boolean("isDeceased").default(false),
+  
+  // 链接和缓存
+  detailLink: varchar("detailLink", { length: 500 }),
+  fromCache: boolean("fromCache").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SpfSearchResult = typeof spfSearchResults.$inferSelect;
+export type InsertSpfSearchResult = typeof spfSearchResults.$inferInsert;

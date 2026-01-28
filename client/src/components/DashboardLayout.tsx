@@ -33,7 +33,7 @@ const menuItems: Array<{ icon: React.ComponentType<{ className?: string }>; labe
   { icon: Linkedin, label: "LinkedIn", path: "/search", isRainbow: true },
   { icon: Users, label: "TruePeopleSearch", path: "/tps", isRainbow: true, isTopRecommend: true },
   { icon: UserSearch, label: "PeopleSearchNow", path: "/people-search-now", isNew: true },
-  { icon: SearchCheck, label: "SearchPeopleFree", path: "/search-people-free", isNew: true },
+  { icon: SearchCheck, label: "SearchPeopleFree", path: "/spf/search", isRainbow: true },
   { icon: Sparkles, label: "Anywho", path: "/anywho", isRainbow: true },
   { icon: Rocket, label: "正在开发", path: "/roadmap" },
   { icon: History, label: "历史记录", path: "/history" },

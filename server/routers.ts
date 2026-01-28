@@ -19,6 +19,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { tpsRouter } from "./tps/router";
 import { anywhoRouter } from "./anywho/router";
+import { spfRouter } from "./spf/router";
 import { linkedinRouter } from "./linkedin/router";
 import { agentRouter, adminAgentRouter } from "./agent/router";
 import { sendPasswordResetEmail } from "./services/email";
@@ -142,6 +143,7 @@ export const appRouter = router({
   system: systemRouter,
   tps: tpsRouter,  // TruePeopleSearch 路由
   anywho: anywhoRouter,  // Anywho 路由
+  spf: spfRouter,  // SearchPeopleFree 路由
   agent: agentRouter,  // 代理系统路由
 
   // ============ 认证路由 ============

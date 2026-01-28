@@ -29,6 +29,9 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import PeopleSearchNow from "./pages/PeopleSearchNow";
 import SearchPeopleFree from "./pages/SearchPeopleFree";
+import SpfSearch from "./pages/SpfSearch";
+import SpfTask from "./pages/SpfTask";
+import SpfHistory from "./pages/SpfHistory";
 import Anywho from "./pages/Anywho";
 import AnywhoSearch from "./pages/AnywhoSearch";
 import AnywhoTask from "./pages/AnywhoTask";
@@ -61,6 +64,9 @@ function Router() {
       <Route path="/tps/history" component={TpsHistory} />
       <Route path="/people-search-now" component={PeopleSearchNow} />
       <Route path="/search-people-free" component={SearchPeopleFree} />
+      <Route path="/spf/search" component={SpfSearch} />
+      <Route path="/spf/task/:taskId" component={SpfTask} />
+      <Route path="/spf/history" component={SpfHistory} />
       <Route path="/anywho" component={AnywhoSearch} />
       <Route path="/anywho/task/:taskId" component={AnywhoTask} />
       <Route path="/anywho/history" component={AnywhoHistory} />
