@@ -64,13 +64,49 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
         const isRetryableError = [502, 503, 504].includes(response.status);
         if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
           console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));  // 递增延迟
+          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
           continue;
         }
         throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
       }
       
-      return await response.text();
+      const text = await response.text();
+      
+      // 检查响应是否是 JSON 错误（scrape.do 有时返回 200 但内容是 JSON 错误）
+      if (text.startsWith('{') && text.includes('"StatusCode"')) {
+        try {
+          const jsonError = JSON.parse(text);
+          const statusCode = jsonError.StatusCode || 0;
+          const isRetryableError = [502, 503, 504].includes(statusCode);
+          
+          if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
+            console.log(`[SPF fetchWithScrapedo] API 返回 JSON 错误 (StatusCode: ${statusCode})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+            await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
+            continue;
+          }
+          
+          const errorMsg = Array.isArray(jsonError.Message) ? jsonError.Message.join(', ') : (jsonError.Message || 'Unknown error');
+          throw new Error(`Scrape.do API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
+        } catch (parseError: any) {
+          // 如果不是有效的 JSON 或已经是我们的错误，重新抛出
+          if (parseError.message?.includes('Scrape.do API')) {
+            throw parseError;
+          }
+        }
+      }
+      
+      // 检查响应是否是有效的 HTML
+      const trimmedText = text.trim();
+      if (!trimmedText.startsWith('<') && !trimmedText.startsWith('<!DOCTYPE')) {
+        if (attempt < SCRAPE_MAX_RETRIES) {
+          console.log(`[SPF fetchWithScrapedo] 响应不是有效的 HTML，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
+          continue;
+        }
+        throw new Error('Scrape.do API 返回的不是有效的 HTML');
+      }
+      
+      return text;
     } catch (error: any) {
       lastError = error;
       
@@ -84,7 +120,7 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
       
       if (isTimeout || isNetworkError || isServerError) {
         console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));  // 递增延迟
+        await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
         continue;
       }
       
