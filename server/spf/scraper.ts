@@ -24,8 +24,15 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   const encodedUrl = encodeURIComponent(url);
   // 使用 render=true 确保 JavaScript 渲染完成
   // 使用 super=true 启用住宅代理，提高成功率
-  // 使用 playWithBrowser 等待页面完全加载
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&render=true&super=true&geoCode=us&customWait=5000&timeout=${SCRAPE_TIMEOUT_MS}`;
+  // 使用 playWithBrowser 模拟真实浏览器行为，等待页面完全加载并滚动
+  const playWithBrowser = encodeURIComponent(JSON.stringify([
+    { "Action": "Wait", "Timeout": 3000 },
+    { "Action": "ScrollY", "Value": 500 },
+    { "Action": "Wait", "Timeout": 2000 },
+    { "Action": "ScrollY", "Value": 1000 },
+    { "Action": "Wait", "Timeout": 2000 }
+  ]));
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&render=true&super=true&geoCode=us&playWithBrowser=${playWithBrowser}&timeout=${SCRAPE_TIMEOUT_MS}`;
   
   let lastError: Error | null = null;
   
