@@ -203,7 +203,7 @@ export default function SpfSearch() {
     }
   `;
 
-  if (loading || profileLoading) {
+  if (loading || !user) {
     return (
       <DashboardLayout>
         <div className="p-6 space-y-6">
