@@ -952,6 +952,18 @@ async function ensureTables() {
     `);
     console.log("[Database] SPF search results table ready");
     
+    // 添加 phoneYear 列（如果不存在）
+    try {
+      await db.execute(sql`ALTER TABLE spf_search_results ADD COLUMN phoneYear INT AFTER phoneType`);
+      console.log("[Database] Added phoneYear column to spf_search_results");
+    } catch (e: any) {
+      if (e.message?.includes('Duplicate column')) {
+        console.log("[Database] phoneYear column already exists in spf_search_results");
+      } else {
+        console.log("[Database] phoneYear column already exists or error:", e.message?.slice(0, 100));
+      }
+    }
+    
     // 插入默认 SPF 配置
     await db.execute(sql`
       INSERT IGNORE INTO spf_config (id, searchCost, detailCost, maxConcurrent, cacheDays, maxPages, batchDelay, enabled, defaultMinAge, defaultMaxAge)
