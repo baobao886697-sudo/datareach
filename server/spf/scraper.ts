@@ -466,6 +466,35 @@ export function parseSearchPageFull(html: string): SpfDetailResult[] {
 }
 
 /**
+ * 提取搜索页面的下一页链接
+ * @param html - 搜索页面 HTML
+ * @returns 下一页的完整 URL，如果没有下一页则返回 null
+ */
+export function extractNextPageUrl(html: string): string | null {
+  const $ = cheerio.load(html);
+  
+  // 查找 "Next Page" 链接
+  // 格式: <a href="/find/john-smith/p-2">Next Page »</a>
+  const nextPageLink = $('a').filter((_, el) => {
+    const text = $(el).text().toLowerCase();
+    return text.includes('next page') || text.includes('next »') || text.includes('»');
+  }).first();
+  
+  if (nextPageLink.length) {
+    const href = nextPageLink.attr('href');
+    if (href) {
+      // 确保是完整 URL
+      if (href.startsWith('http')) {
+        return href;
+      }
+      return `https://www.searchpeoplefree.com${href.startsWith('/') ? '' : '/'}${href}`;
+    }
+  }
+  
+  return null;
+}
+
+/**
  * 简化版搜索页面解析 (仅提取基本信息)
  */
 export function parseSearchPage(html: string): SpfSearchResult[] {
@@ -1013,17 +1042,60 @@ export async function searchAndGetDetails(
       return { results, searchPageCalls, detailPageCalls };
     }
     
-    // 4. 从搜索列表页提取基本数据
-    const searchResults = parseSearchPageFull(searchHtml);
-    console.log(`[SPF] 解析到 ${searchResults.length} 个结果`);
+    // 4. 分页获取所有搜索结果
+    const maxPages = 3;  // 最大获取 3 页，避免过多 API 调用
+    let currentPageHtml = searchHtml;
+    let currentPageNum = 1;
+    const allSearchResults: SpfDetailResult[] = [];
     
-    if (searchResults.length === 0) {
+    while (currentPageNum <= maxPages) {
+      // 解析当前页的搜索结果
+      const pageResults = parseSearchPageFull(currentPageHtml);
+      console.log(`[SPF] 第 ${currentPageNum} 页解析到 ${pageResults.length} 个结果`);
+      
+      if (pageResults.length === 0) {
+        break;
+      }
+      
+      allSearchResults.push(...pageResults);
+      
+      // 检查是否有下一页
+      const nextPageUrl = extractNextPageUrl(currentPageHtml);
+      if (!nextPageUrl || allSearchResults.length >= maxResults * 2) {
+        // 没有下一页，或已获取足够多结果
+        break;
+      }
+      
+      // 获取下一页
+      console.log(`[SPF] 获取下一页: ${nextPageUrl}`);
+      try {
+        currentPageHtml = await fetchWithScrapedo(nextPageUrl, token);
+        searchPageCalls++;
+        currentPageNum++;
+        
+        // 检查是否是错误响应
+        if (currentPageHtml.includes('"ErrorCode"') || currentPageHtml.includes('"StatusCode":4')) {
+          console.log(`[SPF] 下一页获取失败，停止分页`);
+          break;
+        }
+        
+        // 请求间延迟
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (pageError) {
+        console.error(`[SPF] 获取下一页失败:`, pageError);
+        break;
+      }
+    }
+    
+    console.log(`[SPF] 共获取 ${currentPageNum} 页，总计 ${allSearchResults.length} 个搜索结果`);
+    
+    if (allSearchResults.length === 0) {
       console.log(`[SPF] 未找到匹配结果: ${name} ${location}`);
       return { results, searchPageCalls, detailPageCalls };
     }
     
     // 5. 处理每个结果
-    for (const searchResult of searchResults) {
+    for (const searchResult of allSearchResults) {
       if (results.length >= maxResults) break;
       
       // 先应用过滤器
