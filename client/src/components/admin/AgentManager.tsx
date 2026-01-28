@@ -1049,7 +1049,10 @@ export function AgentManager() {
               <Button
                 type="button"
                 onClick={() => {
+                  alert('按钮被点击!');
+                  console.log('selectedWithdrawal:', selectedWithdrawal);
                   const withdrawalId = selectedWithdrawal?.withdrawal?.withdrawalId;
+                  console.log('withdrawalId:', withdrawalId);
                   if (!withdrawalId) {
                     toast.error('提现ID不存在');
                     return;
