@@ -1048,11 +1048,16 @@ export function AgentManager() {
             {selectedWithdrawal?.withdrawal?.status !== 'paid' && selectedWithdrawal?.withdrawal?.status !== 'rejected' && (
               <Button
                 type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  console.log('Button clicked!');
-                  handleProcessWithdrawal('paid');
+                onClick={() => {
+                  const withdrawalId = selectedWithdrawal?.withdrawal?.withdrawalId;
+                  if (!withdrawalId) {
+                    toast.error('提现ID不存在');
+                    return;
+                  }
+                  processWithdrawalMutation.mutate({
+                    withdrawalId,
+                    action: 'paid',
+                  });
                 }}
                 disabled={processWithdrawalMutation.isPending}
                 className="bg-green-500 hover:bg-green-600"
