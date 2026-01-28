@@ -40,7 +40,7 @@ const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次
  */
 async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   const encodedUrl = encodeURIComponent(url);
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}`;
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}&disableRetry=true`;
   
   let lastError: Error | null = null;
   
