@@ -653,7 +653,7 @@ async function executeSpfSearchTask(
     if (refund > 0) {
       addLog(`   • ✅ 已退还: ${refund.toFixed(1)} 积分`);
     }
-    addLog(`═══════════════════════════════════════════════════`;
+    addLog(`═══════════════════════════════════════════════════`);
     
     await completeSpfSearchTask(taskDbId, {
       totalResults,
