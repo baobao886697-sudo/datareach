@@ -1045,9 +1045,15 @@ export function AgentManager() {
                 </Button>
               </>
             )}
-            {(selectedWithdrawal?.withdrawal?.status === 'pending' || selectedWithdrawal?.withdrawal?.status === 'approved') && (
+            {selectedWithdrawal?.withdrawal?.status !== 'paid' && selectedWithdrawal?.withdrawal?.status !== 'rejected' && (
               <Button
-                onClick={() => handleProcessWithdrawal('paid')}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Button clicked!');
+                  handleProcessWithdrawal('paid');
+                }}
                 disabled={processWithdrawalMutation.isPending}
                 className="bg-green-500 hover:bg-green-600"
               >
