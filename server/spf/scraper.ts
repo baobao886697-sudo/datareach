@@ -895,6 +895,9 @@ export async function searchAndGetDetails(
 ): Promise<SpfDetailResult[]> {
   const results: SpfDetailResult[] = [];
   
+  // 调试日志：打印接收到的过滤器
+  console.log(`[SPF] 接收到的过滤器: ${JSON.stringify(filters)}`);
+  
   try {
     // 1. 构建搜索 URL
     const searchUrl = buildSearchUrl(name, location);
