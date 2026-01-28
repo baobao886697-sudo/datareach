@@ -322,7 +322,7 @@ function buildActorInput(
     fetch_count: limit,
     
     // 文件名/运行标签
-    file_name: `LeadHunter_${searchTitle || 'Search'}_${searchState || 'All'}`,
+    file_name: `DataReach_${searchTitle || 'Search'}_${searchState || 'All'}`,
   };
   
   // 职位筛选

@@ -1,7 +1,7 @@
 import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json, decimal, boolean } from "drizzle-orm/mysql-core";
 
 /**
- * LeadHunter Pro - 完整数据库Schema (V6蓝图)
+ * DataReach - 完整数据库Schema (V6蓝图)
  */
 
 // 用户表

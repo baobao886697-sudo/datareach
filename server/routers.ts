@@ -670,7 +670,7 @@ export const appRouter = router({
         // 生成文件名
         const formatSuffix = input.format === 'detailed' ? '_detailed' : input.format === 'minimal' ? '_minimal' : '';
         const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const filename = `LeadHunter_${searchParams.name || 'search'}_${searchParams.state || 'US'}_${timestamp}${formatSuffix}.csv`;
+        const filename = `DataReach_${searchParams.name || 'search'}_${searchParams.state || 'US'}_${timestamp}${formatSuffix}.csv`;
 
         return {
           filename,

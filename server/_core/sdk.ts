@@ -24,7 +24,7 @@ class SDKServer {
     return this.signSession(
       {
         openId,
-        appId: ENV.appId || "leadhunter-pro",
+        appId: ENV.appId || "datareach",
         name: options.name || "",
       },
       options
