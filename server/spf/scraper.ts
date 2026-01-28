@@ -6,12 +6,13 @@
  * - 电话类型标注 (座机/手机)
  * - 婚姻状态和配偶信息
  * - 就业状态
+ * - 教育信息
  * - 数据确认日期
  * - 地理坐标
  * 
  * 重要说明：
- * 根据 Scrape.do 技术支持建议，SearchPeopleFree 不支持 render=true
- * 搜索页面已包含完整的详细信息，无需访问详情页面
+ * 根据 Scrape.do 技术支持建议，SearchPeopleFree 使用 super=true + geoCode=us
+ * 搜索页面和详情页面都可以成功访问
  */
 
 import * as cheerio from 'cheerio';
@@ -85,8 +86,8 @@ export const SPF_CONFIG = {
   SCRAPEDO_CONCURRENCY: 10,
   TOTAL_CONCURRENCY: 40,
   MAX_SAFE_PAGES: 25,
-  SEARCH_COST: 0.8,  // 搜索页成本 (包含完整数据)
-  DETAIL_COST: 0,    // 不再需要详情页
+  SEARCH_COST: 0.8,  // 搜索页成本
+  DETAIL_COST: 0.8,  // 详情页成本
 };
 
 // ==================== 类型定义 ====================
@@ -120,6 +121,7 @@ export interface SpfDetailResult {
   spouseName?: string;
   spouseLink?: string;
   employment?: string;
+  education?: string;
   confirmedDate?: string;
   latitude?: number;
   longitude?: number;
@@ -134,6 +136,14 @@ export interface SpfDetailResult {
   addresses?: string[];
   currentAddress?: string;
   alsoKnownAs?: string[];
+  // 详情页特有字段
+  addressCount?: number;
+  phoneCount?: number;
+  emailCount?: number;
+  akaCount?: number;
+  familyCount?: number;
+  associateCount?: number;
+  businessCount?: number;
 }
 
 export interface SpfFilters {
@@ -235,6 +245,26 @@ function parsePhoneType(typeText: string): string {
   return 'Unknown';
 }
 
+/**
+ * 解码 Cloudflare 邮箱保护
+ * Cloudflare 使用 data-cfemail 属性存储编码后的邮箱
+ */
+function decodeCloudflareEmail(encoded: string): string {
+  if (!encoded) return '';
+  
+  try {
+    const r = parseInt(encoded.substr(0, 2), 16);
+    let email = '';
+    for (let n = 2; encoded.length - n; n += 2) {
+      const charCode = parseInt(encoded.substr(n, 2), 16) ^ r;
+      email += String.fromCharCode(charCode);
+    }
+    return email;
+  } catch (e) {
+    return '';
+  }
+}
+
 // ==================== 搜索页面解析 (完整数据提取) ====================
 
 /**
@@ -246,36 +276,6 @@ function parsePhoneType(typeText: string): string {
  * - 当前地址和历史地址
  * - 家庭成员 (Spouse, partner, mother, father...)
  * - 关联人员 (Friends, family, business associates...)
- * 
- * HTML 结构:
- * <li class="toc l-i mb-5">
- *   <article>
- *     <h2 class="h2">
- *       <a href="/find/john-smith/27Ob2fkq8DOF">
- *         John Smith
- *         <span>in Brook Park, OH</span>
- *         <span class="d-block d-md-inline"><b class="text-aka">also</b> John Morris</span>
- *       </a>
- *     </h2>
- *     <h3 class="mb-3">Age <span>50 <i class="text-muted">(1976 or 1975)</i></span></h3>
- *     <i class="text-muted">Home address...</i>
- *     <ul class="inline current row mb-3">
- *       <li class="col-lg-6">
- *         <address><a href="...">123 Main St, City, ST 12345</a><i class="text-highlight ml-1">-Current</i></address>
- *       </li>
- *     </ul>
- *     <i class="text-muted">Home telephone number...</i>
- *     <ul class="inline current row mb-3">
- *       <li class="col-md-6 col-lg-4">
- *         <h4><a href="...">(123) 456-7890</a><i class="text-highlight"> - LandLine</i></h4>
- *       </li>
- *     </ul>
- *     <i class="text-muted">Spouse, partner, mother, father...</i>
- *     <ul class="inline row mb-3">
- *       <li class="col-md-6 col-lg-4"><a href="...">Jane Smith</a></li>
- *     </ul>
- *   </article>
- * </li>
  */
 export function parseSearchPageFull(html: string): SpfDetailResult[] {
   const $ = cheerio.load(html);
@@ -295,6 +295,7 @@ export function parseSearchPageFull(html: string): SpfDetailResult[] {
       familyMembers: [],
       associates: [],
       alsoKnownAs: [],
+      allEmails: [],
     };
     
     try {
@@ -511,16 +512,336 @@ export function parseSearchPage(html: string): SpfSearchResult[] {
   return results;
 }
 
-// ==================== 详情页面解析 (保留但不再主要使用) ====================
+// ==================== 详情页面解析 ====================
 
 /**
- * 解析详情页面 - 保留用于可能的未来使用
+ * 解析详情页面 - 提取完整的个人信息
+ * 
+ * 详情页面包含以下数据：
+ * - 基本信息：姓名、年龄、出生年份、确认日期
+ * - 婚姻状态：已婚/未婚，配偶姓名和链接
+ * - 邮箱地址：多个邮箱（部分遮蔽）
+ * - 就业信息
+ * - 教育信息
+ * - 电话号码：多个电话及类型
+ * - 地址：当前地址和历史地址（带时间戳）
+ * - 别名 (Also Known As)
+ * - 家庭成员
+ * - 关联人员
+ * - 企业关联
+ * 
+ * HTML 结构示例:
+ * <article class="background">
+ *   <article class="current-bg">
+ *     <p>Married to <a href="...">Jennifer A Smith</a></p>
+ *   </article>
+ * </article>
+ * <article class="email-bg">
+ *   <ol class="inline row">
+ *     <li><a href="...">jh*****<span data-cfemail="...">[email protected]</span></a></li>
+ *   </ol>
+ * </article>
  */
 export function parseDetailPage(html: string, detailLink: string): SpfDetailResult | null {
-  // 由于详情页面无法访问，此函数暂时返回 null
-  // 所有数据现在从搜索页面提取
-  console.log('[SPF parseDetailPage] 详情页面解析已禁用，使用搜索页面数据');
-  return null;
+  try {
+    const $ = cheerio.load(html);
+    
+    // 检查是否是有效的详情页面
+    if (!html.includes('personDetails') && !html.includes('current-bg')) {
+      console.log('[SPF parseDetailPage] 不是有效的详情页面');
+      return null;
+    }
+    
+    const result: SpfDetailResult = {
+      name: '',
+      detailLink: detailLink,
+      allPhones: [],
+      allEmails: [],
+      addresses: [],
+      familyMembers: [],
+      associates: [],
+      alsoKnownAs: [],
+      businesses: [],
+    };
+    
+    // 1. 从 dataLayer 提取统计信息
+    const scriptContent = html.match(/dataLayer\.push\(\{[^}]+\}\)/g);
+    if (scriptContent) {
+      scriptContent.forEach(script => {
+        const addressMatch = script.match(/'addressCount':\s*'(\d+)'/);
+        const phoneMatch = script.match(/'phoneCount':\s*'(\d+)'/);
+        const emailMatch = script.match(/'emailCount':\s*'(\d+)'/);
+        const akaMatch = script.match(/'akaCount':\s*'(\d+)'/);
+        const familyMatch = script.match(/'familyCount':\s*'(\d+)'/);
+        const associateMatch = script.match(/'associateCount':\s*'(\d+)'/);
+        const businessMatch = script.match(/'businessCount':\s*'(\d+)'/);
+        
+        if (addressMatch) result.addressCount = parseInt(addressMatch[1], 10);
+        if (phoneMatch) result.phoneCount = parseInt(phoneMatch[1], 10);
+        if (emailMatch) result.emailCount = parseInt(emailMatch[1], 10);
+        if (akaMatch) result.akaCount = parseInt(akaMatch[1], 10);
+        if (familyMatch) result.familyCount = parseInt(familyMatch[1], 10);
+        if (associateMatch) result.associateCount = parseInt(associateMatch[1], 10);
+        if (businessMatch) result.businessCount = parseInt(businessMatch[1], 10);
+      });
+    }
+    
+    // 2. 提取标题中的姓名
+    const title = $('title').text();
+    const titleMatch = title.match(/^([^|]+)/);
+    if (titleMatch) {
+      const titleName = titleMatch[1].replace(/living in.*|Contact Details/gi, '').trim();
+      result.name = titleName;
+    }
+    
+    // 3. 提取确认日期
+    const confirmedTime = $('article.background time[datetime]').first();
+    if (confirmedTime.length) {
+      result.confirmedDate = confirmedTime.text().replace('Confirmed on', '').trim();
+    }
+    
+    // 4. 提取当前信息区块 (current-bg)
+    const currentBg = $('article.current-bg').first();
+    if (currentBg.length) {
+      // 姓名
+      const headerP = currentBg.find('header p').first();
+      if (headerP.length) {
+        result.name = headerP.text().trim();
+      }
+      
+      // 解析姓名
+      if (result.name) {
+        const nameParts = result.name.split(' ');
+        result.firstName = nameParts[0];
+        result.lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : undefined;
+      }
+      
+      // 年龄和出生年份
+      const ageText = currentBg.text();
+      const { age, birthYear } = parseAgeAndBirthYear(ageText);
+      result.age = age;
+      result.birthYear = birthYear;
+      
+      // 婚姻状态
+      const marriedMatch = currentBg.html()?.match(/Married to\s*<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/i);
+      if (marriedMatch) {
+        result.maritalStatus = 'Married';
+        result.spouseLink = marriedMatch[1];
+        result.spouseName = marriedMatch[2].trim();
+        if (result.spouseLink && !result.spouseLink.startsWith('http')) {
+          result.spouseLink = `https://www.searchpeoplefree.com${result.spouseLink}`;
+        }
+      } else if (currentBg.text().toLowerCase().includes('single')) {
+        result.maritalStatus = 'Single';
+      }
+      
+      // 主邮箱
+      const emailLink = currentBg.find('a[href*="/email/"]').first();
+      if (emailLink.length) {
+        const cfEmail = emailLink.find('span.__cf_email__').attr('data-cfemail');
+        if (cfEmail) {
+          const decodedEmail = decodeCloudflareEmail(cfEmail);
+          if (decodedEmail) {
+            result.email = decodedEmail;
+            result.allEmails?.push(decodedEmail);
+          }
+        }
+      }
+      
+      // 就业状态
+      if (currentBg.text().includes('No known employment')) {
+        result.employment = 'No known employment';
+      }
+      
+      // 主电话
+      currentBg.find('a[href*="hone-lookup"]').each((_, aEl) => {
+        const phoneText = $(aEl).text().trim();
+        const phoneNumber = formatPhoneNumber(phoneText);
+        const typeText = $(aEl).next('i.text-highlight').text();
+        const phoneType = parsePhoneType(typeText);
+        
+        if (phoneNumber && result.allPhones) {
+          result.allPhones.push({ number: phoneNumber, type: phoneType });
+          if (!result.phone) {
+            result.phone = phoneNumber;
+            result.phoneType = phoneType;
+          }
+        }
+      });
+    }
+    
+    // 5. 提取教育信息 (education-bg)
+    const educationBg = $('article.education-bg').first();
+    if (educationBg.length) {
+      const educationText = educationBg.find('dfn.text-muted').text().trim();
+      if (educationText && !educationText.includes('not associated')) {
+        result.education = educationText;
+      } else {
+        // 查找具体的教育记录
+        const educationItems = educationBg.find('ol.inline li');
+        if (educationItems.length) {
+          const educations: string[] = [];
+          educationItems.each((_, li) => {
+            educations.push($(li).text().trim());
+          });
+          result.education = educations.join('; ');
+        }
+      }
+    }
+    
+    // 6. 提取就业信息 (employment-bg)
+    const employmentBg = $('article.employment-bg').first();
+    if (employmentBg.length) {
+      const employmentText = employmentBg.find('dfn.text-muted').text().trim();
+      if (employmentText && !employmentText.includes('not associated')) {
+        result.employment = employmentText;
+      } else {
+        // 查找具体的就业记录
+        const employmentItems = employmentBg.find('ol.inline li');
+        if (employmentItems.length) {
+          const employments: string[] = [];
+          employmentItems.each((_, li) => {
+            employments.push($(li).text().trim());
+          });
+          result.employment = employments.join('; ');
+        }
+      }
+    }
+    
+    // 7. 提取邮箱地址 (email-bg)
+    const emailBg = $('article.email-bg').first();
+    if (emailBg.length) {
+      emailBg.find('ol.inline li a[href*="/email/"]').each((_, aEl) => {
+        const cfEmail = $(aEl).find('span.__cf_email__').attr('data-cfemail');
+        if (cfEmail) {
+          const decodedEmail = decodeCloudflareEmail(cfEmail);
+          if (decodedEmail && result.allEmails && !result.allEmails.includes(decodedEmail)) {
+            result.allEmails.push(decodedEmail);
+            if (!result.email) {
+              result.email = decodedEmail;
+            }
+          }
+        }
+      });
+    }
+    
+    // 8. 提取电话号码 (phone-bg)
+    const phoneBg = $('article.phone-bg').first();
+    if (phoneBg.length) {
+      phoneBg.find('ol.inline li').each((_, liEl) => {
+        const li = $(liEl);
+        const phoneLink = li.find('a[href*="/phone-lookup/"]');
+        if (phoneLink.length) {
+          const phoneText = phoneLink.text().trim();
+          const phoneNumber = formatPhoneNumber(phoneText);
+          const typeText = li.find('i.text-highlight').text();
+          const phoneType = parsePhoneType(typeText);
+          
+          // 检查是否已存在
+          if (phoneNumber && result.allPhones && !result.allPhones.some(p => p.number === phoneNumber)) {
+            result.allPhones.push({ number: phoneNumber, type: phoneType });
+            if (!result.phone) {
+              result.phone = phoneNumber;
+              result.phoneType = phoneType;
+            }
+          }
+        }
+      });
+    }
+    
+    // 9. 提取地址 (address-bg)
+    const addressBg = $('article.address-bg').first();
+    if (addressBg.length) {
+      addressBg.find('ol.inline li').each((_, liEl) => {
+        const li = $(liEl);
+        const addressLink = li.find('a[href*="/address/"]');
+        if (addressLink.length) {
+          const address = addressLink.text().trim();
+          const timeEl = li.find('time');
+          const reportDate = timeEl.length ? timeEl.text().trim() : '';
+          
+          if (address && result.addresses) {
+            const fullAddress = reportDate ? `${address} ${reportDate}` : address;
+            result.addresses.push(fullAddress);
+            
+            // 第一个地址通常是当前地址
+            if (!result.currentAddress) {
+              result.currentAddress = address;
+            }
+          }
+        }
+      });
+    }
+    
+    // 10. 提取别名 (alias-bg)
+    const aliasBg = $('article.alias-bg').first();
+    if (aliasBg.length) {
+      aliasBg.find('ol.inline li a[href*="/find/"]').each((_, aEl) => {
+        const alias = $(aEl).text().trim();
+        if (alias && result.alsoKnownAs && !result.alsoKnownAs.includes(alias)) {
+          result.alsoKnownAs.push(alias);
+        }
+      });
+    }
+    
+    // 11. 提取家庭成员 (family-bg)
+    const familyBg = $('article.family-bg').first();
+    if (familyBg.length) {
+      familyBg.find('ol.inline li a[href*="/find/"]').each((_, aEl) => {
+        const member = $(aEl).text().trim();
+        if (member && result.familyMembers && !result.familyMembers.includes(member)) {
+          result.familyMembers.push(member);
+        }
+      });
+    }
+    
+    // 12. 提取关联人员 (associate-bg)
+    const associateBg = $('article.associate-bg').first();
+    if (associateBg.length) {
+      associateBg.find('ol.inline li a[href*="/find/"]').each((_, aEl) => {
+        const associate = $(aEl).text().trim();
+        if (associate && result.associates && !result.associates.includes(associate)) {
+          result.associates.push(associate);
+        }
+      });
+    }
+    
+    // 13. 提取企业关联 (business-bg)
+    const businessBg = $('article.business-bg').first();
+    if (businessBg.length) {
+      businessBg.find('ol.inline li').each((_, liEl) => {
+        const business = $(liEl).text().trim();
+        if (business && result.businesses && !result.businesses.includes(business)) {
+          result.businesses.push(business);
+        }
+      });
+    }
+    
+    // 14. 提取位置信息
+    if (result.currentAddress) {
+      const addressParts = result.currentAddress.split(',').map(p => p.trim());
+      if (addressParts.length >= 2) {
+        result.city = addressParts[addressParts.length - 2];
+        const stateZip = addressParts[addressParts.length - 1];
+        const stateMatch = stateZip.match(/^([A-Z]{2})/);
+        if (stateMatch) {
+          result.state = stateMatch[1];
+        }
+      }
+      result.location = result.city && result.state ? `${result.city}, ${result.state}` : result.currentAddress;
+    }
+    
+    // 15. 检查是否已故
+    result.isDeceased = html.toLowerCase().includes('deceased');
+    
+    console.log(`[SPF parseDetailPage] 解析详情页成功: ${result.name}, 邮箱: ${result.allEmails?.length || 0}, 电话: ${result.allPhones?.length || 0}`);
+    
+    return result;
+    
+  } catch (error) {
+    console.error('[SPF parseDetailPage] 解析详情页面时出错:', error);
+    return null;
+  }
 }
 
 // ==================== 主搜索函数 ====================
@@ -555,18 +876,22 @@ function applyFilters(detail: SpfDetailResult, filters: SpfFilters): boolean {
 /**
  * 执行搜索并获取详情
  * 
- * 新流程 (无需访问详情页面):
+ * 流程:
  * 1. 获取搜索页面 (/find/john-smith)
- * 2. 直接从搜索页面提取完整数据
- * 3. 应用过滤器
- * 4. 返回结果
+ * 2. 从搜索页面提取基本数据
+ * 3. 可选：获取详情页面以获取更多数据（邮箱、婚姻状态等）
+ * 4. 应用过滤器
+ * 5. 返回结果
+ * 
+ * @param fetchDetails - 是否获取详情页面（默认 false，设为 true 可获取邮箱、婚姻状态等）
  */
 export async function searchAndGetDetails(
   name: string,
   location: string,
   token: string,
   filters: SpfFilters = {},
-  maxResults: number = 10
+  maxResults: number = 10,
+  fetchDetails: boolean = false
 ): Promise<SpfDetailResult[]> {
   const results: SpfDetailResult[] = [];
   
@@ -585,22 +910,61 @@ export async function searchAndGetDetails(
       return results;
     }
     
-    // 3. 直接从搜索页面提取完整数据
-    const fullResults = parseSearchPageFull(searchHtml);
-    console.log(`[SPF] 解析到 ${fullResults.length} 个完整结果`);
+    // 3. 从搜索页面提取基本数据
+    const searchResults = parseSearchPageFull(searchHtml);
+    console.log(`[SPF] 解析到 ${searchResults.length} 个结果`);
     
-    if (fullResults.length === 0) {
+    if (searchResults.length === 0) {
       console.log(`[SPF] 未找到匹配结果: ${name} ${location}`);
       return results;
     }
     
-    // 4. 应用过滤器并限制结果数量
-    for (const detail of fullResults) {
+    // 4. 处理每个结果
+    for (const searchResult of searchResults) {
       if (results.length >= maxResults) break;
       
-      if (applyFilters(detail, filters)) {
-        results.push(detail);
+      // 先应用过滤器
+      if (!applyFilters(searchResult, filters)) {
+        continue;
       }
+      
+      // 如果需要获取详情页面
+      if (fetchDetails && searchResult.detailLink) {
+        try {
+          console.log(`[SPF] 获取详情页: ${searchResult.detailLink}`);
+          const detailHtml = await fetchWithScrapedo(searchResult.detailLink, token);
+          
+          // 检查是否是错误响应
+          if (!detailHtml.includes('"ErrorCode"') && !detailHtml.includes('"StatusCode":4')) {
+            const detailResult = parseDetailPage(detailHtml, searchResult.detailLink);
+            
+            if (detailResult) {
+              // 合并搜索页面和详情页面的数据
+              const mergedResult: SpfDetailResult = {
+                ...searchResult,
+                ...detailResult,
+                // 保留搜索页面的某些字段（如果详情页面没有）
+                name: detailResult.name || searchResult.name,
+                age: detailResult.age || searchResult.age,
+                phone: detailResult.phone || searchResult.phone,
+                phoneType: detailResult.phoneType || searchResult.phoneType,
+              };
+              
+              results.push(mergedResult);
+              console.log(`[SPF] 详情页数据合并成功: ${mergedResult.name}, 婚姻: ${mergedResult.maritalStatus}, 邮箱: ${mergedResult.email}`);
+              
+              // 请求间延迟
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              continue;
+            }
+          }
+        } catch (detailError) {
+          console.error(`[SPF] 获取详情页失败: ${searchResult.detailLink}`, detailError);
+        }
+      }
+      
+      // 如果不需要详情页或获取失败，使用搜索页面数据
+      results.push(searchResult);
     }
     
     console.log(`[SPF] 搜索完成，返回 ${results.length} 个有效结果`);
@@ -614,13 +978,16 @@ export async function searchAndGetDetails(
 
 /**
  * 批量搜索
+ * 
+ * @param fetchDetails - 是否获取详情页面
  */
 export async function batchSearch(
   names: string[],
   locations: string[],
   token: string,
   filters: SpfFilters = {},
-  onProgress?: (completed: number, total: number) => void
+  onProgress?: (completed: number, total: number) => void,
+  fetchDetails: boolean = false
 ): Promise<SpfDetailResult[]> {
   const allResults: SpfDetailResult[] = [];
   const total = names.length;
@@ -632,7 +999,7 @@ export async function batchSearch(
     const location = locations[i] || '';
     
     try {
-      const results = await searchAndGetDetails(name, location, token, filters);
+      const results = await searchAndGetDetails(name, location, token, filters, 10, fetchDetails);
       allResults.push(...results);
     } catch (error) {
       console.error(`[SPF batchSearch] 搜索失败: ${name}`, error);
@@ -668,6 +1035,13 @@ export function exportToCsv(results: SpfDetailResult[]): string {
     'Phone',
     'Phone Type',
     'All Phones',
+    'Email',
+    'All Emails',
+    'Marital Status',
+    'Spouse Name',
+    'Employment',
+    'Education',
+    'Confirmed Date',
     'Current Address',
     'All Addresses',
     'Family Members',
@@ -689,6 +1063,13 @@ export function exportToCsv(results: SpfDetailResult[]): string {
     r.phone || '',
     r.phoneType || '',
     r.allPhones?.map(p => `${p.number}(${p.type})`).join('; ') || '',
+    r.email || '',
+    r.allEmails?.join('; ') || '',
+    r.maritalStatus || '',
+    r.spouseName || '',
+    r.employment || '',
+    r.education || '',
+    r.confirmedDate || '',
     r.currentAddress || '',
     r.addresses?.join('; ') || '',
     r.familyMembers?.join('; ') || '',
