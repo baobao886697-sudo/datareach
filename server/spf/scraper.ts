@@ -51,7 +51,14 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
       
       clearTimeout(timeoutId);
       
+      // 检查是否是可重试的服务器错误 (502, 503, 504)
       if (!response.ok) {
+        const isRetryableError = [502, 503, 504].includes(response.status);
+        if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
+          console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));  // 递增延迟
+          continue;
+        }
         throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
       }
       
@@ -65,10 +72,11 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
       
       const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
       const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+      const isServerError = error.message?.includes('502') || error.message?.includes('503') || error.message?.includes('504');
       
-      if (isTimeout || isNetworkError) {
-        console.log(`[SPF fetchWithScrapedo] 请求超时/失败，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      if (isTimeout || isNetworkError || isServerError) {
+        console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+        await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));  // 递增延迟
         continue;
       }
       
