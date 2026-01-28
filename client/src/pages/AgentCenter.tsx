@@ -423,7 +423,7 @@ export default function AgentCenter() {
                 <div>
                   <p className="text-slate-400 text-sm">冻结中佣金</p>
                   <p className="text-2xl font-bold text-amber-400">${agentInfo.frozenBalance?.toFixed(2)}</p>
-                  <p className="text-xs text-slate-500">{rules?.settlement.days || 7}天后可提现</p>
+                  <p className="text-xs text-slate-500">处理中的佣金</p>
                 </div>
                 <div className="p-3 rounded-xl bg-amber-500/20">
                   <Clock className="w-6 h-6 text-amber-400" />

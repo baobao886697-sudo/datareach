@@ -254,7 +254,7 @@ export async function calculateAndCreateCommission(
     // 直接更新代理可提现余额（实时到账）
     await getDb().update(users).set({
       agentBalance: sql`${users.agentBalance} + ${totalAmount}`,
-      agentTotalEarnings: sql`${users.agentTotalEarnings} + ${totalAmount}`,
+      agentTotalEarned: sql`${users.agentTotalEarned} + ${totalAmount}`,
     }).where(eq(users.id, level1Agent[0].id));
     
     // 二级代理佣金
@@ -280,7 +280,7 @@ export async function calculateAndCreateCommission(
         // 直接更新二级代理可提现余额（实时到账）
         await getDb().update(users).set({
           agentBalance: sql`${users.agentBalance} + ${level2CommissionAmount}`,
-          agentTotalEarnings: sql`${users.agentTotalEarnings} + ${level2CommissionAmount}`,
+          agentTotalEarned: sql`${users.agentTotalEarned} + ${level2CommissionAmount}`,
         }).where(eq(users.id, level2Agent[0].id));
       }
     }
