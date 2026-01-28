@@ -843,6 +843,122 @@ async function ensureTables() {
     `);
     console.log("[Database] Agent applications table ready");
     
+    // ========== SPF (SearchPeopleFree) 相关表 ==========
+    
+    // SPF 配置表
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spf_config (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        searchCost DECIMAL(10,2) NOT NULL DEFAULT 0.3,
+        detailCost DECIMAL(10,2) NOT NULL DEFAULT 0.3,
+        maxConcurrent INT NOT NULL DEFAULT 40,
+        cacheDays INT NOT NULL DEFAULT 180,
+        scrapeDoToken VARCHAR(100),
+        maxPages INT NOT NULL DEFAULT 25,
+        batchDelay INT NOT NULL DEFAULT 200,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        defaultMinAge INT NOT NULL DEFAULT 50,
+        defaultMaxAge INT NOT NULL DEFAULT 79,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
+    console.log("[Database] SPF config table ready");
+    
+    // SPF 详情页缓存表
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spf_detail_cache (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        detailLink VARCHAR(500) NOT NULL UNIQUE,
+        data JSON,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        expiresAt TIMESTAMP NOT NULL,
+        INDEX idx_expiresAt (expiresAt)
+      )
+    `);
+    console.log("[Database] SPF detail cache table ready");
+    
+    // SPF 搜索任务表
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spf_search_tasks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        taskId VARCHAR(32) NOT NULL UNIQUE,
+        userId INT NOT NULL,
+        mode ENUM('nameOnly', 'nameLocation') NOT NULL DEFAULT 'nameOnly',
+        names JSON NOT NULL,
+        locations JSON,
+        filters JSON,
+        totalSubTasks INT NOT NULL DEFAULT 0,
+        completedSubTasks INT NOT NULL DEFAULT 0,
+        totalResults INT NOT NULL DEFAULT 0,
+        searchPageRequests INT NOT NULL DEFAULT 0,
+        detailPageRequests INT NOT NULL DEFAULT 0,
+        cacheHits INT NOT NULL DEFAULT 0,
+        creditsUsed DECIMAL(10,2) NOT NULL DEFAULT 0,
+        status ENUM('pending', 'running', 'completed', 'failed', 'cancelled', 'insufficient_credits') NOT NULL DEFAULT 'pending',
+        progress INT NOT NULL DEFAULT 0,
+        logs JSON,
+        errorMessage TEXT,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        startedAt TIMESTAMP NULL,
+        completedAt TIMESTAMP NULL,
+        INDEX idx_userId (userId),
+        INDEX idx_status (status)
+      )
+    `);
+    console.log("[Database] SPF search tasks table ready");
+    
+    // SPF 搜索结果表（包含独特字段：email, maritalStatus, spouseName, employment, confirmedDate, latitude, longitude）
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spf_search_results (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        taskId INT NOT NULL,
+        subTaskIndex INT NOT NULL DEFAULT 0,
+        name VARCHAR(200),
+        firstName VARCHAR(100),
+        lastName VARCHAR(100),
+        searchName VARCHAR(200),
+        searchLocation VARCHAR(200),
+        age INT,
+        birthYear VARCHAR(20),
+        city VARCHAR(100),
+        state VARCHAR(50),
+        location VARCHAR(200),
+        phone VARCHAR(50),
+        phoneType VARCHAR(50),
+        carrier VARCHAR(100),
+        allPhones JSON,
+        reportYear INT,
+        isPrimary BOOLEAN DEFAULT TRUE,
+        email VARCHAR(200),
+        allEmails JSON,
+        maritalStatus VARCHAR(50),
+        spouseName VARCHAR(200),
+        spouseLink VARCHAR(500),
+        employment VARCHAR(200),
+        confirmedDate VARCHAR(50),
+        latitude DECIMAL(10,6),
+        longitude DECIMAL(10,6),
+        familyMembers JSON,
+        associates JSON,
+        businesses JSON,
+        propertyValue INT DEFAULT 0,
+        yearBuilt INT,
+        isDeceased BOOLEAN DEFAULT FALSE,
+        detailLink VARCHAR(500),
+        fromCache BOOLEAN DEFAULT FALSE NOT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        INDEX idx_taskId (taskId)
+      )
+    `);
+    console.log("[Database] SPF search results table ready");
+    
+    // 插入默认 SPF 配置
+    await db.execute(sql`
+      INSERT IGNORE INTO spf_config (id, searchCost, detailCost, maxConcurrent, cacheDays, maxPages, batchDelay, enabled, defaultMinAge, defaultMaxAge)
+      VALUES (1, 0.3, 0.3, 40, 180, 25, 200, TRUE, 50, 79)
+    `);
+    console.log("[Database] Default SPF config inserted");
+    
     // 插入默认代理配置
     await db.execute(sql`
       INSERT IGNORE INTO agent_settings (settingKey, settingValue, description) VALUES
