@@ -413,6 +413,8 @@ export async function getSpfSearchResults(
  * 获取所有搜索结果（用于导出）
  */
 export async function getAllSpfSearchResults(taskDbId: number) {
+  console.log('[SPF DB] getAllSpfSearchResults called with taskDbId:', taskDbId);
+  
   const database = await db();
   
   const results = await database
@@ -420,6 +422,8 @@ export async function getAllSpfSearchResults(taskDbId: number) {
     .from(spfSearchResults)
     .where(eq(spfSearchResults.taskId, taskDbId))
     .orderBy(spfSearchResults.id);
+  
+  console.log('[SPF DB] getAllSpfSearchResults returned', results.length, 'results');
   
   return results;
 }

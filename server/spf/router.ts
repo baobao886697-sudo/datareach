@@ -421,8 +421,12 @@ export const spfRouter = router({
       
       const csvContent = csvRows.join("\n");
       
+      // 添加 UTF-8 BOM 以确保 Excel 正确识别中文
+      const BOM = "\uFEFF";
+      const csvContentWithBom = BOM + csvContent;
+      
       console.log('[SPF CSV Export] CSV rows count:', csvRows.length);
-      console.log('[SPF CSV Export] CSV content length:', csvContent.length);
+      console.log('[SPF CSV Export] CSV content length:', csvContentWithBom.length);
       if (results.length > 0) {
         console.log('[SPF CSV Export] First result sample:', JSON.stringify(results[0]).slice(0, 200));
       }
@@ -433,11 +437,11 @@ export const spfRouter = router({
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       const fileName = `DataReach_SPF_${firstNames}_${date}.csv`;
       
-      console.log('[SPF CSV Export] Returning fileName:', fileName, 'content length:', csvContent.length);
+      console.log('[SPF CSV Export] Returning fileName:', fileName, 'content length:', csvContentWithBom.length, 'results count:', results.length);
       
       return {
         fileName,
-        content: csvContent,
+        content: csvContentWithBom,
         totalRecords: results.length,
       };
     }),
@@ -615,6 +619,8 @@ async function executeSpfSearchTask(
     
     await runConcurrentSearches();
     
+    addLog(`📊 搜索完成，共收集 ${allResults.length} 条结果`);
+    
     // 保存结果
     if (allResults.length > 0) {
       // 按子任务分组保存
@@ -633,11 +639,18 @@ async function executeSpfSearchTask(
         }
       }
       
+      addLog(`💾 开始保存结果到数据库 (taskDbId: ${taskDbId})...`);
+      
       for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
         const subTask = subTasks[subTaskIndex];
+        addLog(`   • 保存子任务 ${subTaskIndex}: ${results.length} 条结果`);
         await saveSpfSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
         totalResults += results.length;
       }
+      
+      addLog(`✅ 结果保存完成，共 ${totalResults} 条`);
+    } else {
+      addLog(`⚠️ 无结果需要保存`);
     }
     
     // 计算实际消耗：搜索页 API + 详情页 API 分别计费
