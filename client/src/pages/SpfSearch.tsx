@@ -50,16 +50,19 @@ export default function SpfSearch() {
   const [namesInput, setNamesInput] = useState("");
   const [locationsInput, setLocationsInput] = useState("");
   
-  // 过滤条件 - 默认不限制年龄，让用户自己选择
+  // 过滤条件 - 默认年龄 50-79，但需要用户启用才生效
   const [filters, setFilters] = useState({
-    minAge: 18,
-    maxAge: 100,
+    minAge: 50,
+    maxAge: 79,
     minPropertyValue: 0,
     excludeTMobile: false,
     excludeComcast: false,
     excludeLandline: false,
     excludeWireless: false,
   });
+  
+  // 是否启用年龄过滤 - 默认启用
+  const [enableAgeFilter, setEnableAgeFilter] = useState(true);
   
   // 从后端配置获取默认年龄范围
   const [ageRangeInitialized, setAgeRangeInitialized] = useState(false);
@@ -75,14 +78,13 @@ export default function SpfSearch() {
   // 获取 SPF 配置
   const { data: spfConfig } = trpc.spf.getConfig.useQuery();
   
-  // 从后端配置初始化默认年龄范围 - 使用更宽松的默认值
+  // 从后端配置初始化默认年龄范围
   useEffect(() => {
     if (spfConfig && !ageRangeInitialized) {
-      // 默认不限制年龄，让用户自己选择
       setFilters(prev => ({
         ...prev,
-        minAge: 18,
-        maxAge: 100,
+        minAge: spfConfig.defaultMinAge || 50,
+        maxAge: spfConfig.defaultMaxAge || 79,
       }));
       setAgeRangeInitialized(true);
     }
@@ -125,11 +127,19 @@ export default function SpfSearch() {
       return;
     }
     
+    // 构建过滤器，只有启用年龄过滤时才传递年龄参数
+    const effectiveFilters = {
+      ...filters,
+      // 如果未启用年龄过滤，则不传递年龄参数
+      minAge: enableAgeFilter ? filters.minAge : undefined,
+      maxAge: enableAgeFilter ? filters.maxAge : undefined,
+    };
+    
     searchMutation.mutate({
       names,
       locations: mode === "nameLocation" ? locations : [],
       mode,
-      filters,
+      filters: effectiveFilters,
     });
   };
   
@@ -394,20 +404,31 @@ export default function SpfSearch() {
                 <CardContent className="space-y-6">
                   {/* 年龄范围 */}
                   <div>
-                    <Label className="flex items-center gap-2 mb-4">
-                      <Users className="w-4 h-4 text-yellow-400" />
-                      年龄范围: {filters.minAge} - {filters.maxAge} 岁
-                    </Label>
-                    <div className="px-2">
-                      <Slider
-                        value={[filters.minAge, filters.maxAge]}
-                        min={18}
-                        max={100}
-                        step={1}
-                        onValueChange={([min, max]) => setFilters(prev => ({ ...prev, minAge: min, maxAge: max }))}
-                        className="w-full"
+                    <div className="flex items-center justify-between mb-4">
+                      <Label className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-yellow-400" />
+                        年龄过滤: {enableAgeFilter ? `${filters.minAge} - ${filters.maxAge} 岁` : '已禁用'}
+                      </Label>
+                      <Switch
+                        checked={enableAgeFilter}
+                        onCheckedChange={setEnableAgeFilter}
                       />
                     </div>
+                    {enableAgeFilter && (
+                      <div className="px-2">
+                        <Slider
+                          value={[filters.minAge, filters.maxAge]}
+                          min={18}
+                          max={100}
+                          step={1}
+                          onValueChange={([min, max]) => setFilters(prev => ({ ...prev, minAge: min, maxAge: max }))}
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground mt-2">
+                          默认过滤 50-79 岁，可调整范围或禁用此过滤器
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* 电话类型过滤 */}
