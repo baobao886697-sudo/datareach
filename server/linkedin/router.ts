@@ -22,20 +22,24 @@ import { previewSearch, executeSearchV3 } from './processor';
 // ============ 辅助函数 ============
 
 /**
- * 格式化电话号码
+ * 格式化电话号码 - 转换为标准美国号码纯数字格式（11位，以1开头）
+ * 例如：+1 (410) 279-7891 -> 14102797891
+ *       (301) 790-1980 -> 13017901980
  */
 function formatPhoneNumber(phone: string | null | undefined): string {
   if (!phone) return "";
   // 移除所有非数字字符
   const digits = phone.replace(/\D/g, '');
-  // 如果是美国号码（10位或11位以1开头），格式化为 (XXX) XXX-XXXX
+  // 如果是10位数字，添加1前缀（美国国家代码）
   if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    return `1${digits}`;
   }
+  // 如果是11位且以1开头，直接返回
   if (digits.length === 11 && digits.startsWith('1')) {
-    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    return digits;
   }
-  return phone;
+  // 其他情况返回纯数字
+  return digits;
 }
 
 // ============ 路由定义 ============
