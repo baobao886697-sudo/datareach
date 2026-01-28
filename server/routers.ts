@@ -19,6 +19,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { tpsRouter } from "./tps/router";
 import { anywhoRouter } from "./anywho/router";
+import { linkedinRouter } from "./linkedin/router";
 import { agentRouter, adminAgentRouter } from "./agent/router";
 import { sendPasswordResetEmail } from "./services/email";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -111,7 +112,8 @@ import {
   getCreditAnomalies,
 } from "./db";
 // Apollo 相关处理器已移除
-import { previewSearch, executeSearchV3, getSearchCreditsConfig } from "./services/searchProcessorV3";
+// [已迁移到 linkedin 模块] 保留原导入以便回滚
+// import { previewSearch, executeSearchV3, getSearchCreditsConfig } from "./services/searchProcessorV3";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -348,7 +350,13 @@ export const appRouter = router({
   }),
 
   // ============ 搜索路由 ============
-  search: router({
+  // [已迁移到 linkedin 独立模块] 使用新的 linkedinRouter
+  search: linkedinRouter,
+
+  // ============ [备份] 旧搜索路由代码 - 保留以便回滚 ============
+  // 如需回滚，取消下面的注释并注释掉上面的 linkedinRouter
+  /*
+  search_backup: router({
     // 获取积分配置 - 前端用于显示动态积分价格
     creditsConfig: protectedProcedure
       .query(async () => {
@@ -673,6 +681,8 @@ export const appRouter = router({
         };
       }),
   }),
+  */
+  // ============ [备份结束] 旧搜索路由代码 ============
 
   // ============ 充值路由 ============
   recharge: router({
