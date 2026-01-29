@@ -1,5 +1,61 @@
 import * as cheerio from 'cheerio';
 
+// ==================== 全局并发限制 ====================
+
+/**
+ * 全局信号量类 - 用于限制系统总并发数
+ * 不管有多少用户同时使用，系统总并发不超过设定值
+ */
+class GlobalSemaphore {
+  private maxConcurrency: number;
+  private currentCount: number = 0;
+  private waitQueue: Array<() => void> = [];
+  
+  constructor(maxConcurrency: number) {
+    this.maxConcurrency = maxConcurrency;
+  }
+  
+  async acquire(): Promise<void> {
+    if (this.currentCount < this.maxConcurrency) {
+      this.currentCount++;
+      return;
+    }
+    
+    // 需要等待
+    return new Promise<void>((resolve) => {
+      this.waitQueue.push(() => {
+        this.currentCount++;
+        resolve();
+      });
+    });
+  }
+  
+  release(): void {
+    this.currentCount--;
+    if (this.waitQueue.length > 0) {
+      const next = this.waitQueue.shift();
+      if (next) next();
+    }
+  }
+  
+  getStatus() {
+    return {
+      current: this.currentCount,
+      max: this.maxConcurrency,
+      waiting: this.waitQueue.length,
+    };
+  }
+}
+
+// 全局信号量实例 - 限制系统总并发为 40（与 TPS_CONFIG.TOTAL_CONCURRENCY 一致）
+const GLOBAL_MAX_CONCURRENCY = 40;
+const globalSemaphore = new GlobalSemaphore(GLOBAL_MAX_CONCURRENCY);
+
+// 导出获取状态的函数（用于监控）
+export function getGlobalConcurrencyStatus() {
+  return globalSemaphore.getStatus();
+}
+
 // ==================== Scrape.do API ====================
 
 // 超时配置
@@ -15,55 +71,63 @@ const SCRAPE_MAX_RETRIES = 1;    // 最多重试 1 次
  * - 提升整体响应速度，避免慢请求阻塞
  */
 async function fetchWithScrapedo(url: string, token: string): Promise<string> {
-  const encodedUrl = encodeURIComponent(url);
-  // Scrape.do 的 timeout 参数单位是毫秒
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}`;
+  // 获取全局并发许可
+  await globalSemaphore.acquire();
   
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 2000); // 客户端超时比 API 超时多 2 秒
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+  try {
+    const encodedUrl = encodeURIComponent(url);
+    // Scrape.do 的 timeout 参数单位是毫秒
+    const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}`;
+    
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 2000); // 客户端超时比 API 超时多 2 秒
+        
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+        }
+        
+        return await response.text();
+      } catch (error: any) {
+        lastError = error;
+        
+        // 如果是最后一次尝试，不再重试
+        if (attempt >= SCRAPE_MAX_RETRIES) {
+          break;
+        }
+        
+        // 超时或网络错误时重试
+        const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
+        const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+        
+        if (isTimeout || isNetworkError) {
+          console.log(`[fetchWithScrapedo] 请求超时/失败，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          continue;
+        }
+        
+        // 其他错误直接抛出
+        throw error;
       }
-      
-      return await response.text();
-    } catch (error: any) {
-      lastError = error;
-      
-      // 如果是最后一次尝试，不再重试
-      if (attempt >= SCRAPE_MAX_RETRIES) {
-        break;
-      }
-      
-      // 超时或网络错误时重试
-      const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
-      const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
-      
-      if (isTimeout || isNetworkError) {
-        console.log(`[fetchWithScrapedo] 请求超时/失败，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-        continue;
-      }
-      
-      // 其他错误直接抛出
-      throw error;
     }
+    
+    throw lastError || new Error('请求失败');
+  } finally {
+    // 确保释放全局并发许可
+    globalSemaphore.release();
   }
-  
-  throw lastError || new Error('请求失败');
 }
 
 // ==================== 配置常量 ====================
