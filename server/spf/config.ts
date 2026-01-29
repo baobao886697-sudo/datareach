@@ -128,7 +128,7 @@ export type SpfRunMode = 'thread_pool' | 'async_only';
  * 设置为 'thread_pool' 启用线程池模式
  * 设置为 'async_only' 使用旧的纯异步模式
  */
-export const CURRENT_RUN_MODE: SpfRunMode = 'thread_pool';
+export const CURRENT_RUN_MODE: SpfRunMode = 'async_only';
 
 /**
  * 是否启用线程池模式
