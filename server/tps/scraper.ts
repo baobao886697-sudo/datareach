@@ -783,17 +783,26 @@ export async function fetchDetailsInBatch(
   filters: TpsFilters,
   onProgress: (message: string) => void,
   getCachedDetails: (links: string[]) => Promise<Map<string, TpsDetailResult[]>>,
-  setCachedDetails: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>
+  setCachedDetails: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>,
+  creditTracker?: any  // 可选的实时积分跟踪器
 ): Promise<FetchDetailsResult> {
   const results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }> = [];
   let detailPageRequests = 0;
   let cacheHits = 0;
   let filteredOut = 0;
+  let stoppedDueToCredits = false;
   
   const baseUrl = 'https://www.truepeoplesearch.com';
-  const uniqueLinks = [...new Set(tasks.map(t => t.searchResult.detailLink))];
+  const uniqueLinks = Array.from(new Set(tasks.map(t => t.searchResult.detailLink)));
   
-  onProgress(`检查缓存: ${uniqueLinks.length} 个链接...`);
+  // 如果有 creditTracker，不使用缓存命中
+  const useCacheHit = !creditTracker;
+  
+  if (useCacheHit) {
+    onProgress(`检查缓存: ${uniqueLinks.length} 个链接...`);
+  } else {
+    onProgress(`获取详情: ${uniqueLinks.length} 个链接（无缓存命中模式）...`);
+  }
   const cachedMap = await getCachedDetails(uniqueLinks);
   
   const tasksToFetch: DetailTaskWithIndex[] = [];
@@ -807,25 +816,33 @@ export async function fetchDetailsInBatch(
     tasksByLink.get(link)!.push(task);
   }
   
-  for (const [link, linkTasks] of tasksByLink) {
-    const cachedArray = cachedMap.get(link);
-    if (cachedArray && cachedArray.length > 0 && cachedArray.some(c => c.phone && c.phone.length >= 10)) {
-      cacheHits++;
-      // 标记缓存数据来源
-      const cachedWithFlag = cachedArray.map(r => ({ ...r, fromCache: true }));
-      const filteredCached = cachedWithFlag.filter(r => shouldIncludeResult(r, filters));
-      filteredOut += cachedArray.length - filteredCached.length;
-      if (filteredCached.length > 0) {
-        for (const task of linkTasks) {
-          results.push({ task, details: filteredCached });
+  // 根据是否使用缓存命中模式处理
+  if (useCacheHit) {
+    // 传统模式：使用缓存命中
+    for (const [link, linkTasks] of Array.from(tasksByLink.entries())) {
+      const cachedArray = cachedMap.get(link);
+      if (cachedArray && cachedArray.length > 0 && cachedArray.some(c => c.phone && c.phone.length >= 10)) {
+        cacheHits++;
+        const cachedWithFlag = cachedArray.map(r => ({ ...r, fromCache: true }));
+        const filteredCached = cachedWithFlag.filter(r => shouldIncludeResult(r, filters));
+        filteredOut += cachedArray.length - filteredCached.length;
+        if (filteredCached.length > 0) {
+          for (const task of linkTasks) {
+            results.push({ task, details: filteredCached });
+          }
         }
+      } else {
+        tasksToFetch.push(linkTasks[0]);
       }
-    } else {
+    }
+  } else {
+    // 实时扣费模式：不使用缓存命中，所有任务都需要获取
+    for (const [link, linkTasks] of Array.from(tasksByLink.entries())) {
       tasksToFetch.push(linkTasks[0]);
     }
   }
   
-  // 调试日志：检查搜索结果中的年龄信息
+  // 调试日志
   let tasksWithAge = 0;
   let tasksWithoutAge = 0;
   for (const task of tasksToFetch) {
@@ -835,27 +852,56 @@ export async function fetchDetailsInBatch(
       tasksWithoutAge++;
     }
   }
-  onProgress(`⚡ 缓存命中: ${cacheHits}, 待获取: ${tasksToFetch.length} (有年龄: ${tasksWithAge}, 无年龄: ${tasksWithoutAge})`);
+  
+  if (useCacheHit) {
+    onProgress(`⚡ 缓存命中: ${cacheHits}, 待获取: ${tasksToFetch.length} (有年龄: ${tasksWithAge}, 无年龄: ${tasksWithoutAge})`);
+  } else {
+    onProgress(`📥 待获取: ${tasksToFetch.length} 条（实时扣费模式）`);
+  }
   
   const cacheToSave: Array<{ link: string; data: TpsDetailResult }> = [];
   let completed = 0;
   let detailsWithAge = 0;
   let detailsWithoutAge = 0;
 
-  if (tasksToFetch.length > 0) {
+  if (tasksToFetch.length > 0 && !stoppedDueToCredits) {
     // 并发控制实现
     const concurrencyPool = new Set<Promise<any>>();
     for (const task of tasksToFetch) {
+        // 检查是否因积分不足而停止
+        if (stoppedDueToCredits) {
+          break;
+        }
+        
+        // 如果有 creditTracker，检查积分是否足够
+        if (creditTracker) {
+          const canAfford = await creditTracker.canAffordDetailPage();
+          if (!canAfford) {
+            stoppedDueToCredits = true;
+            onProgress(`⚠️ 积分不足，停止获取详情`);
+            break;
+          }
+        }
+        
         if (concurrencyPool.size >= concurrency) {
             await Promise.race(concurrencyPool);
         }
 
+        let promiseRef: Promise<void> | null = null;
         const promise = (async () => {
             const link = task.searchResult.detailLink;
             const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
             try {
                 const html = await fetchWithScrapedo(detailUrl, token);
                 detailPageRequests++;
+                
+                // 实时扣除详情页费用
+                if (creditTracker) {
+                  const deductResult = await creditTracker.deductDetailPage();
+                  if (!deductResult.success) {
+                    stoppedDueToCredits = true;
+                  }
+                }
                 const details = parseDetailPage(html, task.searchResult);
                 
                 // 调试日志：统计解析结果中的年龄信息
@@ -885,9 +931,10 @@ export async function fetchDetailsInBatch(
                     const percent = Math.round((completed / tasksToFetch.length) * 100);
                     onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
                 }
-                concurrencyPool.delete(promise);
+                if (promiseRef) concurrencyPool.delete(promiseRef);
             }
         })();
+        promiseRef = promise;
         concurrencyPool.add(promise);
     }
     await Promise.all(Array.from(concurrencyPool));

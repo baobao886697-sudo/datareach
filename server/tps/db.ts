@@ -175,6 +175,7 @@ export async function updateTpsSearchTaskProgress(
     searchPageRequests?: number;
     detailPageRequests?: number;
     cacheHits?: number;
+    creditsUsed?: number;
     logs?: Array<{ timestamp: string; message: string }>;
   }
 ) {
@@ -189,6 +190,7 @@ export async function updateTpsSearchTaskProgress(
   if (data.searchPageRequests !== undefined) updateData.searchPageRequests = data.searchPageRequests;
   if (data.detailPageRequests !== undefined) updateData.detailPageRequests = data.detailPageRequests;
   if (data.cacheHits !== undefined) updateData.cacheHits = data.cacheHits;
+  if (data.creditsUsed !== undefined) updateData.creditsUsed = data.creditsUsed;
   if (data.logs !== undefined) updateData.logs = data.logs;
   
   if (data.status === "running" && !updateData.startedAt) {

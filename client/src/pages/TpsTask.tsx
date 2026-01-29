@@ -176,7 +176,7 @@ export default function TpsTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.tps.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && task?.status === "completed" }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits") }
   );
   
   // 自动滚动到最新日志
@@ -249,6 +249,8 @@ export default function TpsTask() {
         return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">失败</Badge>;
       case "cancelled":
         return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">已取消</Badge>;
+      case "insufficient_credits":
+        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">积分不足</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -295,7 +297,7 @@ export default function TpsTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {task?.status === "completed" && (
+            {(task?.status === "completed" || task?.status === "insufficient_credits") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}
@@ -372,7 +374,7 @@ export default function TpsTask() {
                 <User className="h-8 w-8 text-cyan-400" />
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                缓存命中: {task?.cacheHits || 0}
+                实时扣费模式
               </p>
             </CardContent>
           </Card>
@@ -514,12 +516,7 @@ export default function TpsTask() {
                     <CreditCard className="h-4 w-4 inline mr-1" />
                     当前消耗: <span className="text-yellow-400 font-bold">{task?.creditsUsed?.toFixed(1) || 0}</span> 积分
                   </span>
-                  {task?.cacheHits && task.cacheHits > 0 && (
-                    <span className="text-green-400">
-                      <Zap className="h-4 w-4 inline mr-1" />
-                      缓存命中: {task.cacheHits} 条
-                    </span>
-                  )}
+
                 </div>
                 <span className="text-xs text-muted-foreground">
                   每 2 秒自动刷新
