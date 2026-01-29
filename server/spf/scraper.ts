@@ -72,8 +72,8 @@ class GlobalSemaphore {
   }
 }
 
-// 全局信号量实例 - 限制系统总并发为 3
-const GLOBAL_MAX_CONCURRENCY = 3;
+// 全局信号量实例 - 限制系统总并发为 15
+const GLOBAL_MAX_CONCURRENCY = 15;
 const globalSemaphore = new GlobalSemaphore(GLOBAL_MAX_CONCURRENCY);
 
 // 导出获取状态的函数（用于监控）
