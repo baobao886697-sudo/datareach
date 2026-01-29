@@ -429,9 +429,22 @@ async function executeSpfSearchUnifiedQueue(
   const maxPages = SPF_CONFIG.MAX_SAFE_PAGES;
   
   const logs: Array<{ timestamp: string; message: string }> = [];
+  const MAX_LOG_ENTRIES = 100;  // 限制日志条数
+  const MAX_MESSAGE_LENGTH = 200;  // 限制每条消息长度
+  
   const addLog = (message: string) => {
-    logs.push({ timestamp: new Date().toISOString(), message });
-    console.log(`[SPF Task ${taskId}] ${message}`);
+    // 截断过长的消息
+    const truncatedMessage = message.length > MAX_MESSAGE_LENGTH 
+      ? message.substring(0, MAX_MESSAGE_LENGTH) + '...' 
+      : message;
+    
+    // 如果日志已满，移除最早的条目
+    if (logs.length >= MAX_LOG_ENTRIES) {
+      logs.shift();
+    }
+    
+    logs.push({ timestamp: new Date().toISOString(), message: truncatedMessage });
+    console.log(`[SPF Task ${taskId}] ${truncatedMessage}`);
   };
   
   // 构建子任务列表

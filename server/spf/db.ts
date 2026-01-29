@@ -201,7 +201,7 @@ export async function updateSpfSearchTaskProgress(
   if (data.searchPageRequests !== undefined) updateData.searchPageRequests = data.searchPageRequests;
   if (data.detailPageRequests !== undefined) updateData.detailPageRequests = data.detailPageRequests;
   if (data.cacheHits !== undefined) updateData.cacheHits = data.cacheHits;
-  if (data.logs !== undefined) updateData.logs = data.logs.slice(-200); // 限制日志数量
+  if (data.logs !== undefined) updateData.logs = data.logs.slice(-100); // 限制日志数量为 100 条
   
   if (data.status === "running" && !updateData.startedAt) {
     updateData.startedAt = new Date();
@@ -225,8 +225,8 @@ export async function completeSpfSearchTask(
   }
 ) {
   const database = await db();
-  // 限制日志数量为最近 200 条，避免超过数据库字段大小限制
-  const truncatedLogs = data.logs.slice(-200);
+  // 限制日志数量为最近 100 条，避免超过数据库字段大小限制
+  const truncatedLogs = data.logs.slice(-100);
   await database.update(spfSearchTasks).set({
     status: "completed",
     progress: 100,
@@ -249,11 +249,15 @@ export async function failSpfSearchTask(
   logs: Array<{ timestamp: string; message: string }>
 ) {
   const database = await db();
-  // 限制日志数量为最近 200 条，避免超过数据库字段大小限制
-  const truncatedLogs = logs.slice(-200);
+  // 限制日志数量为最近 100 条，避免超过数据库字段大小限制
+  const truncatedLogs = logs.slice(-100);
+  // 截断过长的错误消息
+  const truncatedErrorMessage = errorMessage.length > 500 
+    ? errorMessage.substring(0, 500) + '...' 
+    : errorMessage;
   await database.update(spfSearchTasks).set({
     status: "failed",
-    errorMessage,
+    errorMessage: truncatedErrorMessage,
     logs: truncatedLogs,
     completedAt: new Date(),
   }).where(eq(spfSearchTasks.id, taskDbId));
