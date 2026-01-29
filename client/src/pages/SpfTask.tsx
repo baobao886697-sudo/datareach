@@ -2,7 +2,7 @@
  * SearchPeopleFree 任务详情页面 - 七彩鎏金风格
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, useParams } from "wouter";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -43,6 +43,12 @@ import {
   Heart,
   Briefcase,
   Star,
+  Terminal,
+  Activity,
+  Zap,
+  AlertCircle,
+  Info,
+  DollarSign,
 } from "lucide-react";
 
 // 七彩鎏金动画样式
@@ -103,6 +109,45 @@ const rainbowStyles = `
     background-size: 400% 400%;
     animation: rainbow-flow 8s ease infinite;
   }
+  
+  .terminal-log {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  
+  .log-entry {
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    transition: background-color 0.2s;
+  }
+  
+  .log-entry:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  .log-time {
+    color: #6b7280;
+    margin-right: 8px;
+  }
+  
+  .log-info { color: #60a5fa; }
+  .log-success { color: #34d399; }
+  .log-warning { color: #fbbf24; }
+  .log-error { color: #f87171; }
+  .log-progress { color: #a78bfa; }
+  .log-config { color: #f472b6; }
+  .log-cost { color: #fcd34d; }
+  
+  @keyframes new-log-flash {
+    0% { background-color: rgba(255, 215, 0, 0.3); }
+    100% { background-color: transparent; }
+  }
+  
+  .log-new {
+    animation: new-log-flash 1s ease-out;
+  }
 `;
 
 export default function SpfTask() {
@@ -111,6 +156,9 @@ export default function SpfTask() {
   const [, setLocation] = useLocation();
   const [page, setPage] = useState(1);
   const pageSize = 50;
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [prevLogCount, setPrevLogCount] = useState(0);
   
   // 获取任务状态
   const { data: task, refetch: refetchTask } = trpc.spf.getTaskStatus.useQuery(
@@ -132,6 +180,47 @@ export default function SpfTask() {
     { taskId: taskId!, page, pageSize },
     { enabled: !!taskId && task?.status === "completed" }
   );
+  
+  // 自动滚动到最新日志
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current && task?.logs) {
+      const container = logContainerRef.current;
+      container.scrollTop = container.scrollHeight;
+    }
+    if (task?.logs) {
+      setPrevLogCount(task.logs.length);
+    }
+  }, [task?.logs, autoScroll]);
+  
+  // 解析日志类型
+  const getLogType = (message: string): string => {
+    if (message.includes('[成功]') || message.includes('✅') || message.includes('完成')) return 'success';
+    if (message.includes('[错误]') || message.includes('失败') || message.includes('❌')) return 'error';
+    if (message.includes('[警告]') || message.includes('⚠️') || message.includes('重试')) return 'warning';
+    if (message.includes('进度') || message.includes('📥') || message.includes('%')) return 'progress';
+    if (message.includes('[配置]') || message.includes('[并发]') || message.includes('•')) return 'config';
+    if (message.includes('[费用]') || message.includes('积分') || message.includes('💰')) return 'cost';
+    return 'info';
+  };
+  
+  // 格式化时间
+  const formatLogTime = (timestamp: string): string => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+  
+  // 获取日志图标
+  const getLogIcon = (type: string) => {
+    switch (type) {
+      case 'success': return <CheckCircle className="h-3 w-3 text-green-400" />;
+      case 'error': return <AlertCircle className="h-3 w-3 text-red-400" />;
+      case 'warning': return <AlertCircle className="h-3 w-3 text-yellow-400" />;
+      case 'progress': return <Activity className="h-3 w-3 text-purple-400" />;
+      case 'config': return <Info className="h-3 w-3 text-pink-400" />;
+      case 'cost': return <DollarSign className="h-3 w-3 text-yellow-400" />;
+      default: return <Zap className="h-3 w-3 text-blue-400" />;
+    }
+  };
   
   // 导出 CSV
   const exportMutation = trpc.spf.exportCsv.useMutation({
@@ -430,18 +519,136 @@ export default function SpfTask() {
           </Card>
         )}
         
-        {/* 任务进行中提示 */}
+        {/* 任务进行中 - 专业实时日志显示 */}
         {(task?.status === "running" || task?.status === "pending") && (
-          <Card className="rainbow-border rainbow-glow">
-            <CardContent className="py-12 text-center">
-              <Loader2 className="h-12 w-12 text-yellow-400 animate-spin mx-auto mb-4" />
-              <h3 className="text-xl font-bold rainbow-text mb-2">搜索进行中</h3>
-              <p className="text-muted-foreground">
-                正在搜索 SearchPeopleFree 数据，请稍候...
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                进度: {task?.progress || 0}%
-              </p>
+          <Card className="rainbow-border">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Terminal className="h-5 w-5 text-green-400" />
+                  <span className="rainbow-text">任务执行日志</span>
+                  <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 animate-pulse">
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    运行中
+                  </Badge>
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAutoScroll(!autoScroll)}
+                    className={autoScroll ? "text-green-400" : "text-muted-foreground"}
+                  >
+                    {autoScroll ? "自动滚动: 开" : "自动滚动: 关"}
+                  </Button>
+                </div>
+              </div>
+              <CardDescription>
+                实时查看任务执行进度和详细信息
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* 进度概览 */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">总进度</p>
+                  <p className="text-lg font-bold text-blue-400">{task?.progress || 0}%</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">搜索页</p>
+                  <p className="text-lg font-bold text-purple-400">{task?.searchPageRequests || 0}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">详情页</p>
+                  <p className="text-lg font-bold text-cyan-400">{task?.detailPageRequests || 0}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">已找到</p>
+                  <p className="text-lg font-bold text-green-400">{task?.totalResults || 0}</p>
+                </div>
+              </div>
+              
+              {/* 进度条 */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                  <span>任务进度</span>
+                  <span>{task?.completedSubTasks || 0} / {task?.totalSubTasks || 0} 子任务</span>
+                </div>
+                <Progress value={task?.progress || 0} className="h-2" />
+              </div>
+              
+              {/* 实时日志终端 */}
+              <div className="bg-slate-900/80 rounded-lg border border-slate-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span className="text-xs text-muted-foreground ml-2">task-log</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {task?.logs?.length || 0} 条日志
+                  </span>
+                </div>
+                <div 
+                  ref={logContainerRef}
+                  className="h-[300px] overflow-y-auto p-3 terminal-log"
+                  onScroll={(e) => {
+                    const target = e.target as HTMLDivElement;
+                    const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 50;
+                    if (!isAtBottom && autoScroll) {
+                      setAutoScroll(false);
+                    }
+                  }}
+                >
+                  {task?.logs && task.logs.length > 0 ? (
+                    task.logs.map((log: { timestamp: string; message: string }, index: number) => {
+                      const logType = getLogType(log.message);
+                      const isNew = index >= prevLogCount - 1 && index === task.logs!.length - 1;
+                      return (
+                        <div 
+                          key={index} 
+                          className={`log-entry flex items-start gap-2 ${isNew ? 'log-new' : ''}`}
+                        >
+                          <span className="log-time flex-shrink-0">
+                            {formatLogTime(log.timestamp)}
+                          </span>
+                          <span className="flex-shrink-0">
+                            {getLogIcon(logType)}
+                          </span>
+                          <span className={`log-${logType} break-all`}>
+                            {log.message}
+                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center text-muted-foreground py-8">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                      <p>等待日志...</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* 费用信息 */}
+              <div className="mt-4 flex items-center justify-between text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">
+                    <CreditCard className="h-4 w-4 inline mr-1" />
+                    当前消耗: <span className="text-yellow-400 font-bold">{task?.creditsUsed?.toFixed(1) || 0}</span> 积分
+                  </span>
+                  {task?.cacheHits && task.cacheHits > 0 && (
+                    <span className="text-green-400">
+                      <Zap className="h-4 w-4 inline mr-1" />
+                      缓存命中: {task.cacheHits} 条
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  每 2 秒自动刷新
+                </span>
+              </div>
             </CardContent>
           </Card>
         )}
