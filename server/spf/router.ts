@@ -353,8 +353,8 @@ export const spfRouter = router({
         "姓名", "年龄", "出生年份", "城市", "州", "位置",
         "电话", "电话类型", "电话年份",
         "邮箱", "婚姻状态", "配偶姓名",
-        "就业信息",
-        "搜索姓名", "缓存命中", "数据来源", "获取时间"
+        "就业信息", "关联企业",
+        "搜索姓名", "缓存命中", "详情链接", "数据来源", "获取时间"
       ];
       
       // 格式化日期时间
@@ -372,6 +372,15 @@ export const spfRouter = router({
         }).replace(/\//g, '/');
       };
       
+      // 格式化关联企业（JSON数组转字符串）
+      const formatBusinesses = (businesses: any): string => {
+        if (!businesses) return "";
+        if (Array.isArray(businesses)) {
+          return businesses.filter(b => b).join(" | ");
+        }
+        return String(businesses);
+      };
+      
       const csvRows = results.map((r: any) => [
         r.name || "",
         r.age?.toString() || "",
@@ -386,8 +395,10 @@ export const spfRouter = router({
         r.maritalStatus || "",
         r.spouseName || "",
         (r.employment || "").replace(/[\r\n]+/g, " | "),  // 将换行符替换为分隔符
+        formatBusinesses(r.businesses),  // 关联企业
         r.searchName || "",
         r.fromCache ? "是" : "否",
+        r.detailLink || "",  // 详情链接
         "实时获取",  // 数据来源：统一标记为实时获取
         formatDateTime(r.createdAt),  // 获取时间
       ]);
