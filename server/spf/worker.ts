@@ -13,6 +13,7 @@
  */
 
 import { parentPort, workerData, isMainThread } from 'worker_threads';
+import { SpfDetailResult } from './scraper';
 import { SCRAPEDO_CONFIG } from './config';
 import * as cheerio from 'cheerio';
 
@@ -53,53 +54,7 @@ export interface SpfFilters {
   excludeWireless?: boolean;
 }
 
-export interface SpfDetailResult {
-  name: string;
-  firstName?: string;
-  lastName?: string;
-  age?: number;
-  birthYear?: string;
-  city?: string;
-  state?: string;
-  location?: string;
-  phone?: string;
-  phoneType?: string;
-  carrier?: string;
-  allPhones?: Array<{ number: string; type: string; year?: number; date?: string }>;
-  phoneYear?: number;
-  reportYear?: number;
-  isPrimary?: boolean;
-  email?: string;
-  allEmails?: string[];
-  maritalStatus?: string;
-  spouseName?: string;
-  spouseLink?: string;
-  employment?: string;
-  education?: string;
-  confirmedDate?: string;
-  latitude?: number;
-  longitude?: number;
-  familyMembers?: string[];
-  associates?: string[];
-  businesses?: string[];
-  propertyValue?: number;
-  yearBuilt?: number;
-  isDeceased?: boolean;
-  detailLink?: string;
-  fromCache?: boolean;
-  addresses?: string[];
-  currentAddress?: string;
-  alsoKnownAs?: string[];
-  addressCount?: number;
-  phoneCount?: number;
-  emailCount?: number;
-  akaCount?: number;
-  familyCount?: number;
-  associateCount?: number;
-  businessCount?: number;
-  searchName?: string;
-  searchLocation?: string;
-}
+
 
 export interface WorkerResult {
   type: 'search' | 'detail';

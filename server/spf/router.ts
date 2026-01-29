@@ -277,9 +277,13 @@ export const spfRouter = router({
       };
     }),
 
-  // 获取搜索结果
+  // 获取搜索结果 (支持分页)
   getResults: protectedProcedure
-    .input(z.object({ taskId: z.string() }))
+    .input(z.object({ 
+      taskId: z.string(),
+      page: z.number().min(1).default(1),
+      pageSize: z.number().min(1).max(100).default(20),
+    }))
     .query(async ({ ctx, input }) => {
       const task = await getSpfSearchTask(input.taskId);
       
@@ -290,13 +294,18 @@ export const spfRouter = router({
         });
       }
       
-      const resultsData = await getSpfSearchResults(task.id);
+      const resultsData = await getSpfSearchResults(task.id, input.page, input.pageSize);
+      const totalPages = Math.ceil(resultsData.total / input.pageSize);
       
       return {
         taskId: task.taskId,
         status: task.status,
         results: resultsData.data,
+        total: resultsData.total,
         totalResults: resultsData.total,
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages,
       };
     }),
 
