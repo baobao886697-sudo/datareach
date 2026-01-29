@@ -370,7 +370,7 @@ export const spfRouter = router({
         r.email || "",
         r.maritalStatus || "",
         r.spouseName || "",
-        r.employment || "",
+        (r.employment || "").replace(/[\r\n]+/g, " | "),  // 将换行符替换为分隔符
         r.searchName || "",
         r.fromCache ? "是" : "否",
       ]);
