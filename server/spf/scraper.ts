@@ -25,10 +25,66 @@
 
 import * as cheerio from 'cheerio';
 
+// ==================== 全局并发限制 ====================
+
+/**
+ * 全局信号量类 - 用于限制系统总并发数
+ * 不管有多少用户同时使用，系统总并发不超过设定值
+ */
+class GlobalSemaphore {
+  private maxConcurrency: number;
+  private currentCount: number = 0;
+  private waitQueue: Array<() => void> = [];
+  
+  constructor(maxConcurrency: number) {
+    this.maxConcurrency = maxConcurrency;
+  }
+  
+  async acquire(): Promise<void> {
+    if (this.currentCount < this.maxConcurrency) {
+      this.currentCount++;
+      return;
+    }
+    
+    // 需要等待
+    return new Promise<void>((resolve) => {
+      this.waitQueue.push(() => {
+        this.currentCount++;
+        resolve();
+      });
+    });
+  }
+  
+  release(): void {
+    this.currentCount--;
+    if (this.waitQueue.length > 0 && this.currentCount < this.maxConcurrency) {
+      const next = this.waitQueue.shift();
+      if (next) next();
+    }
+  }
+  
+  getStatus(): { current: number; max: number; waiting: number } {
+    return {
+      current: this.currentCount,
+      max: this.maxConcurrency,
+      waiting: this.waitQueue.length,
+    };
+  }
+}
+
+// 全局信号量实例 - 限制系统总并发为 15
+const GLOBAL_MAX_CONCURRENCY = 15;
+const globalSemaphore = new GlobalSemaphore(GLOBAL_MAX_CONCURRENCY);
+
+// 导出获取状态的函数（用于监控）
+export function getGlobalConcurrencyStatus() {
+  return globalSemaphore.getStatus();
+}
+
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 5000;   // 5 秒超时（降低以快速失败，避免长时间等待 502）
-const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次（减少重试次数）
+const SCRAPE_TIMEOUT_MS = 10000;   // 10 秒超时（适当放宽以提高成功率）
+const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次
 
 /**
  * 使用 Scrape.do API 获取页面（带超时和重试）
@@ -45,99 +101,107 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   
   let lastError: Error | null = null;
   
-  for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 15000); // 客户端超时比 API 超时多 15 秒
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // 检查是否是可重试的服务器错误 (502, 503, 504)
-      if (!response.ok) {
-        const isRetryableError = [502, 503, 504].includes(response.status);
-        if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
-          console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
-          continue;
-        }
-        throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
-      }
-      
-      const text = await response.text();
-      
-      // 检查响应是否是 JSON 错误（scrape.do 有时返回 200 但内容是 JSON 错误）
-      if (text.startsWith('{') && text.includes('"StatusCode"')) {
-        try {
-          const jsonError = JSON.parse(text);
-          const statusCode = jsonError.StatusCode || 0;
-          const isRetryableError = [502, 503, 504].includes(statusCode);
-          
+  // 获取全局信号量 - 限制系统总并发
+  await globalSemaphore.acquire();
+  
+  try {
+    for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 5000); // 客户端超时比 API 超时多 5 秒
+        
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // 检查是否是可重试的服务器错误 (502, 503, 504)
+        if (!response.ok) {
+          const isRetryableError = [502, 503, 504].includes(response.status);
           if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
-            console.log(`[SPF fetchWithScrapedo] API 返回 JSON 错误 (StatusCode: ${statusCode})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-            await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
+            console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
-          
-          const errorMsg = Array.isArray(jsonError.Message) ? jsonError.Message.join(', ') : (jsonError.Message || 'Unknown error');
-          throw new Error(`Scrape.do API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
-        } catch (parseError: any) {
-          // 如果不是有效的 JSON 或已经是我们的错误，重新抛出
-          if (parseError.message?.includes('Scrape.do API')) {
-            throw parseError;
+          throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const text = await response.text();
+        
+        // 检查响应是否是 JSON 错误（scrape.do 有时返回 200 但内容是 JSON 错误）
+        if (text.startsWith('{') && text.includes('"StatusCode"')) {
+          try {
+            const jsonError = JSON.parse(text);
+            const statusCode = jsonError.StatusCode || 0;
+            const isRetryableError = [502, 503, 504].includes(statusCode);
+            
+            if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
+              console.log(`[SPF fetchWithScrapedo] API 返回 JSON 错误 (StatusCode: ${statusCode})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+              await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
+              continue;
+            }
+            
+            const errorMsg = Array.isArray(jsonError.Message) ? jsonError.Message.join(', ') : (jsonError.Message || 'Unknown error');
+            throw new Error(`Scrape.do API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
+          } catch (parseError: any) {
+            // 如果不是有效的 JSON 或已经是我们的错误，重新抛出
+            if (parseError.message?.includes('Scrape.do API')) {
+              throw parseError;
+            }
           }
         }
-      }
-      
-      // 检查响应是否是有效的 HTML
-      const trimmedText = text.trim();
-      if (!trimmedText.startsWith('<') && !trimmedText.startsWith('<!DOCTYPE')) {
-        if (attempt < SCRAPE_MAX_RETRIES) {
-          console.log(`[SPF fetchWithScrapedo] 响应不是有效的 HTML，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-          await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
+        
+        // 检查响应是否是有效的 HTML
+        const trimmedText = text.trim();
+        if (!trimmedText.startsWith('<') && !trimmedText.startsWith('<!DOCTYPE')) {
+          if (attempt < SCRAPE_MAX_RETRIES) {
+            console.log(`[SPF fetchWithScrapedo] 响应不是有效的 HTML，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
+            continue;
+          }
+          throw new Error('Scrape.do API 返回的不是有效的 HTML');
+        }
+        
+        return text;
+      } catch (error: any) {
+        lastError = error;
+        
+        if (attempt >= SCRAPE_MAX_RETRIES) {
+          break;
+        }
+        
+        const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
+        const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+        const isServerError = error.message?.includes('502') || error.message?.includes('503') || error.message?.includes('504');
+        
+        if (isTimeout || isNetworkError || isServerError) {
+          console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
           continue;
         }
-        throw new Error('Scrape.do API 返回的不是有效的 HTML');
+        
+        throw error;
       }
-      
-      return text;
-    } catch (error: any) {
-      lastError = error;
-      
-      if (attempt >= SCRAPE_MAX_RETRIES) {
-        break;
-      }
-      
-      const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
-      const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
-      const isServerError = error.message?.includes('502') || error.message?.includes('503') || error.message?.includes('504');
-      
-      if (isTimeout || isNetworkError || isServerError) {
-        console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
-        await new Promise(resolve => setTimeout(resolve, 5000 * (attempt + 1)));
-        continue;
-      }
-      
-      throw error;
     }
+    
+    throw lastError || new Error('请求失败');
+  } finally {
+    // 释放全局信号量
+    globalSemaphore.release();
   }
-  
-  throw lastError || new Error('请求失败');
 }
 
 // ==================== 配置常量 ====================
 
 export const SPF_CONFIG = {
-  TASK_CONCURRENCY: 3,       // 同时执行的搜索任务数（降低以减少 502）
-  SCRAPEDO_CONCURRENCY: 5,   // 每个任务的 Scrape.do 并发数（降低）
-  TOTAL_CONCURRENCY: 10,     // 详情页总并发数（降低以避免限流）
+  TASK_CONCURRENCY: 5,       // 同时执行的搜索任务数（全局限制会控制实际并发）
+  SCRAPEDO_CONCURRENCY: 10,  // 每个任务的 Scrape.do 并发数（全局限制会控制实际并发）
+  TOTAL_CONCURRENCY: 20,     // 详情页总并发数（全局限制会控制实际并发）
   MAX_SAFE_PAGES: 25,        // 最大搜索页数（网站上限）
   MAX_DETAILS_PER_TASK: 250, // 每个任务最大详情数 (25页 × 10条/页)
   SEARCH_COST: 0.85,         // 搜索页成本 (每次 API 调用)
