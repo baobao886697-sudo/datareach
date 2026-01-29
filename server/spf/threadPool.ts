@@ -17,17 +17,10 @@
 import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import path from 'path';
+import { THREAD_POOL_CONFIG } from './config';
 
-// ==================== 配置常量 ====================
-
-export const THREAD_POOL_CONFIG = {
-  WORKER_THREAD_COUNT: 3,        // Worker Thread 数量
-  CONCURRENCY_PER_WORKER: 5,     // 每个 Worker 的并发数
-  GLOBAL_MAX_CONCURRENCY: 15,    // 全局最大并发（3 × 5 = 15）
-  TASK_QUEUE_MAX_SIZE: 1000,     // 任务队列最大长度
-  WORKER_RESTART_DELAY: 1000,    // Worker 重启延迟（毫秒）
-  WORKER_RESTART_MAX_RETRIES: 3, // Worker 最大重启次数
-};
+// 重新导出配置，保持向后兼容
+export { THREAD_POOL_CONFIG };
 
 // ==================== 类型定义 ====================
 

@@ -1,13 +1,12 @@
 /**
- * SPF 线程池执行器
+ * SPF 线程池执行器 v2.0
  * 
- * 将线程池模式集成到现有 SPF 搜索流程
- * 
- * 功能：
- * 1. 提供与现有 executeSpfSearchUnifiedQueue 兼容的接口
- * 2. 使用线程池执行搜索和详情获取任务
- * 3. 支持缓存机制
- * 4. 支持进度回调和日志记录
+ * 重构版本：
+ * 1. 实时积分扣除 - 用多少扣多少，扣完即停
+ * 2. 移除缓存读取 - 每次都请求最新数据
+ * 3. 保留数据保存 - 用于历史任务 CSV 导出
+ * 4. 简化费用明细 - 专业、简洁、透明
+ * 5. 优雅停止机制 - 积分不足时返回已获取结果
  */
 
 import { getThreadPool, initThreadPool, THREAD_POOL_CONFIG } from './threadPool';
@@ -21,6 +20,11 @@ import {
   SpfFilters,
   DetailTask,
 } from './scraper';
+import {
+  RealtimeCreditTracker,
+  createRealtimeCreditTracker,
+  formatCostBreakdown,
+} from './realtimeCredits';
 
 // ==================== 类型定义 ====================
 
@@ -37,7 +41,6 @@ export interface ThreadPoolSearchResult {
   stats: {
     totalSearchPages: number;
     totalDetailPages: number;
-    totalCacheHits: number;
     totalResults: number;
     totalFilteredOut: number;
     totalSkippedDeceased: number;
@@ -48,9 +51,13 @@ export interface ThreadPoolSearchResult {
 // ==================== 线程池执行器 ====================
 
 /**
- * 使用线程池执行 SPF 搜索
+ * 使用线程池执行 SPF 搜索 (v2.0 - 实时扣除版)
  * 
- * 这是线程池模式的主入口函数，替代原有的 executeSpfSearchUnifiedQueue
+ * 核心改动：
+ * 1. 移除预扣费机制，改为实时扣除
+ * 2. 移除缓存读取，每次都请求最新数据
+ * 3. 保留数据保存，用于 CSV 导出
+ * 4. 积分不足时优雅停止，返回已获取结果
  */
 export async function executeSpfSearchWithThreadPool(
   taskDbId: number,
@@ -58,14 +65,14 @@ export async function executeSpfSearchWithThreadPool(
   config: any,
   input: ThreadPoolSearchInput,
   userId: number,
-  frozenAmount: number,
+  _frozenAmount: number, // 不再使用，保留参数兼容性
   addLog: (message: string) => void,
-  getCachedDetails: (links: string[]) => Promise<any[]>,
+  _getCachedDetails: (links: string[]) => Promise<any[]>, // 不再使用
   setCachedDetails: (items: Array<{ link: string; data: SpfDetailResult }>) => Promise<void>,
   updateProgress: (data: any) => Promise<void>,
   completeTask: (data: any) => Promise<void>,
   failTask: (error: string, logs: string[]) => Promise<void>,
-  settleCredits: (userId: number, frozenAmount: number, actualCost: number, taskId: string) => Promise<any>,
+  _settleCredits: (userId: number, frozenAmount: number, actualCost: number, taskId: string) => Promise<any>, // 不再使用
   logApi: (data: any) => Promise<void>,
   logUserActivity: (data: any) => Promise<void>,
   saveResults: (taskDbId: number, subTaskIndex: number, name: string, location: string, results: SpfDetailResult[]) => Promise<void>
@@ -100,49 +107,23 @@ export async function executeSpfSearchWithThreadPool(
     addLog(msg);
   };
   
+  // ==================== 初始化实时积分跟踪器 ====================
+  const creditTracker = await createRealtimeCreditTracker(userId, taskId, searchCost, detailCost);
+  const initialBalance = creditTracker.getCurrentBalance();
+  
   // 记录任务信息
   logMessage(`═══════════════════════════════════════════════════`);
-  logMessage(`🚀 SPF 搜索任务启动 (线程池模式)`);
+  logMessage(`🚀 SPF 搜索任务启动`);
   logMessage(`═══════════════════════════════════════════════════`);
   logMessage(`📋 任务 ID: ${taskId}`);
-  logMessage(`📋 搜索配置:`);
-  logMessage(`   • 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名搜索' : '姓名+地点组合搜索'}`);
-  logMessage(`   • 搜索姓名: ${input.names.join(', ')}`);
-  if (input.mode === 'nameLocation' && input.locations) {
-    logMessage(`   • 搜索地点: ${input.locations.join(', ')}`);
-  }
-  logMessage(`   • 搜索组合: ${subTasks.length} 个任务`);
+  logMessage(`📋 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名' : '姓名+地点'}`);
+  logMessage(`📋 搜索组合: ${subTasks.length} 个任务`);
+  logMessage(`💰 当前余额: ${initialBalance.toFixed(1)} 积分`);
+  logMessage(`💰 计费标准: 搜索页 ${searchCost} 积分/页, 详情页 ${detailCost} 积分/页`);
   
   // 显示过滤条件
   const filters = input.filters || {};
-  logMessage(`📋 过滤条件:`);
-  logMessage(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
-  if (filters.excludeLandline) logMessage(`   • 排除座机号码`);
-  if (filters.excludeWireless) logMessage(`   • 排除手机号码`);
-  if (filters.excludeTMobile) logMessage(`   • 排除 T-Mobile 运营商`);
-  if (filters.excludeComcast) logMessage(`   • 排除 Comcast/Xfinity 运营商`);
-  
-  // 显示线程池配置
-  logMessage(`═══════════════════════════════════════════════════`);
-  logMessage(`🧵 线程池配置 (基于 Scrape.do 最佳实践):`);
-  logMessage(`   • Worker Thread 数量: ${THREAD_POOL_CONFIG.WORKER_THREAD_COUNT}`);
-  logMessage(`   • 每个 Worker 并发数: ${THREAD_POOL_CONFIG.CONCURRENCY_PER_WORKER}`);
-  logMessage(`   • 全局最大并发: ${THREAD_POOL_CONFIG.GLOBAL_MAX_CONCURRENCY}`);
-  
-  // 显示预估费用
-  const maxPagesPerTask = SPF_SEARCH_CONFIG.MAX_SAFE_PAGES;
-  const maxDetailsPerTask = SPF_SEARCH_CONFIG.MAX_DETAILS_PER_TASK;
-  const estimatedSearchPages = subTasks.length * maxPagesPerTask;
-  const estimatedSearchCost = estimatedSearchPages * searchCost;
-  const estimatedDetailPages = subTasks.length * maxDetailsPerTask;
-  const estimatedDetailCost = estimatedDetailPages * detailCost;
-  const estimatedTotalCost = estimatedSearchCost + estimatedDetailCost;
-  
-  logMessage(`💰 费用预估 (最大值):`);
-  logMessage(`   • 搜索页费用: 最多 ${estimatedSearchPages} 页 × ${searchCost} = ${estimatedSearchCost.toFixed(1)} 积分`);
-  logMessage(`   • 详情页费用: 最多 ${estimatedDetailPages} 页 × ${detailCost} = ${estimatedDetailCost.toFixed(1)} 积分`);
-  logMessage(`   • 预估总费用: ~${estimatedTotalCost.toFixed(1)} 积分 (实际费用取决于搜索结果)`);
-  logMessage(`   💡 提示: 缓存命中的详情不收费，可节省大量积分`);
+  logMessage(`📋 过滤条件: 年龄 ${filters.minAge || 50}-${filters.maxAge || 79} 岁`);
   
   // 更新任务状态
   await updateProgress({
@@ -154,83 +135,92 @@ export async function executeSpfSearchWithThreadPool(
   // 统计
   let totalSearchPages = 0;
   let totalDetailPages = 0;
-  let totalCacheHits = 0;
   let totalResults = 0;
   let totalFilteredOut = 0;
   let totalSkippedDeceased = 0;
+  let stoppedDueToCredits = false;
   
   // 用于跨任务电话号码去重
   const seenPhones = new Set<string>();
   
   try {
     // 初始化线程池
-    logMessage(`📋 初始化线程池...`);
     const pool = await initThreadPool();
     
-    // 监听进度事件
-    pool.on('taskProgress', (data: { workerId: number; taskId: string; message: string }) => {
-      logMessage(data.message);
-    });
-    
-    // ==================== 阶段一：并发搜索 ====================
-    logMessage(`═══════════════════════════════════════════════════`);
-    logMessage(`📋 阶段一：线程池并发搜索...`);
+    // ==================== 阶段一：逐个搜索（实时扣费） ====================
+    logMessage(`───────────────────────────────────────────────────`);
+    logMessage(`📋 阶段一：搜索阶段`);
     
     // 收集所有详情任务
     const allDetailTasks: DetailTask[] = [];
     const subTaskResults: Map<number, { searchResults: SpfDetailResult[]; searchPages: number }> = new Map();
     
-    // 构建搜索任务
-    const searchTasks = subTasks.map(subTask => ({
-      name: subTask.name,
-      location: subTask.location,
-      token,
-      maxPages,
-      filters: input.filters || {},
-      subTaskIndex: subTask.index,
-    }));
-    
-    // 提交搜索任务到线程池
-    logMessage(`📤 提交 ${searchTasks.length} 个搜索任务到线程池...`);
-    
-    const searchResults = await pool.submitSearchTasks(searchTasks);
-    
-    // 处理搜索结果
-    for (const result of searchResults) {
+    for (const subTask of subTasks) {
+      // 检查积分是否足够
+      if (!await creditTracker.canAffordSearchPage()) {
+        logMessage(`⚠️ 积分不足，停止搜索`);
+        stoppedDueToCredits = true;
+        break;
+      }
+      
+      // 构建搜索任务
+      const searchTask = {
+        name: subTask.name,
+        location: subTask.location,
+        token,
+        maxPages,
+        filters: input.filters || {},
+        subTaskIndex: subTask.index,
+      };
+      
+      // 提交搜索任务
+      const searchResults = await pool.submitSearchTasks([searchTask]);
+      const result = searchResults[0];
+      
       if (result.success && result.data) {
         const { searchResults: results, subTaskIndex } = result.data;
         const stats = result.stats || {};
+        const pagesUsed = stats.searchPageRequests || 1;
         
-        totalSearchPages += stats.searchPageRequests || 0;
+        // 实时扣除搜索页费用
+        for (let i = 0; i < pagesUsed; i++) {
+          const deductResult = await creditTracker.deductSearchPage();
+          if (!deductResult.success) {
+            logMessage(`⚠️ 积分不足，停止搜索`);
+            stoppedDueToCredits = true;
+            break;
+          }
+        }
+        
+        if (stoppedDueToCredits) break;
+        
+        totalSearchPages += pagesUsed;
         totalFilteredOut += stats.filteredOut || 0;
         totalSkippedDeceased += stats.skippedDeceased || 0;
         
         // 保存搜索结果
         subTaskResults.set(subTaskIndex, {
           searchResults: results,
-          searchPages: stats.searchPageRequests || 0,
+          searchPages: pagesUsed,
         });
         
         // 收集详情任务
-        const subTask = subTasks.find(t => t.index === subTaskIndex);
-        if (subTask) {
-          for (const searchResult of results) {
-            if (searchResult.detailLink) {
-              allDetailTasks.push({
-                detailLink: searchResult.detailLink,
-                searchName: subTask.name,
-                searchLocation: subTask.location,
-                searchResult,
-                subTaskIndex,
-              });
-            }
+        for (const searchResult of results) {
+          if (searchResult.detailLink) {
+            allDetailTasks.push({
+              detailLink: searchResult.detailLink,
+              searchName: subTask.name,
+              searchLocation: subTask.location,
+              searchResult,
+              subTaskIndex,
+            });
           }
-          
-          const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
-          logMessage(`✅ [${subTaskIndex + 1}/${subTasks.length}] ${taskName} - ${results.length} 条结果, ${stats.searchPageRequests || 0} 页`);
         }
+        
+        const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
+        logMessage(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${results.length} 条, ${pagesUsed} 页`);
       } else {
-        logMessage(`❌ 搜索任务失败: ${result.error || 'Unknown error'}`);
+        logMessage(`❌ 搜索失败: ${result.error || 'Unknown error'}`);
       }
     }
     
@@ -242,45 +232,15 @@ export async function executeSpfSearchWithThreadPool(
       logs,
     });
     
-    // 增强搜索阶段完成日志
-    logMessage(`════════ 搜索阶段完成 ════════`);
-    logMessage(`📊 搜索页请求: ${totalSearchPages} 页`);
-    logMessage(`📊 待获取详情: ${allDetailTasks.length} 条`);
-    logMessage(`📊 年龄预过滤: ${totalFilteredOut} 条被排除`);
-    if (totalSkippedDeceased > 0) {
-      logMessage(`📊 排除已故: ${totalSkippedDeceased} 条 (Deceased)`);
-    }
+    logMessage(`📊 搜索完成: ${totalSearchPages} 页, ${allDetailTasks.length} 条待获取详情`);
     
-    // ==================== 阶段二：统一队列获取详情 ====================
-    if (allDetailTasks.length > 0) {
-      logMessage(`═══════════════════════════════════════════════════`);
-      logMessage(`📋 阶段二：线程池统一队列获取详情...`);
+    // ==================== 阶段二：获取详情（实时扣费，无缓存读取） ====================
+    if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
+      logMessage(`───────────────────────────────────────────────────`);
+      logMessage(`📋 阶段二：详情获取`);
       
       // 去重详情链接
       const uniqueLinks = Array.from(new Set(allDetailTasks.map(t => t.detailLink)));
-      logMessage(`🔗 去重后 ${uniqueLinks.length} 个唯一详情链接`);
-      
-      // 检查缓存
-      logMessage(`检查缓存: ${uniqueLinks.length} 个链接...`);
-      const cachedArray = await getCachedDetails(uniqueLinks);
-      
-      // 将数组转换为 Map
-      const cachedMap = new Map<string, SpfDetailResult>();
-      for (const item of cachedArray) {
-        if (item.data && item.detailLink) {
-          cachedMap.set(item.detailLink, item.data as SpfDetailResult);
-        }
-      }
-      
-      // 分离缓存命中和需要获取的任务
-      const tasksToFetch: Array<{
-        detailLink: string;
-        token: string;
-        filters: any;
-        subTaskIndex: number;
-        searchName: string;
-        searchLocation: string;
-      }> = [];
       const tasksByLink = new Map<string, DetailTask[]>();
       
       for (const task of allDetailTasks) {
@@ -291,18 +251,34 @@ export async function executeSpfSearchWithThreadPool(
         tasksByLink.get(link)!.push(task);
       }
       
-      const cachedResults: Array<{ task: DetailTask; details: SpfDetailResult }> = [];
+      logMessage(`🔗 ${uniqueLinks.length} 个唯一详情链接`);
       
-      for (const [link, linkTasks] of Array.from(tasksByLink.entries())) {
-        const cached = cachedMap.get(link);
-        if (cached && cached.phone && cached.phone.length >= 10) {
-          totalCacheHits++;
-          const cachedWithFlag = { ...cached, fromCache: true };
-          
-          for (const task of linkTasks) {
-            cachedResults.push({ task, details: cachedWithFlag });
-          }
-        } else {
+      // 检查可以负担多少条详情
+      const affordCheck = await creditTracker.canAffordDetailBatch(uniqueLinks.length);
+      let linksToFetch = uniqueLinks;
+      
+      if (!affordCheck.canAfford) {
+        logMessage(`⚠️ 积分不足，无法获取详情`);
+        stoppedDueToCredits = true;
+      } else if (affordCheck.affordableCount < uniqueLinks.length) {
+        logMessage(`⚠️ 积分仅够获取 ${affordCheck.affordableCount}/${uniqueLinks.length} 条详情`);
+        linksToFetch = uniqueLinks.slice(0, affordCheck.affordableCount);
+        stoppedDueToCredits = true;
+      }
+      
+      // 构建详情任务
+      const tasksToFetch: Array<{
+        detailLink: string;
+        token: string;
+        filters: any;
+        subTaskIndex: number;
+        searchName: string;
+        searchLocation: string;
+      }> = [];
+      
+      for (const link of linksToFetch) {
+        const linkTasks = tasksByLink.get(link);
+        if (linkTasks && linkTasks.length > 0) {
           const firstTask = linkTasks[0];
           tasksToFetch.push({
             detailLink: link,
@@ -315,13 +291,12 @@ export async function executeSpfSearchWithThreadPool(
         }
       }
       
-      logMessage(`⚡ 缓存命中: ${totalCacheHits}, 待获取: ${tasksToFetch.length}`);
-      
       // 提交详情任务到线程池
       const cacheToSave: Array<{ link: string; data: SpfDetailResult }> = [];
+      const fetchedResults: Array<{ task: DetailTask; details: SpfDetailResult }> = [];
       
       if (tasksToFetch.length > 0) {
-        logMessage(`📤 提交 ${tasksToFetch.length} 个详情任务到线程池...`);
+        logMessage(`📤 获取 ${tasksToFetch.length} 条详情...`);
         
         const detailResults = await pool.submitDetailTasks(tasksToFetch);
         
@@ -330,11 +305,22 @@ export async function executeSpfSearchWithThreadPool(
           if (result.success && result.data) {
             const { details, subTaskIndex } = result.data;
             const stats = result.stats || {};
+            const pagesUsed = stats.detailPageRequests || 1;
             
-            totalDetailPages += stats.detailPageRequests || 0;
+            // 实时扣除详情页费用
+            for (let i = 0; i < pagesUsed; i++) {
+              const deductResult = await creditTracker.deductDetailPage();
+              if (!deductResult.success) {
+                logMessage(`⚠️ 积分不足，停止获取详情`);
+                stoppedDueToCredits = true;
+                break;
+              }
+            }
+            
+            totalDetailPages += pagesUsed;
             
             if (details) {
-              // 保存到缓存
+              // 保存到缓存（用于 CSV 导出）
               if (details.phone && details.phone.length >= 10) {
                 cacheToSave.push({ link: details.detailLink!, data: details });
               }
@@ -342,7 +328,7 @@ export async function executeSpfSearchWithThreadPool(
               // 关联到所有使用此链接的任务
               const linkTasks = tasksByLink.get(details.detailLink!) || [];
               for (const task of linkTasks) {
-                cachedResults.push({ task, details });
+                fetchedResults.push({ task, details });
               }
             }
           } else {
@@ -351,13 +337,15 @@ export async function executeSpfSearchWithThreadPool(
               totalFilteredOut += result.stats.filteredOut;
             }
           }
+          
+          if (stoppedDueToCredits) break;
         }
       }
       
       // 按子任务分组保存结果
       const resultsBySubTask = new Map<number, SpfDetailResult[]>();
       
-      for (const { task, details } of cachedResults) {
+      for (const { task, details } of fetchedResults) {
         if (!details) continue;
         
         if (!resultsBySubTask.has(task.subTaskIndex)) {
@@ -391,17 +379,12 @@ export async function executeSpfSearchWithThreadPool(
         }
       }
       
-      // 保存缓存
+      // 保存数据到缓存表（用于 CSV 导出，不用于读取）
       if (cacheToSave.length > 0) {
-        logMessage(`保存缓存: ${cacheToSave.length} 条...`);
         await setCachedDetails(cacheToSave);
       }
       
-      logMessage(`════════ 详情阶段完成 ════════`);
-      logMessage(`📊 详情页请求: ${totalDetailPages} 页`);
-      logMessage(`📊 缓存命中: ${totalCacheHits} 条`);
-      logMessage(`📊 详情过滤: ${totalFilteredOut} 条被排除`);
-      logMessage(`📊 有效结果: ${totalResults} 条`);
+      logMessage(`📊 详情完成: ${totalDetailPages} 页, ${totalResults} 条有效结果`);
     }
     
     // 更新最终进度
@@ -410,14 +393,33 @@ export async function executeSpfSearchWithThreadPool(
       totalResults,
       searchPageRequests: totalSearchPages,
       detailPageRequests: totalDetailPages,
-      cacheHits: totalCacheHits,
       logs,
     });
     
-    // ==================== 结算退还机制 ====================
-    const actualCost = totalSearchPages * searchCost + totalDetailPages * detailCost;
+    // ==================== 费用明细（简洁专业版） ====================
+    const breakdown = creditTracker.getCostBreakdown();
+    const currentBalance = creditTracker.getCurrentBalance();
     
-    const settlement = await settleCredits(userId, frozenAmount, actualCost, taskId);
+    logMessage(`═══════════════════════════════════════════════════`);
+    if (stoppedDueToCredits) {
+      logMessage(`⚠️ 任务因积分不足提前结束`);
+    } else {
+      logMessage(`🎉 任务完成`);
+    }
+    logMessage(`═══════════════════════════════════════════════════`);
+    logMessage(`💰 费用明细`);
+    logMessage(`───────────────────────────────────────────────────`);
+    logMessage(`📋 搜索页: ${breakdown.searchPages} 页 × ${searchCost} = ${breakdown.searchCost.toFixed(1)} 积分`);
+    logMessage(`📋 详情页: ${breakdown.detailPages} 页 × ${detailCost} = ${breakdown.detailCost.toFixed(1)} 积分`);
+    logMessage(`───────────────────────────────────────────────────`);
+    logMessage(`📊 本次消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
+    logMessage(`📊 剩余余额: ${currentBalance.toFixed(1)} 积分`);
+    logMessage(`📊 获取结果: ${totalResults} 条`);
+    if (totalResults > 0) {
+      const costPerResult = breakdown.totalCost / totalResults;
+      logMessage(`📊 每条成本: ${costPerResult.toFixed(2)} 积分`);
+    }
+    logMessage(`═══════════════════════════════════════════════════`);
     
     // 记录 API 日志
     await logApi({
@@ -428,77 +430,23 @@ export async function executeSpfSearchWithThreadPool(
       responseStatus: 200,
       responseTime: 0,
       success: true,
-      creditsUsed: actualCost,
+      creditsUsed: breakdown.totalCost,
     });
-    
-    // 增强完成日志
-    logMessage(`═══════════════════════════════════════════════════`);
-    logMessage(`🎉 任务完成! (线程池模式)`);
-    logMessage(`═══════════════════════════════════════════════════`);
-    
-    // 搜索结果摘要
-    logMessage(`📊 搜索结果摘要:`);
-    logMessage(`   • 有效结果: ${totalResults} 条联系人信息`);
-    logMessage(`   • 缓存命中: ${totalCacheHits} 条 (免费获取)`);
-    logMessage(`   • 过滤排除: ${totalFilteredOut} 条 (不符合筛选条件)`);
-    if (totalSkippedDeceased > 0) {
-      logMessage(`   • 排除已故: ${totalSkippedDeceased} 条 (Deceased)`);
-    }
-    
-    // 费用明细
-    const searchPageCost = totalSearchPages * searchCost;
-    const detailPageCost = totalDetailPages * detailCost;
-    const savedByCache = totalCacheHits * detailCost;
-    
-    logMessage(`💰 费用明细:`);
-    logMessage(`   • 搜索页费用: ${totalSearchPages} 页 × ${searchCost} = ${searchPageCost.toFixed(1)} 积分`);
-    logMessage(`   • 详情页费用: ${totalDetailPages} 页 × ${detailCost} = ${detailPageCost.toFixed(1)} 积分`);
-    logMessage(`   • 缓存节省: ${totalCacheHits} 条 × ${detailCost} = ${savedByCache.toFixed(1)} 积分`);
-    logMessage(`   ──────────────────────────────`);
-    logMessage(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
-    logMessage(`   • 实际消耗: ${actualCost.toFixed(1)} 积分`);
-    if (settlement.refundAmount > 0) {
-      logMessage(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
-    }
-    logMessage(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
-    
-    // 费用效率分析
-    logMessage(`📈 费用效率:`);
-    if (totalResults > 0) {
-      const costPerResult = actualCost / totalResults;
-      logMessage(`   • 每条结果成本: ${costPerResult.toFixed(2)} 积分`);
-    }
-    const cacheHitRate = totalCacheHits > 0 ? ((totalCacheHits / (totalCacheHits + totalDetailPages)) * 100).toFixed(1) : '0';
-    logMessage(`   • 缓存命中率: ${cacheHitRate}%`);
-    if (savedByCache > 0 && actualCost > 0) {
-      logMessage(`   • 缓存节省: ${savedByCache.toFixed(1)} 积分 (相当于 ${Math.round(savedByCache / actualCost * 100)}% 的实际费用)`);
-    }
-    
-    // 线程池状态
-    const poolStatus = pool.getStatus();
-    logMessage(`🧵 线程池状态:`);
-    logMessage(`   • 总任务提交: ${poolStatus.stats.totalTasksSubmitted}`);
-    logMessage(`   • 总任务完成: ${poolStatus.stats.totalTasksCompleted}`);
-    logMessage(`   • 总任务失败: ${poolStatus.stats.totalTasksFailed}`);
-    
-    logMessage(`═══════════════════════════════════════════════════`);
-    logMessage(`💡 提示: 相同姓名/地点的后续搜索将命中缓存，节省更多积分`);
-    logMessage(`═══════════════════════════════════════════════════`);
     
     await completeTask({
       totalResults,
       searchPageRequests: totalSearchPages,
       detailPageRequests: totalDetailPages,
-      cacheHits: totalCacheHits,
-      creditsUsed: actualCost,
+      creditsUsed: breakdown.totalCost,
       logs,
+      stoppedDueToCredits,
     });
     
     // 记录用户活动日志
     await logUserActivity({
       userId,
       action: 'SPF搜索',
-      details: `搜索完成(线程池模式): ${input.names.length}个姓名, ${totalResults}条结果, 消耗${actualCost.toFixed(1)}积分`,
+      details: `搜索完成: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${breakdown.totalCost.toFixed(1)}积分${stoppedDueToCredits ? ' (积分不足提前结束)' : ''}`,
       ipAddress: undefined,
       userAgent: undefined,
     });
@@ -506,18 +454,11 @@ export async function executeSpfSearchWithThreadPool(
   } catch (error: any) {
     logMessage(`❌ 搜索任务失败: ${error.message}`);
     
-    // 失败时的结算退还
-    const partialCost = totalSearchPages * searchCost + totalDetailPages * detailCost;
+    // 获取已消耗的费用
+    const breakdown = creditTracker.getCostBreakdown();
     
-    const settlement = await settleCredits(userId, frozenAmount, partialCost, taskId);
-    
-    logMessage(`💰 失败结算:`);
-    logMessage(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
-    logMessage(`   • 已消耗: ${partialCost.toFixed(1)} 积分（搜索页 ${totalSearchPages} + 详情页 ${totalDetailPages}）`);
-    if (settlement.refundAmount > 0) {
-      logMessage(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
-    }
-    logMessage(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
+    logMessage(`💰 已消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
+    logMessage(`📊 剩余余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
     
     await failTask(error.message, logs);
     
@@ -530,7 +471,7 @@ export async function executeSpfSearchWithThreadPool(
       responseTime: 0,
       success: false,
       errorMessage: error.message,
-      creditsUsed: partialCost,
+      creditsUsed: breakdown.totalCost,
     });
   }
 }

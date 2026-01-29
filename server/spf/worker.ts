@@ -13,6 +13,7 @@
  */
 
 import { parentPort, workerData, isMainThread } from 'worker_threads';
+import { SCRAPEDO_CONFIG } from './config';
 import * as cheerio from 'cheerio';
 
 // ==================== 类型定义 ====================
@@ -20,7 +21,7 @@ import * as cheerio from 'cheerio';
 export interface WorkerTask {
   type: 'search' | 'detail';
   taskId: string;
-  data: SearchTaskData | DetailTaskData;
+  data: SearchTaskData | DetailTask;
 }
 
 export interface SearchTaskData {
@@ -32,7 +33,7 @@ export interface SearchTaskData {
   subTaskIndex: number;
 }
 
-export interface DetailTaskData {
+export interface DetailTask {
   detailLink: string;
   token: string;
   filters: SpfFilters;
@@ -173,8 +174,8 @@ class WorkerSemaphore {
 
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 10000;
-const SCRAPE_MAX_RETRIES = 2;
+const SCRAPE_TIMEOUT_MS = SCRAPEDO_CONFIG.TIMEOUT_MS;
+const SCRAPE_MAX_RETRIES = SCRAPEDO_CONFIG.MAX_RETRIES;
 
 /**
  * 使用 Scrape.do API 获取页面（带超时和重试）
@@ -635,7 +636,7 @@ if (!isMainThread && parentPort) {
             },
           } as WorkerResponse);
         } else if (task.type === 'detail') {
-          const result = await executeDetailTask(task.data as DetailTaskData, workerSemaphore, workerId);
+          const result = await executeDetailTask(task.data as DetailTask, workerSemaphore, workerId);
           
           parentPort!.postMessage({
             type: 'result',
@@ -789,7 +790,7 @@ async function executeSearchTask(
  * 执行详情任务
  */
 async function executeDetailTask(
-  data: DetailTaskData,
+  data: DetailTask,
   semaphore: WorkerSemaphore,
   workerId: number
 ): Promise<{ success: boolean; data?: any; error?: string; stats?: any }> {
