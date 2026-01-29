@@ -27,7 +27,7 @@ import * as cheerio from 'cheerio';
 
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 15000;  // 15 秒超时（SearchPeopleFree 页面较复杂）
+const SCRAPE_TIMEOUT_MS = 30000;  // 30 秒超时（SearchPeopleFree 页面较复杂，需要更多时间）
 const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次
 
 /**
@@ -40,7 +40,7 @@ const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次
  */
 async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   const encodedUrl = encodeURIComponent(url);
-  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}&disableRetry=true`;
+  const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us&timeout=${SCRAPE_TIMEOUT_MS}`;
   
   let lastError: Error | null = null;
   
