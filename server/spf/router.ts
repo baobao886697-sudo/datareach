@@ -1,7 +1,7 @@
 /**
  * SearchPeopleFree (SPF) tRPC 路由
  * 
- * v2.0 - 参考 TPS 优化版本
+ * v3.0 - 线程池+并发模式 (基于 Scrape.do 官方最佳实践)
  * 
  * SPF 独特亮点：
  * - 电子邮件信息
@@ -10,6 +10,12 @@
  * - 就业状态
  * - 数据确认日期
  * - 地理坐标
+ * 
+ * v3.0 线程池模式特性：
+ * - 3 个 Worker Thread，每个 Worker 5 并发
+ * - 全局最大 15 并发（跨所有 Worker）
+ * - 任务队列管理，故障隔离
+ * - 负载均衡，优雅关闭
  * 
  * 优化特性：
  * - 两阶段并发执行：先并发获取所有分页，再并发获取所有详情
@@ -28,7 +34,10 @@ import {
   SpfDetailResult,
   DetailTask,
   SPF_CONFIG,
+  isThreadPoolEnabled,
 } from "./scraper";
+import { executeSpfSearchWithThreadPool, shouldUseThreadPool } from "./threadPoolExecutor";
+import { THREAD_POOL_CONFIG } from "./config";
 import {
   getSpfConfig,
   createSpfSearchTask,
@@ -51,9 +60,10 @@ import { getDb, logUserActivity } from "../db";
 import { spfSearchTasks } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 
-// 并发配置
-const TOTAL_CONCURRENCY = SPF_CONFIG.TOTAL_CONCURRENCY;  // 20 详情页并发
-const SEARCH_CONCURRENCY = SPF_CONFIG.TASK_CONCURRENCY;  // 3 任务并发
+// 并发配置 (基于 Scrape.do 官方最佳实践)
+// v3.0: 线程池模式 - 3 Worker Thread × 5 并发 = 15 全局并发
+const TOTAL_CONCURRENCY = THREAD_POOL_CONFIG.GLOBAL_MAX_CONCURRENCY;  // 15 全局并发
+const SEARCH_CONCURRENCY = THREAD_POOL_CONFIG.WORKER_THREAD_COUNT;    // 3 Worker Thread
 
 // 输入验证 schema
 const spfFiltersSchema = z.object({
@@ -207,16 +217,46 @@ export const spfRouter = router({
       }
       
       // 异步执行搜索任务
-      executeSpfSearchUnifiedQueue(
-        task.id,
-        task.taskId,
-        config,
-        input,
-        userId,
-        freezeResult.frozenAmount
-      ).catch(err => {
-        console.error(`[SPF] 任务执行失败: ${task.taskId}`, err);
-      });
+      // v3.0: 支持线程池模式和纯异步模式
+      if (shouldUseThreadPool()) {
+        // 线程池模式 (基于 Scrape.do 官方最佳实践)
+        console.log(`[SPF] 使用线程池模式执行任务: ${task.taskId}`);
+        executeSpfSearchWithThreadPool(
+          task.id,
+          task.taskId,
+          config,
+          input,
+          userId,
+          freezeResult.frozenAmount,
+          (msg) => console.log(`[SPF Task ${task.taskId}] ${msg}`),
+          getCachedSpfDetails,
+          async (items) => {
+            const cacheDays = config.cacheDays || 180;
+            await saveSpfDetailCache(items, cacheDays);
+          },
+          async (data) => await updateSpfSearchTaskProgress(task.id, data),
+          async (data) => await completeSpfSearchTask(task.id, data),
+          async (error, logs) => await failSpfSearchTask(task.id, error, logs.map(msg => ({ timestamp: new Date().toISOString(), message: msg }))),
+          settleSpfCredits,
+          logApi,
+          logUserActivity,
+          saveSpfSearchResults
+        ).catch(err => {
+          console.error(`[SPF] 线程池任务执行失败: ${task.taskId}`, err);
+        });
+      } else {
+        // 纯异步模式 (兼容旧版本)
+        executeSpfSearchUnifiedQueue(
+          task.id,
+          task.taskId,
+          config,
+          input,
+          userId,
+          freezeResult.frozenAmount
+        ).catch(err => {
+          console.error(`[SPF] 任务执行失败: ${task.taskId}`, err);
+        });
+      }
       
       return {
         taskId: task.taskId,
@@ -666,7 +706,7 @@ async function executeSpfSearchUnifiedQueue(
     
     // 显示预扣费信息
     const searchPageCostSoFar = totalSearchPages * searchCost;
-    const uniqueDetailLinks = [...new Set(allDetailTasks.map(t => t.detailLink))];
+    const uniqueDetailLinks = Array.from(new Set(allDetailTasks.map(t => t.detailLink)));
     const estimatedDetailCostRemaining = uniqueDetailLinks.length * detailCost;
     const totalEstimatedCost = searchPageCostSoFar + estimatedDetailCostRemaining;
     
@@ -679,7 +719,7 @@ async function executeSpfSearchUnifiedQueue(
       addLog(`📋 阶段二：统一队列获取详情（${TOTAL_CONCURRENCY} 并发）...`);
       
       // 去重详情链接
-      const uniqueLinks = [...new Set(allDetailTasks.map(t => t.detailLink))];
+      const uniqueLinks = Array.from(new Set(allDetailTasks.map(t => t.detailLink)));
       addLog(`🔗 去重后 ${uniqueLinks.length} 个唯一详情链接`);
       
       // 统一获取详情
@@ -726,7 +766,7 @@ async function executeSpfSearchUnifiedQueue(
       }
       
       // 保存结果到数据库
-      for (const [subTaskIndex, results] of resultsBySubTask) {
+      for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
         const subTask = subTasks.find(t => t.index === subTaskIndex);
         if (subTask && results.length > 0) {
           await saveSpfSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);

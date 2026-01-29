@@ -198,15 +198,11 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
 
 // ==================== 配置常量 ====================
 
-export const SPF_CONFIG = {
-  TASK_CONCURRENCY: 3,       // 同时执行的搜索任务数（3任务并发）
-  SCRAPEDO_CONCURRENCY: 10,  // 每个任务的 Scrape.do 并发数（全局限制会控制实际并发）
-  TOTAL_CONCURRENCY: 20,     // 详情页总并发数（全局限制会控制实际并发）
-  MAX_SAFE_PAGES: 25,        // 最大搜索页数（网站上限）
-  MAX_DETAILS_PER_TASK: 250, // 每个任务最大详情数 (25页 × 10条/页)
-  SEARCH_COST: 0.85,         // 搜索页成本 (每次 API 调用)
-  DETAIL_COST: 0.85,         // 详情页成本 (每次 API 调用)
-};
+// 从统一配置文件导入（基于 Scrape.do 官方最佳实践）
+import { SPF_CONFIG, THREAD_POOL_CONFIG, SPF_SEARCH_CONFIG, SCRAPEDO_CONFIG, isThreadPoolEnabled } from './config';
+
+// 重新导出配置供其他模块使用
+export { SPF_CONFIG, THREAD_POOL_CONFIG, SPF_SEARCH_CONFIG, SCRAPEDO_CONFIG, isThreadPoolEnabled };
 
 // ==================== 类型定义 ====================
 
@@ -1168,7 +1164,7 @@ export async function fetchDetailsInBatch(
   let filteredOut = 0;
   
   const baseUrl = 'https://www.searchpeoplefree.com';
-  const uniqueLinks = [...new Set(tasks.map(t => t.detailLink))];
+  const uniqueLinks = Array.from(new Set(tasks.map(t => t.detailLink)));
   
   onProgress(`检查缓存: ${uniqueLinks.length} 个链接...`);
   const cachedMap = await getCachedDetails(uniqueLinks);
@@ -1185,7 +1181,7 @@ export async function fetchDetailsInBatch(
     tasksByLink.get(link)!.push(task);
   }
   
-  for (const [link, linkTasks] of tasksByLink) {
+  for (const [link, linkTasks] of Array.from(tasksByLink.entries())) {
     const cached = cachedMap.get(link);
     if (cached && cached.phone && cached.phone.length >= 10) {
       cacheHits++;
@@ -1219,6 +1215,7 @@ export async function fetchDetailsInBatch(
         await Promise.race(concurrencyPool);
       }
       
+      let promiseRef: Promise<any> = null as any;
       const promise = (async () => {
         const link = task.detailLink;
         const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
@@ -1274,10 +1271,10 @@ export async function fetchDetailsInBatch(
             const percent = Math.round((completed / tasksToFetch.length) * 100);
             onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
           }
-          concurrencyPool.delete(promise);
+          concurrencyPool.delete(promiseRef);
         }
       })();
-      
+      promiseRef = promise;
       concurrencyPool.add(promise);
     }
     
