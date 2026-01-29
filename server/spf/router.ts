@@ -351,7 +351,7 @@ export const spfRouter = router({
         });
       }
       
-      if (task.status !== "completed") {
+      if (task.status !== "completed" && task.status !== "insufficient_credits") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成",
@@ -367,9 +367,11 @@ export const spfRouter = router({
         });
       }
       
-      // CSV 表头
+      // CSV 表头 - 完整字段
       const headers = [
         "姓名",
+        "名",
+        "姓",
         "年龄",
         "出生年份",
         "城市",
@@ -377,6 +379,7 @@ export const spfRouter = router({
         "完整地址",
         "电话",
         "电话类型",
+        "运营商",
         "电话年份",
         "邮箱",
         "婚姻状态",
@@ -389,14 +392,19 @@ export const spfRouter = router({
         "获取时间",
       ];
       
-      // 格式化电话号码
+      // 格式化电话号码 - 纯数字格式，前缀加 1
       const formatPhone = (phone: string | null | undefined): string => {
         if (!phone) return "";
         const digits = phone.replace(/\D/g, "");
-        if (digits.length === 10) {
-          return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+        if (digits.length === 0) return "";
+        // 确保前缀有 1
+        if (digits.startsWith("1") && digits.length === 11) {
+          return digits;
         }
-        return phone;
+        if (digits.length === 10) {
+          return "1" + digits;
+        }
+        return digits;
       };
       
       // 格式化日期时间
@@ -425,6 +433,8 @@ export const spfRouter = router({
       
       const csvRows = results.map((r: any) => [
         r.name || "",
+        r.firstName || "",
+        r.lastName || "",
         r.age?.toString() || "",
         r.birthYear || "",
         r.city || "",
@@ -432,6 +442,7 @@ export const spfRouter = router({
         r.location || (r.city && r.state ? `${r.city}, ${r.state}` : (r.city || r.state || "")),
         formatPhone(r.phone),
         r.phoneType || "",
+        r.carrier || "",
         r.phoneYear?.toString() || "",
         r.email || "",
         r.maritalStatus || "",
