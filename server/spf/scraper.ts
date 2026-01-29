@@ -83,7 +83,7 @@ export function getGlobalConcurrencyStatus() {
 
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 10000;   // 10 秒超时（适当放宽以提高成功率）
+const SCRAPE_TIMEOUT_MS = 30000;   // 30 秒超时（住宅代理响应较慢，需要更长时间）
 const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次
 
 /**
