@@ -299,6 +299,12 @@ export async function getUserSpfSearchTasks(
 /**
  * 保存搜索结果（包含 SPF 独特字段）
  */
+// 安全截断字符串函数
+function truncateString(str: string | undefined | null, maxLength: number): string {
+  if (!str) return '';
+  return str.length > maxLength ? str.substring(0, maxLength) : str;
+}
+
 export async function saveSpfSearchResults(
   taskDbId: number,
   subTaskIndex: number,
@@ -347,31 +353,31 @@ export async function saveSpfSearchResults(
   const values = results.map(r => ({
     taskId: taskDbId,
     subTaskIndex,
-    searchName,
-    searchLocation,
-    name: r.name || '',
-    firstName: r.firstName || '',
-    lastName: r.lastName || '',
+    searchName: truncateString(searchName, 200),
+    searchLocation: truncateString(searchLocation, 200),
+    name: truncateString(r.name, 200),
+    firstName: truncateString(r.firstName, 100),
+    lastName: truncateString(r.lastName, 100),
     age: r.age ?? null,
-    birthYear: r.birthYear || null,
-    city: r.city || '',
-    state: r.state || '',
-    location: r.location || '',
-    phone: r.phone || '',
-    phoneType: r.phoneType || '',
+    birthYear: truncateString(r.birthYear, 20),
+    city: truncateString(r.city, 100),
+    state: truncateString(r.state, 50),
+    location: truncateString(r.location, 200),
+    phone: truncateString(r.phone, 50),
+    phoneType: truncateString(r.phoneType, 50),
     phoneYear: r.phoneYear ?? null,
-    carrier: r.carrier || '',
+    carrier: truncateString(r.carrier, 100),
     allPhones: r.allPhones || [],
     reportYear: r.reportYear ?? null,
     isPrimary: r.isPrimary ?? false,
-    // SPF 独特字段
-    email: r.email || '',
+    // SPF 独特字段 - 按 schema 定义截断
+    email: truncateString(r.email, 200),
     allEmails: r.allEmails || [],
-    maritalStatus: r.maritalStatus || '',
-    spouseName: r.spouseName || '',
-    spouseLink: r.spouseLink || '',
-    employment: r.employment || '',
-    confirmedDate: r.confirmedDate || '',
+    maritalStatus: truncateString(r.maritalStatus, 50),
+    spouseName: truncateString(r.spouseName, 200),
+    spouseLink: truncateString(r.spouseLink, 500),
+    employment: truncateString(r.employment, 200),
+    confirmedDate: truncateString(r.confirmedDate, 50),
     latitude: r.latitude?.toString() || null,
     longitude: r.longitude?.toString() || null,
     // 其他字段
@@ -381,7 +387,7 @@ export async function saveSpfSearchResults(
     propertyValue: r.propertyValue ?? 0,
     yearBuilt: r.yearBuilt ?? null,
     isDeceased: r.isDeceased ?? false,
-    detailLink: r.detailLink || '',
+    detailLink: truncateString(r.detailLink, 500),
     fromCache: r.fromCache ?? false,
   }));
   
