@@ -52,8 +52,8 @@ import { spfSearchTasks } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 
 // 并发配置
-const TOTAL_CONCURRENCY = SPF_CONFIG.TOTAL_CONCURRENCY;  // 40 总并发
-const SEARCH_CONCURRENCY = SPF_CONFIG.TASK_CONCURRENCY;  // 4 搜索并发
+const TOTAL_CONCURRENCY = SPF_CONFIG.TOTAL_CONCURRENCY;  // 20 详情页并发
+const SEARCH_CONCURRENCY = SPF_CONFIG.TASK_CONCURRENCY;  // 3 任务并发
 
 // 输入验证 schema
 const spfFiltersSchema = z.object({

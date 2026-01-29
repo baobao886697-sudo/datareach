@@ -199,7 +199,7 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
 // ==================== 配置常量 ====================
 
 export const SPF_CONFIG = {
-  TASK_CONCURRENCY: 5,       // 同时执行的搜索任务数（全局限制会控制实际并发）
+  TASK_CONCURRENCY: 3,       // 同时执行的搜索任务数（3任务并发）
   SCRAPEDO_CONCURRENCY: 10,  // 每个任务的 Scrape.do 并发数（全局限制会控制实际并发）
   TOTAL_CONCURRENCY: 20,     // 详情页总并发数（全局限制会控制实际并发）
   MAX_SAFE_PAGES: 25,        // 最大搜索页数（网站上限）
