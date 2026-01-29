@@ -27,8 +27,8 @@ import * as cheerio from 'cheerio';
 
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 60000;  // 60 秒超时（恢复之前成功的配置）
-const SCRAPE_MAX_RETRIES = 3;    // 最多重试 3 次（恢复之前成功的配置）
+const SCRAPE_TIMEOUT_MS = 5000;   // 5 秒超时（降低以快速失败，避免长时间等待 502）
+const SCRAPE_MAX_RETRIES = 2;    // 最多重试 2 次（减少重试次数）
 
 /**
  * 使用 Scrape.do API 获取页面（带超时和重试）
@@ -135,9 +135,9 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
 // ==================== 配置常量 ====================
 
 export const SPF_CONFIG = {
-  TASK_CONCURRENCY: 4,       // 同时执行的搜索任务数
-  SCRAPEDO_CONCURRENCY: 10,  // 每个任务的 Scrape.do 并发数
-  TOTAL_CONCURRENCY: 20,     // 详情页总并发数（降低以避免限流）
+  TASK_CONCURRENCY: 3,       // 同时执行的搜索任务数（降低以减少 502）
+  SCRAPEDO_CONCURRENCY: 5,   // 每个任务的 Scrape.do 并发数（降低）
+  TOTAL_CONCURRENCY: 10,     // 详情页总并发数（降低以避免限流）
   MAX_SAFE_PAGES: 25,        // 最大搜索页数（网站上限）
   MAX_DETAILS_PER_TASK: 250, // 每个任务最大详情数 (25页 × 10条/页)
   SEARCH_COST: 0.85,         // 搜索页成本 (每次 API 调用)
