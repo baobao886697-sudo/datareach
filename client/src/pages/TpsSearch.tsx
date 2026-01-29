@@ -183,15 +183,14 @@ export default function TpsSearch() {
   const searchCost = tpsConfig?.searchCost || 0.3;
   const detailCost = tpsConfig?.detailCost || 0.3;
   
-  // 预估消耗计算（包含搜索页和详情页费用）
-  const estimatedSearches = mode === "nameOnly" 
-    ? names.length 
-    : names.length * Math.max(locations.length, 1);
-  const maxPages = 25;  // 固定使用最大 25 页
-  const avgDetailsPerSearch = 50;  // 预估每个搜索平均 50 条详情
-  // 费用 = 搜索页费用 + 详情页费用
-  const estimatedSearchPageCost = estimatedSearches * maxPages * searchCost;
-  const estimatedDetailPageCost = estimatedSearches * avgDetailsPerSearch * detailCost;
+  // ==================== 预扣费用计算（多扣少补策略） ====================
+  // 预扣上限：固定 25 搜索页 + 200 详情页（与后端保持一致）
+  const MAX_PREDEDUCT_SEARCH_PAGES = 25;  // 预扣搜索页上限
+  const MAX_PREDEDUCT_DETAIL_PAGES = 200; // 预扣详情页上限
+  
+  // 计算预扣费用（任务完成后退还多余积分）
+  const estimatedSearchPageCost = MAX_PREDEDUCT_SEARCH_PAGES * searchCost;
+  const estimatedDetailPageCost = MAX_PREDEDUCT_DETAIL_PAGES * detailCost;
   const estimatedCost = estimatedSearchPageCost + estimatedDetailPageCost;
   
   // 提交搜索
@@ -549,52 +548,48 @@ export default function TpsSearch() {
               </CardContent>
             </Card>
 
-            {/* 费用预估 */}
+            {/* 预扣费用（多扣少补） */}
             <Card className="bg-gradient-to-br from-purple-900/30 to-pink-900/30 border-purple-700/50">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-purple-500" />
-                  费用预估
+                  预扣费用
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">搜索任务数</span>
-                  <span>{estimatedSearches} 个</span>
+                  <span className="text-muted-foreground">预扣搜索页</span>
+                  <span>{MAX_PREDEDUCT_SEARCH_PAGES} 页</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">最大搜索页数</span>
-                  <span>每任务 {maxPages} 页</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">预估详情数</span>
-                  <span>每任务 ~{avgDetailsPerSearch} 条</span>
+                  <span className="text-muted-foreground">预扣详情页</span>
+                  <span>{MAX_PREDEDUCT_DETAIL_PAGES} 条</span>
                 </div>
                 
                 <div className="border-t border-slate-700 pt-3 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">搜索页费用</span>
+                    <span className="text-muted-foreground">搜索页预扣</span>
                     <span className="text-cyan-400">
-                      {estimatedSearches} × {maxPages} × {searchCost} = {estimatedSearchPageCost.toFixed(1)}
+                      {MAX_PREDEDUCT_SEARCH_PAGES} × {searchCost} = {estimatedSearchPageCost.toFixed(1)}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">详情页费用</span>
+                    <span className="text-muted-foreground">详情页预扣</span>
                     <span className="text-cyan-400">
-                      {estimatedSearches} × {avgDetailsPerSearch} × {detailCost} = {estimatedDetailPageCost.toFixed(1)}
+                      {MAX_PREDEDUCT_DETAIL_PAGES} × {detailCost} = {estimatedDetailPageCost.toFixed(1)}
                     </span>
                   </div>
                 </div>
                 
                 <div className="border-t border-slate-700 pt-3">
                   <div className="flex justify-between">
-                    <span className="font-medium">预估总消耗</span>
+                    <span className="font-medium">预扣总额</span>
                     <span className="text-xl font-bold text-purple-400">
-                      ~{estimatedCost.toFixed(1)} 积分
+                      {estimatedCost.toFixed(1)} 积分
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    实际费用取决于搜索结果数量，可能低于预估
+                    多扣少补：任务完成后退还多余积分
                   </p>
                 </div>
                 

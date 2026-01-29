@@ -162,11 +162,15 @@ export const tpsRouter = router({
         subTaskCount = input.names.length * locations.length;
       }
       
-      // 预估最大消耗（与前端保持一致）
-      const avgDetailsPerTask = 50;  // 每个任务平均 50 条详情
-      const maxSearchPageCost = subTaskCount * maxPages * searchCost;
-      const estimatedDetailCost = subTaskCount * avgDetailsPerTask * detailCost;
-      const maxEstimatedCost = maxSearchPageCost + estimatedDetailCost;
+      // ==================== 预扣费用计算（多扣少补策略） ====================
+      // 预扣上限：最大 25 搜索页 + 200 详情页（仅用于预扣，不影响实际搜索逻辑）
+      const MAX_PREDEDUCT_SEARCH_PAGES = 25;  // 预扣搜索页上限
+      const MAX_PREDEDUCT_DETAIL_PAGES = 200; // 预扣详情页上限
+      
+      // 计算预扣费用（按上限预扣，任务完成后退还多余积分）
+      const preDeductSearchPageCost = MAX_PREDEDUCT_SEARCH_PAGES * searchCost;
+      const preDeductDetailCost = MAX_PREDEDUCT_DETAIL_PAGES * detailCost;
+      const maxEstimatedCost = preDeductSearchPageCost + preDeductDetailCost;
       
       // 创建搜索任务（先创建任务，获取 taskId）
       const task = await createTpsSearchTask({
@@ -195,7 +199,7 @@ export const tpsRouter = router({
         
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `积分不足，预估最多需要 ${maxEstimatedCost.toFixed(1)} 积分（搜索页 ${maxSearchPageCost.toFixed(1)} + 详情页 ${estimatedDetailCost.toFixed(1)}），当前余额 ${freezeResult.currentBalance} 积分`,
+          message: `积分不足，预扣需要 ${maxEstimatedCost.toFixed(1)} 积分（搜索页 ${preDeductSearchPageCost.toFixed(1)} + 详情页 ${preDeductDetailCost.toFixed(1)}），当前余额 ${freezeResult.currentBalance} 积分`,
         });
       }
       
