@@ -448,6 +448,21 @@ async function ensureTables() {
     `);
     console.log("[Database] TPS config table ready");
     
+    // 添加 TPS 配置表的新字段（如果不存在）
+    try {
+      await db.execute(sql`ALTER TABLE tps_config ADD COLUMN defaultMinAge INT NOT NULL DEFAULT 50`);
+      console.log("[Database] TPS config defaultMinAge column added");
+    } catch (e) {
+      console.log("[Database] TPS config defaultMinAge column already exists or error:", (e as Error).message);
+    }
+    
+    try {
+      await db.execute(sql`ALTER TABLE tps_config ADD COLUMN defaultMaxAge INT NOT NULL DEFAULT 79`);
+      console.log("[Database] TPS config defaultMaxAge column added");
+    } catch (e) {
+      console.log("[Database] TPS config defaultMaxAge column already exists or error:", (e as Error).message);
+    }
+    
     // 19. TPS 详情页缓存表
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS tps_detail_cache (
