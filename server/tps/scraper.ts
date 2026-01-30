@@ -492,13 +492,11 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       }
     }
   }
-  // 优化：只取第一个电话号码（TPS页面上第一个号码 = Primary主号 = 最新号码）
-  // 这样确保每个人只导出一个号码，避免重复数据
-  let foundFirstPhone = false;
+  // 优化：提取所有电话号码，然后按 reportYear 排序取最新的
+  // 这样确保即使 TPS 更新数据，也能自动获取最新年份的号码
+  const allPhones: TpsDetailResult[] = [];
+  
   $('.col-12.col-md-6.mb-3').each((_, container) => {
-    // 如果已经找到第一个有效电话，跳过后续所有电话
-    if (foundFirstPhone) return;
-    
     const $container = $(container);
     const phoneLink = $container.find('a[data-link-to-more="phone"]');
     if (!phoneLink.length) return;
@@ -539,7 +537,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       reportYear = parseInt(reportMatch[1], 10);
     }
     const isPrimary = containerText.toLowerCase().includes('primary');
-    results.push({
+    allPhones.push({
       name,
       age,
       city,
@@ -554,10 +552,24 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       yearBuilt,
       detailLink: searchResult.detailLink,
     });
-    
-    // 标记已找到第一个有效电话，后续不再提取
-    foundFirstPhone = true;
   });
+  
+  // 按 reportYear 降序排序，取最新年份的号码
+  // 如果没有 reportYear，则优先取标记为 Primary 的号码
+  if (allPhones.length > 0) {
+    allPhones.sort((a, b) => {
+      // 优先按 reportYear 降序排序（最新的在前）
+      const yearA = a.reportYear || 0;
+      const yearB = b.reportYear || 0;
+      if (yearB !== yearA) return yearB - yearA;
+      // 如果年份相同，优先取 Primary 号码
+      if (a.isPrimary && !b.isPrimary) return -1;
+      if (!a.isPrimary && b.isPrimary) return 1;
+      return 0;
+    });
+    // 只取最新的一个号码
+    results.push(allPhones[0]);
+  }
   // 备用方法：如果主方法未找到电话，使用正则匹配（也只取第一个）
   if (results.length === 0) {
     const phonePattern = /\((\d{3})\)\s*(\d{3})-(\d{4})/g;
@@ -628,7 +640,7 @@ export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters
   if (result.age < minAge) return false;
   if (result.age > maxAge) return false;
   
-  // 注：已移除minYear过滤，因为现在只提取每个人的第一个号码（Primary主号），它本身就是最新的
+  // 注：已移除minYear过滤，因为现在按 reportYear 排序取最新年份的号码
   if (filters.minPropertyValue !== undefined && filters.minPropertyValue > 0) {
     if (!result.propertyValue || result.propertyValue < filters.minPropertyValue) return false;
   }
