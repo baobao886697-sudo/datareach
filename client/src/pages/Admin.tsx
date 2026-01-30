@@ -1578,16 +1578,14 @@ export default function Admin() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {['SPF_SCRAPE_TOKEN', 'SPF_MAX_CONCURRENT', 'SPF_CACHE_DAYS'].map((key) => {
+                  {['SPF_SCRAPE_TOKEN', 'SPF_CACHE_DAYS'].map((key) => {
                     const config = configs.find((c: any) => c.key === key);
                     const labels: Record<string, string> = {
                       'SPF_SCRAPE_TOKEN': 'Scrape.do API Token',
-                      'SPF_MAX_CONCURRENT': '最大并发数',
                       'SPF_CACHE_DAYS': '缓存天数',
                     };
                     const defaults: Record<string, string> = {
                       'SPF_SCRAPE_TOKEN': '***已配置***',
-                      'SPF_MAX_CONCURRENT': '15',
                       'SPF_CACHE_DAYS': '180',
                     };
                     return (
@@ -1612,6 +1610,66 @@ export default function Admin() {
                       </div>
                     );
                   })}
+                </CardContent>
+              </Card>
+
+              {/* 高级配置 */}
+              <Card className="bg-gradient-to-br from-yellow-900/20 to-amber-800/10 border-yellow-700/30">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Settings className="h-5 w-5 text-purple-400" />
+                    高级配置
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    并发、超时、重试等运行参数
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {['SPF_GLOBAL_CONCURRENCY', 'SPF_TIMEOUT_MS', 'SPF_MAX_RETRIES'].map((key) => {
+                    const config = configs.find((c: any) => c.key === key);
+                    const labels: Record<string, string> = {
+                      'SPF_GLOBAL_CONCURRENCY': '全局最大并发数',
+                      'SPF_TIMEOUT_MS': '请求超时 (毫秒)',
+                      'SPF_MAX_RETRIES': '最大重试次数',
+                    };
+                    const defaults: Record<string, string> = {
+                      'SPF_GLOBAL_CONCURRENCY': '15',
+                      'SPF_TIMEOUT_MS': '60000',
+                      'SPF_MAX_RETRIES': '3',
+                    };
+                    const hints: Record<string, string> = {
+                      'SPF_GLOBAL_CONCURRENCY': '建议范围: 1-50',
+                      'SPF_TIMEOUT_MS': '建议范围: 10000-120000',
+                      'SPF_MAX_RETRIES': '建议范围: 0-5',
+                    };
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300">{labels[key] || key}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingConfig({ key, value: config?.value || defaults[key], description: config?.description || hints[key] })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Input
+                          value={config?.value || defaults[key]}
+                          readOnly
+                          className="bg-slate-800 border-slate-700 text-white font-mono"
+                          placeholder={defaults[key]}
+                        />
+                        <p className="text-xs text-slate-500">{hints[key]}</p>
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-yellow-700/30">
+                    <p className="text-xs text-yellow-400/70">
+                      ⚠️ 修改后需等待配置缓存刷新（最多 5 分钟）或重启服务
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
 

@@ -27,9 +27,15 @@ import * as cheerio from 'cheerio';
 
 // ==================== 全局并发限制 ====================
 
+// 导入运行时配置模块
+import { getSpfRuntimeConfig, SpfRuntimeConfig } from './runtimeConfig';
+import { SCRAPEDO_CONFIG } from './config';
+
 /**
  * 全局信号量类 - 用于限制系统总并发数
  * 不管有多少用户同时使用，系统总并发不超过设定值
+ * 
+ * v2.0 - 支持动态配置
  */
 class GlobalSemaphore {
   private maxConcurrency: number;
@@ -38,6 +44,25 @@ class GlobalSemaphore {
   
   constructor(maxConcurrency: number) {
     this.maxConcurrency = maxConcurrency;
+  }
+  
+  /**
+   * 动态更新最大并发数
+   * 注意：只有在当前并发数低于新限制时才会立即生效
+   */
+  updateMaxConcurrency(newMax: number): void {
+    const oldMax = this.maxConcurrency;
+    this.maxConcurrency = newMax;
+    
+    // 如果新限制更高，尝试释放等待队列中的任务
+    if (newMax > oldMax) {
+      while (this.waitQueue.length > 0 && this.currentCount < this.maxConcurrency) {
+        const next = this.waitQueue.shift();
+        if (next) next();
+      }
+    }
+    
+    console.log(`[SPF GlobalSemaphore] 并发限制已更新: ${oldMax} -> ${newMax}`);
   }
   
   async acquire(): Promise<void> {
@@ -72,19 +97,29 @@ class GlobalSemaphore {
   }
 }
 
-// 全局信号量实例 - 限制系统总并发为 15
-const GLOBAL_MAX_CONCURRENCY = 15;
-const globalSemaphore = new GlobalSemaphore(GLOBAL_MAX_CONCURRENCY);
+// 全局信号量实例 - 默认限制系统总并发为 15
+// 可通过数据库配置 SPF_GLOBAL_CONCURRENCY 动态修改
+const DEFAULT_GLOBAL_MAX_CONCURRENCY = SCRAPEDO_CONFIG.GLOBAL_MAX_CONCURRENCY;
+const globalSemaphore = new GlobalSemaphore(DEFAULT_GLOBAL_MAX_CONCURRENCY);
 
 // 导出获取状态的函数（用于监控）
 export function getGlobalConcurrencyStatus() {
   return globalSemaphore.getStatus();
 }
 
+/**
+ * 更新全局并发限制
+ * 管理员可通过控制台调用此函数动态调整并发数
+ */
+export function updateGlobalConcurrency(newMax: number): void {
+  globalSemaphore.updateMaxConcurrency(newMax);
+}
+
 // ==================== Scrape.do API ====================
 
-const SCRAPE_TIMEOUT_MS = 60000;   // 60 秒超时（地点搜索响应特别慢）
-const SCRAPE_MAX_RETRIES = 3;    // 最多重试 3 次（恢复成功版本配置）
+// 默认配置值（可通过数据库配置覆盖）
+const DEFAULT_SCRAPE_TIMEOUT_MS = SCRAPEDO_CONFIG.TIMEOUT_MS;   // 60 秒超时
+const DEFAULT_SCRAPE_MAX_RETRIES = SCRAPEDO_CONFIG.MAX_RETRIES; // 最多重试 3 次
 
 /**
  * 使用 Scrape.do API 获取页面（带超时和重试）
@@ -93,8 +128,20 @@ const SCRAPE_MAX_RETRIES = 3;    // 最多重试 3 次（恢复成功版本配�
  * - super=true: 使用住宅代理，提高成功率
  * - geoCode=us: 使用美国 IP
  * - 不使用 render=true: SearchPeopleFree 不支持渲染模式
+ * 
+ * v2.0 - 支持动态配置
+ * - 超时和重试参数可通过数据库配置覆盖
+ * - 默认使用 SCRAPEDO_CONFIG 中的值
  */
-async function fetchWithScrapedo(url: string, token: string): Promise<string> {
+async function fetchWithScrapedo(
+  url: string, 
+  token: string,
+  configOverride?: { timeoutMs?: number; maxRetries?: number }
+): Promise<string> {
+  // 使用配置覆盖或默认值
+  const timeoutMs = configOverride?.timeoutMs || DEFAULT_SCRAPE_TIMEOUT_MS;
+  const maxRetries = configOverride?.maxRetries || DEFAULT_SCRAPE_MAX_RETRIES;
+  
   const encodedUrl = encodeURIComponent(url);
   // 注意：不使用 timeout 和 disableRetry 参数，让 scrape.do 使用默认配置（之前成功的配置）
   const apiUrl = `https://api.scrape.do/?token=${token}&url=${encodedUrl}&super=true&geoCode=us`;
@@ -105,10 +152,10 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   await globalSemaphore.acquire();
   
   try {
-    for (let attempt = 0; attempt <= SCRAPE_MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS + 15000); // 客户端超时比 API 超时多 15 秒（恢复成功版本配置）
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs + 15000); // 客户端超时比 API 超时多 15 秒
         
         const response = await fetch(apiUrl, {
           method: 'GET',
@@ -123,8 +170,8 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
         // 检查是否是可重试的服务器错误 (502, 503, 504)
         if (!response.ok) {
           const isRetryableError = [502, 503, 504].includes(response.status);
-          if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
-            console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          if (isRetryableError && attempt < maxRetries) {
+            console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${maxRetries})...`);
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
@@ -140,8 +187,8 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
             const statusCode = jsonError.StatusCode || 0;
             const isRetryableError = [502, 503, 504].includes(statusCode);
             
-            if (isRetryableError && attempt < SCRAPE_MAX_RETRIES) {
-              console.log(`[SPF fetchWithScrapedo] API 返回 JSON 错误 (StatusCode: ${statusCode})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+            if (isRetryableError && attempt < maxRetries) {
+              console.log(`[SPF fetchWithScrapedo] API 返回 JSON 错误 (StatusCode: ${statusCode})，正在重试 (${attempt + 1}/${maxRetries})...`);
               await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
               continue;
             }
@@ -159,8 +206,8 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
         // 检查响应是否是有效的 HTML
         const trimmedText = text.trim();
         if (!trimmedText.startsWith('<') && !trimmedText.startsWith('<!DOCTYPE')) {
-          if (attempt < SCRAPE_MAX_RETRIES) {
-            console.log(`[SPF fetchWithScrapedo] 响应不是有效的 HTML，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          if (attempt < maxRetries) {
+            console.log(`[SPF fetchWithScrapedo] 响应不是有效的 HTML，正在重试 (${attempt + 1}/${maxRetries})...`);
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
@@ -171,7 +218,7 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
       } catch (error: any) {
         lastError = error;
         
-        if (attempt >= SCRAPE_MAX_RETRIES) {
+        if (attempt >= maxRetries) {
           break;
         }
         
@@ -180,7 +227,7 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
         const isServerError = error.message?.includes('502') || error.message?.includes('503') || error.message?.includes('504');
         
         if (isTimeout || isNetworkError || isServerError) {
-          console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${SCRAPE_MAX_RETRIES})...`);
+          console.log(`[SPF fetchWithScrapedo] 请求失败 (${error.message})，正在重试 (${attempt + 1}/${maxRetries})...`);
           await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
           continue;
         }
@@ -199,7 +246,8 @@ async function fetchWithScrapedo(url: string, token: string): Promise<string> {
 // ==================== 配置常量 ====================
 
 // 从统一配置文件导入（基于 Scrape.do 官方最佳实践）
-import { SPF_CONFIG, THREAD_POOL_CONFIG, SPF_SEARCH_CONFIG, SCRAPEDO_CONFIG, isThreadPoolEnabled } from './config';
+// 注意：SCRAPEDO_CONFIG 已在文件顶部导入
+import { SPF_CONFIG, THREAD_POOL_CONFIG, SPF_SEARCH_CONFIG, isThreadPoolEnabled } from './config';
 
 // 重新导出配置供其他模块使用
 export { SPF_CONFIG, THREAD_POOL_CONFIG, SPF_SEARCH_CONFIG, SCRAPEDO_CONFIG, isThreadPoolEnabled };

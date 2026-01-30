@@ -3,31 +3,30 @@
  * 
  * 统一管理 SPF 模块的所有配置参数
  * 
- * 基于 Scrape.do 官方文档最佳实践：
- * - 线程池 + 并发模式
- * - 3 个 Worker Thread，每个 Worker 10 并发
- * - 全局最大 30 并发
+ * v2.0 - 配置统一化
+ * - 静态配置：代码中定义的默认值
+ * - 动态配置：可通过数据库 systemConfigs 表覆盖
+ * 
+ * 当前运行模式：async_only（纯异步模式）
+ * 全局并发限制：15（硬性约束，保护 API）
  */
 
-// ==================== 线程池配置 ====================
+// ==================== 静态配置（默认值） ====================
 
 /**
- * 线程池配置
+ * 线程池配置（线程池模式使用）
  * 
- * 架构说明：
- * - WORKER_THREAD_COUNT: Worker Thread 数量
- * - CONCURRENCY_PER_WORKER: 每个 Worker 的并发数
- * - GLOBAL_MAX_CONCURRENCY: 全局最大并发（WORKER_THREAD_COUNT × CONCURRENCY_PER_WORKER）
+ * 注意：当前运行模式为 async_only，线程池配置仅作为备用
  */
 export const THREAD_POOL_CONFIG = {
   /** Worker Thread 数量 */
   WORKER_THREAD_COUNT: 3,
   
   /** 每个 Worker 的并发数 */
-  CONCURRENCY_PER_WORKER: 10,
+  CONCURRENCY_PER_WORKER: 5,
   
-  /** 全局最大并发（3 × 10 = 30） */
-  GLOBAL_MAX_CONCURRENCY: 30,
+  /** 全局最大并发（与 async_only 模式保持一致） */
+  GLOBAL_MAX_CONCURRENCY: 15,
   
   /** 任务队列最大长度 */
   TASK_QUEUE_MAX_SIZE: 1000,
@@ -39,8 +38,6 @@ export const THREAD_POOL_CONFIG = {
   WORKER_RESTART_MAX_RETRIES: 3,
 };
 
-// ==================== 搜索配置 ====================
-
 /**
  * SPF 搜索配置
  */
@@ -51,10 +48,10 @@ export const SPF_SEARCH_CONFIG = {
   /** 每个任务最大详情数 (25页 × 10条/页) */
   MAX_DETAILS_PER_TASK: 250,
   
-  /** 搜索页成本（每次 API 调用） */
+  /** 搜索页成本（每次 API 调用）- 默认值，可通过数据库覆盖 */
   SEARCH_COST: 0.85,
   
-  /** 详情页成本（每次 API 调用） */
+  /** 详情页成本（每次 API 调用）- 默认值，可通过数据库覆盖 */
   DETAIL_COST: 0.85,
   
   /** 默认最小年龄 */
@@ -67,17 +64,17 @@ export const SPF_SEARCH_CONFIG = {
   CACHE_DAYS: 180,
 };
 
-// ==================== Scrape.do API 配置 ====================
-
 /**
  * Scrape.do API 配置
+ * 
+ * 重要：这些值与 scraper.ts 中的实际使用值保持一致
  */
 export const SCRAPEDO_CONFIG = {
-  /** 请求超时（毫秒） */
-  TIMEOUT_MS: 10000,
+  /** 请求超时（毫秒）- 60秒，地点搜索响应较慢 */
+  TIMEOUT_MS: 60000,
   
   /** 最大重试次数 */
-  MAX_RETRIES: 2,
+  MAX_RETRIES: 3,
   
   /** 重试延迟基数（毫秒） */
   RETRY_DELAY_BASE: 3000,
@@ -90,6 +87,9 @@ export const SCRAPEDO_CONFIG = {
   
   /** 地理位置代码 */
   GEO_CODE: 'us',
+  
+  /** 全局最大并发数（硬性约束） */
+  GLOBAL_MAX_CONCURRENCY: 15,
 };
 
 // ==================== 兼容旧配置 ====================
@@ -103,7 +103,7 @@ export const SPF_CONFIG = {
   // 线程池配置
   TASK_CONCURRENCY: THREAD_POOL_CONFIG.WORKER_THREAD_COUNT,
   SCRAPEDO_CONCURRENCY: THREAD_POOL_CONFIG.CONCURRENCY_PER_WORKER,
-  TOTAL_CONCURRENCY: THREAD_POOL_CONFIG.GLOBAL_MAX_CONCURRENCY,
+  TOTAL_CONCURRENCY: SCRAPEDO_CONFIG.GLOBAL_MAX_CONCURRENCY,
   
   // 搜索配置
   MAX_SAFE_PAGES: SPF_SEARCH_CONFIG.MAX_SAFE_PAGES,
@@ -118,7 +118,7 @@ export const SPF_CONFIG = {
  * SPF 运行模式
  * 
  * - 'thread_pool': 线程池 + 并发模式（推荐，基于 Scrape.do 最佳实践）
- * - 'async_only': 纯异步并发模式（旧模式，兼容性）
+ * - 'async_only': 纯异步并发模式（当前使用）
  */
 export type SpfRunMode = 'thread_pool' | 'async_only';
 
@@ -156,6 +156,39 @@ export const LOG_CONFIG = {
   LOG_CACHE_HITS: true,
 };
 
+// ==================== 动态配置键名 ====================
+
+/**
+ * 数据库配置键名映射
+ * 
+ * 这些配置可以通过 systemConfigs 表动态修改
+ */
+export const SPF_CONFIG_KEYS = {
+  /** 搜索页积分消耗 */
+  SEARCH_CREDITS: 'SPF_SEARCH_CREDITS',
+  
+  /** 详情页积分消耗 */
+  DETAIL_CREDITS: 'SPF_DETAIL_CREDITS',
+  
+  /** Scrape.do API Token */
+  SCRAPE_TOKEN: 'SPF_SCRAPE_TOKEN',
+  
+  /** 默认最小年龄 */
+  MIN_AGE: 'SPF_MIN_AGE',
+  
+  /** 默认最大年龄 */
+  MAX_AGE: 'SPF_MAX_AGE',
+  
+  /** 全局最大并发数 */
+  GLOBAL_CONCURRENCY: 'SPF_GLOBAL_CONCURRENCY',
+  
+  /** 请求超时（毫秒） */
+  TIMEOUT_MS: 'SPF_TIMEOUT_MS',
+  
+  /** 最大重试次数 */
+  MAX_RETRIES: 'SPF_MAX_RETRIES',
+};
+
 // ==================== 导出所有配置 ====================
 
 export default {
@@ -165,4 +198,5 @@ export default {
   SPF_CONFIG,
   CURRENT_RUN_MODE,
   LOG_CONFIG,
+  SPF_CONFIG_KEYS,
 };
