@@ -1633,7 +1633,7 @@ export default function Admin() {
                       'SPF_MAX_RETRIES': '最大重试次数',
                     };
                     const defaults: Record<string, string> = {
-                      'SPF_GLOBAL_CONCURRENCY': '15',
+                      'SPF_GLOBAL_CONCURRENCY': '16',
                       'SPF_TIMEOUT_MS': '60000',
                       'SPF_MAX_RETRIES': '3',
                     };

@@ -14,19 +14,20 @@
 // ==================== 静态配置（默认值） ====================
 
 /**
- * 线程池配置（线程池模式使用）
+ * 线程池配置
  * 
- * 注意：当前运行模式为 async_only，线程池配置仅作为备用
+ * 配置：2线程 × 8并发 = 16总并发
+ * 与 smartConcurrencyPool.ts 保持一致
  */
 export const THREAD_POOL_CONFIG = {
   /** Worker Thread 数量 */
-  WORKER_THREAD_COUNT: 3,
+  WORKER_THREAD_COUNT: 2,
   
   /** 每个 Worker 的并发数 */
-  CONCURRENCY_PER_WORKER: 5,
+  CONCURRENCY_PER_WORKER: 8,
   
-  /** 全局最大并发（与 async_only 模式保持一致） */
-  GLOBAL_MAX_CONCURRENCY: 15,
+  /** 全局最大并发（2 × 8 = 16） */
+  GLOBAL_MAX_CONCURRENCY: 16,
   
   /** 任务队列最大长度 */
   TASK_QUEUE_MAX_SIZE: 1000,
@@ -68,6 +69,7 @@ export const SPF_SEARCH_CONFIG = {
  * Scrape.do API 配置
  * 
  * 重要：这些值与 scraper.ts 中的实际使用值保持一致
+ * 并发配置：2线程 × 8并发 = 16总并发
  */
 export const SCRAPEDO_CONFIG = {
   /** 请求超时（毫秒）- 60秒，地点搜索响应较慢 */
@@ -88,8 +90,8 @@ export const SCRAPEDO_CONFIG = {
   /** 地理位置代码 */
   GEO_CODE: 'us',
   
-  /** 全局最大并发数（硬性约束） */
-  GLOBAL_MAX_CONCURRENCY: 15,
+  /** 全局最大并发数（2线程 × 8并发 = 16） */
+  GLOBAL_MAX_CONCURRENCY: 16,
 };
 
 // ==================== 兼容旧配置 ====================
