@@ -287,17 +287,29 @@ export interface DetailTask {
 
 /**
  * 构建搜索 URL
+ * 
+ * 使用查询参数格式（类似 TPS），支持所有地点输入格式：
+ * - 城市 (如 "Phoenix")
+ * - 州 (如 "Texas")
+ * - 城市+州 (如 "Phoenix, AZ")
+ * 
+ * 测试验证：
+ * - 路径格式 /find/john-smith/texas 会返回 502 错误
+ * - 查询参数格式 /results?name=john+smith&citystatezip=texas 成功
  */
 function buildSearchUrl(name: string, location: string): string {
-  const nameParts = name.trim().toLowerCase().replace(/\s+/g, '-');
-  let url = `https://www.searchpeoplefree.com/find/${nameParts}`;
+  const baseUrl = 'https://www.searchpeoplefree.com/results';
+  const params = new URLSearchParams();
   
-  if (location) {
-    const locationParts = location.trim().toLowerCase().replace(/,\s*/g, '-').replace(/\s+/g, '-');
-    url += `/${locationParts}`;
+  // 姓名参数
+  params.set('name', name.trim());
+  
+  // 地点参数（可选）
+  if (location && location.trim()) {
+    params.set('citystatezip', location.trim());
   }
   
-  return url;
+  return `${baseUrl}?${params.toString()}`;
 }
 
 /**
