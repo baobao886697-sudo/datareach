@@ -7,8 +7,6 @@
 
 // 从本模块导入
  import {
-  freezeCredits,
-  settleCredits,
   createSearchTask, 
   updateSearchTask, 
   getSearchTask,
@@ -19,6 +17,7 @@
   setCache,
   getUserCredits
 } from './db';
+import { createLinkedInRealtimeCreditTracker, LinkedInRealtimeCreditTracker } from './realtimeCredits';
 import { searchPeople as apifySearchPeople, LeadPerson } from './apify';
 import { brightdataSearchPeople } from './brightdata';
 import { verifyPhoneNumber, PersonToVerify, VerificationResult } from './scraper';
@@ -371,15 +370,6 @@ export async function executeSearchV3(
   const user = await getUserById(userId);
   if (!user) throw new Error('用户不存在');
 
-  // ==================== 预扣费机制 ====================
-  // 计算最大预估费用（搜索费 + 最大数据费）
-  const maxEstimatedCost = currentSearchCredits + requestedCount * currentPhoneCreditsPerPerson;
-  
-  // 检查积分是否足够
-  if (user.credits < maxEstimatedCost) {
-    throw new Error(`积分不足，预估最大消耗 ${maxEstimatedCost} 积分（搜索费 ${currentSearchCredits} + 数据费 ${requestedCount} × ${currentPhoneCreditsPerPerson}），当前余额 ${user.credits} 积分`);
-  }
-
   const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);
   const params = { 
     name: searchName, 
@@ -396,12 +386,20 @@ export async function executeSearchV3(
   const task = await createSearchTask(userId, searchHash, params, requestedCount);
   if (!task) throw new Error('创建搜索任务失败');
 
-  // ==================== 执行预扣费 ====================
-  const freezeResult = await freezeCredits(userId, maxEstimatedCost, task.taskId);
-  if (!freezeResult.success) {
-    throw new Error(freezeResult.message);
+  // ==================== 实时扣费机制 ====================
+  // 创建实时积分跟踪器
+  const creditTracker = await createLinkedInRealtimeCreditTracker(
+    userId,
+    task.taskId,
+    currentSearchCredits,
+    currentPhoneCreditsPerPerson
+  );
+  
+  // 检查是否有足够积分开始搜索（至少需要搜索费）
+  const canStart = await creditTracker.canAffordSearch();
+  if (!canStart) {
+    throw new Error(`积分不足，需要至少 ${currentSearchCredits} 积分开始搜索，当前余额 ${creditTracker.getCurrentBalance()} 积分`);
   }
-  const frozenAmount = freezeResult.frozenAmount;
 
   const progress: SearchProgress = {
     taskId: task.taskId,
@@ -465,20 +463,23 @@ export async function executeSearchV3(
     addLog(`   • 电话验证: ${enableVerification ? '✅ 已启用' : '❌ 已禁用'}`, 'info', 'init', '');
     addLog(`   • 搜索模式: ${mode === 'fuzzy' ? '模糊搜索' : '精准搜索'}`, 'info', 'init', '');
     addLog('──────────────────────────────', 'info', 'init', '');
-    addLog(`💰 费用预估:`, 'info', 'init', '');
-    addLog(`   • 当前余额: ${user.credits} 积分`, 'info', 'init', '');
-    addLog(`   • 预估消耗: ${currentSearchCredits + requestedCount * currentPhoneCreditsPerPerson} 积分`, 'info', 'init', '');
-    addLog(`   (搜索费 ${currentSearchCredits} + 数据费 ${requestedCount} × ${currentPhoneCreditsPerPerson})`, 'info', 'init', '');
+    addLog(`💰 费用说明:`, 'info', 'init', '');
+    addLog(`   • 当前余额: ${creditTracker.getCurrentBalance()} 积分`, 'info', 'init', '');
+    addLog(`   • 搜索费: ${currentSearchCredits} 积分`, 'info', 'init', '');
+    addLog(`   • 数据费: ${currentPhoneCreditsPerPerson} 积分/条`, 'info', 'init', '');
+    addLog(`   💡 实时扣费模式：用多少，扣多少，扣完即停`, 'info', 'init', '');
     addLog('═══════════════════════════════════════════════════', 'info', 'init', '');
     await updateProgress('初始化搜索任务', 'searching', 'init', 10);
 
-    // ==================== 预扣费已完成，显示信息 ====================
+    // ==================== 扣除搜索费 ====================
     currentStep++;
-    const modeLabel = mode === 'fuzzy' ? '模糊搜索' : '精准搜索';
-    addLog(`💰 预扣费机制已启用`, 'info', 'init', '');
-    addLog(`   ✅ 已预扣: ${frozenAmount} 积分`, 'success', 'init', '✅');
-    addLog(`   💡 任务完成后将按实际消耗结算，多扣的积分会退还`, 'info', 'init', '');
-    await updateProgress('预扣费完成', undefined, undefined, 20);
+    const searchFeeResult = await creditTracker.deductSearchFee();
+    if (!searchFeeResult.success) {
+      throw new Error(`搜索费扣除失败: ${searchFeeResult.message}`);
+    }
+    stats.creditsUsed = currentSearchCredits;
+    addLog(`💰 搜索费: ${currentSearchCredits} 积分 | 余额: ${searchFeeResult.newBalance} 积分`, 'success', 'init', '✅');
+    await updateProgress('搜索费已扣除', undefined, undefined, 15);
 
     currentStep++;
     addLog('──────────────────────────────', 'info', 'search', '');
@@ -588,58 +589,43 @@ export async function executeSearchV3(
       addLog(`⚠️ 未找到匹配的结果`, 'warning', 'complete', '⚠️');
       addLog(`   请尝试调整搜索条件后重试`, 'info', 'complete', '');
       
-      // ==================== 预扣费机制：无结果时的结算 ====================
-      if (mode === 'exact') {
-        // 精准搜索无结果，实际消耗为0，退还全部预扣积分
-        stats.creditsUsed = 0;
-        addLog(`💰 精准搜索无结果，将退还全部预扣积分`, 'info', 'complete', '');
-      } else {
-        // 模糊搜索无结果，仍收取搜索基础费
-        stats.creditsUsed = currentSearchCredits;
-        addLog(`💰 模糊搜索无结果，收取搜索基础费 ${currentSearchCredits} 积分`, 'info', 'complete', '');
-      }
-      
-      // 结算退还
-      const settlement = await settleCredits(userId, frozenAmount, stats.creditsUsed, task.taskId);
+      // ==================== 实时扣费：无结果时已扣除搜索费 ====================
+      const breakdown = creditTracker.getCostBreakdown();
       addLog('──────────────────────────────', 'info', 'complete', '');
       addLog(`💰 费用明细:`, 'info', 'complete', '');
-      addLog(`   • 预扣积分: ${frozenAmount} 积分`, 'info', 'complete', '');
-      addLog(`   • 实际消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
-      if (settlement.refundAmount > 0) {
-        addLog(`   • ✅ 已退还: ${settlement.refundAmount} 积分`, 'success', 'complete', '✅');
-      }
-      addLog(`   • 当前余额: ${settlement.newBalance} 积分`, 'info', 'complete', '');
+      addLog(`   • 搜索费: ${breakdown.searchFee} 积分`, 'info', 'complete', '');
+      addLog(`   • 数据费: 0 积分 (无结果)`, 'info', 'complete', '');
+      addLog(`   • 总消耗: ${breakdown.totalCost} 积分`, 'info', 'complete', '');
+      addLog(`   • 当前余额: ${creditTracker.getCurrentBalance()} 积分`, 'info', 'complete', '');
       
+      stats.creditsUsed = breakdown.totalCost;
       progress.status = 'completed';
       await updateProgress('搜索完成', 'completed', 'complete', 100);
       return getSearchTask(task.taskId);
     }
 
     currentStep++;
-    const actualCount = Math.min(searchResults.length, requestedCount);
-    const dataCreditsNeeded = actualCount * currentPhoneCreditsPerPerson;
+    
+    // ==================== 实时扣费：检查可负担的数据量 ====================
+    const { canAfford, affordableCount } = await creditTracker.getAffordableCount(searchResults.length);
+    const actualCount = Math.min(searchResults.length, requestedCount, affordableCount);
     
     addLog('──────────────────────────────', 'info', 'process', '');
     addLog(`📊 数据量计算:`, 'info', 'process', '');
     addLog(`   用户请求: ${requestedCount} 条`, 'info', 'process', '');
     addLog(`   实际返回: ${searchResults.length} 条`, 'info', 'process', '');
-    addLog(`   可处理数量: ${actualCount} 条`, 'info', 'process', '');
+    addLog(`   积分可负担: ${affordableCount} 条`, 'info', 'process', '');
+    addLog(`   将处理: ${actualCount} 条`, 'info', 'process', '');
     
-    // ==================== 预扣费机制：不再中途扣费，只统计实际消耗 ====================
-    // 记录实际数据费用（用于最终结算）
-    stats.creditsUsed = currentSearchCredits + dataCreditsNeeded;
-    
-    addLog(`💰 预估实际消耗:`, 'info', 'process', '');
-    addLog(`   搜索费: ${currentSearchCredits} 积分`, 'info', 'process', '');
-    addLog(`   数据费: ${actualCount} 条 × ${currentPhoneCreditsPerPerson} = ${dataCreditsNeeded} 积分`, 'info', 'process', '');
-    addLog(`   预估总计: ${stats.creditsUsed} 积分`, 'info', 'process', '');
-    addLog(`   💡 已预扣 ${frozenAmount} 积分，任务完成后结算退还`, 'info', 'process', '');
+    if (actualCount < Math.min(searchResults.length, requestedCount)) {
+      addLog(`⚠️ 积分不足，将只处理 ${actualCount} 条数据`, 'warning', 'process', '⚠️');
+    }
     
     addLog('──────────────────────────────', 'info', 'process', '');
     
     const shuffledResults = shuffleArray(searchResults);
     addLog(`🔀 已打乱数据顺序，采用随机提取策略`, 'info', 'process', '');
-    addLog(`📊 开始逐条处理数据...`, 'info', 'process', '');
+    addLog(`📊 开始逐条处理数据，实时扣费...`, 'info', 'process', '');
     addLog('──────────────────────────────', 'info', 'process', '');
 
     const toProcess = shuffledResults.slice(0, actualCount);
@@ -671,10 +657,28 @@ export async function executeSearchV3(
     addLog(`📊 数据分类: ${recordsWithPhone.length} 条有电话, ${recordsWithoutPhone.length} 条无电话`, 'info', 'process', '');
     
     let processedCount = 0;
+    let insufficientCredits = false;
+    
     for (const person of recordsWithoutPhone) {
+      // 检查积分是否足够
+      if (!creditTracker.canContinue()) {
+        insufficientCredits = true;
+        addLog(`⚠️ 积分不足，停止处理`, 'warning', 'process', '⚠️');
+        break;
+      }
+      
+      // 实时扣除数据费
+      const deductResult = await creditTracker.deductDataRecord();
+      if (!deductResult.success) {
+        insufficientCredits = true;
+        addLog(`⚠️ 积分不足，停止处理`, 'warning', 'process', '⚠️');
+        break;
+      }
+      
       processedCount++;
       stats.recordsProcessed++;
       stats.excludedNoPhone++;
+      stats.creditsUsed = creditTracker.getTotalDeducted();
       
       const personName = person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown';
       
@@ -712,8 +716,8 @@ export async function executeSearchV3(
       }
     }
     
-    if (recordsWithoutPhone.length > 0) {
-      addLog(`✅ 已快速处理 ${recordsWithoutPhone.length} 条无电话记录`, 'info', 'process', '');
+    if (recordsWithoutPhone.length > 0 && processedCount > 0) {
+      addLog(`✅ 已处理 ${processedCount} 条无电话记录 | 消耗: ${creditTracker.getTotalDeducted()} 积分`, 'info', 'process', '');
     }
     
     let taskStopped = false;
@@ -724,13 +728,21 @@ export async function executeSearchV3(
       taskStopped = true;
     }
     
-    if (!taskStopped && recordsWithPhone.length > 0) {
+    if (!taskStopped && !insufficientCredits && recordsWithPhone.length > 0) {
       addLog(`🔄 开始并发验证 ${recordsWithPhone.length} 条有电话记录...`, 'info', 'verify', '');
       addLog('──────────────────────────────', 'info', 'process', '');
       
       const totalBatches = Math.ceil(recordsWithPhone.length / CONCURRENT_BATCH_SIZE);
       
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        // 检查积分是否足够继续
+        if (!creditTracker.canContinue()) {
+          insufficientCredits = true;
+          addLog(`⚠️ 积分不足，停止处理`, 'warning', 'process', '⚠️');
+          progress.status = 'insufficient_credits';
+          break;
+        }
+        
         const currentTask = await getSearchTask(task.taskId);
         if (currentTask?.status === 'stopped') {
           addLog(`⏹️ 任务已被用户停止`, 'warning', 'complete', '⏹️');
@@ -740,7 +752,33 @@ export async function executeSearchV3(
         
         const start = batchIndex * CONCURRENT_BATCH_SIZE;
         const end = Math.min(start + CONCURRENT_BATCH_SIZE, recordsWithPhone.length);
-        const batch = recordsWithPhone.slice(start, end);
+        let batch = recordsWithPhone.slice(start, end);
+        
+        // 检查当前批次可以负担多少条
+        const { canAfford: batchCanAfford, affordableCount: batchAffordable } = await creditTracker.getAffordableCount(batch.length);
+        if (!batchCanAfford) {
+          insufficientCredits = true;
+          addLog(`⚠️ 积分不足，停止处理`, 'warning', 'process', '⚠️');
+          progress.status = 'insufficient_credits';
+          break;
+        }
+        
+        // 如果只能负担部分，截取批次
+        if (batchAffordable < batch.length) {
+          batch = batch.slice(0, batchAffordable);
+          addLog(`⚠️ 积分仅够处理 ${batchAffordable} 条`, 'warning', 'process', '⚠️');
+        }
+        
+        // 批量扣除数据费
+        const batchDeductResult = await creditTracker.deductDataRecords(batch.length);
+        if (!batchDeductResult.success) {
+          insufficientCredits = true;
+          addLog(`⚠️ 积分扣除失败，停止处理`, 'warning', 'process', '⚠️');
+          progress.status = 'insufficient_credits';
+          break;
+        }
+        
+        stats.creditsUsed = creditTracker.getTotalDeducted();
         
         const batchStartTime = Date.now();
         addLog(`📦 批次 ${batchIndex + 1}/${totalBatches}: 并发处理 ${batch.length} 条记录...`, 'info', 'process', '');
@@ -888,13 +926,11 @@ export async function executeSearchV3(
           addLog('📞 请联系管理员处理 API 积分问题', 'warning', 'process', '');
           addLog('', 'info', 'process', '');
           
-          // ==================== 预扣费机制：更新实际消耗统计 ====================
+          // ==================== 实时扣费：已扣除的积分不退还 ====================
           const unprocessedCount = actualCount - processedCount;
-          // 重新计算实际消耗（搜索费 + 已处理的数据费）
-          stats.creditsUsed = currentSearchCredits + processedCount * currentPhoneCreditsPerPerson;
+          stats.creditsUsed = creditTracker.getTotalDeducted();
           stats.unprocessedCount = unprocessedCount;
-          addLog(`💰 实际消耗已更新: ${stats.creditsUsed} 积分（未处理 ${unprocessedCount} 条）`, 'info', 'process', '');
-          addLog(`💡 任务结束后将统一结算退还多扣的积分`, 'info', 'process', '');
+          addLog(`💰 已消耗: ${stats.creditsUsed} 积分 | 未处理: ${unprocessedCount} 条`, 'info', 'process', '');
           
           progress.status = 'stopped';
           break;
@@ -946,27 +982,22 @@ export async function executeSearchV3(
       if (stats.excludedError > 0) addLog(`   处理失败: ${stats.excludedError}`, 'info', 'complete', '');
     }
     
+    // ==================== 实时扣费：最终费用明细 ====================
+    const breakdown = creditTracker.getCostBreakdown();
+    stats.creditsUsed = breakdown.totalCost;
+    stats.creditsFinal = breakdown.totalCost;
+    
     addLog('──────────────────────────────', 'info', 'complete', '');
-    stats.creditsFinal = stats.creditsUsed - stats.creditsRefunded;
-    addLog(`💰 积分消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
-    if (stats.creditsRefunded > 0) {
-      addLog(`💰 积分节省: ${stats.creditsRefunded} 积分 (因实际数据量少于请求量)`, 'success', 'complete', '');  
-    }
+    addLog(`💰 费用明细 (实时扣费):`, 'info', 'complete', '');
+    addLog(`   • 搜索费: ${breakdown.searchFee} 积分`, 'info', 'complete', '');
+    addLog(`   • 数据费: ${breakdown.dataRecords} 条 × ${currentPhoneCreditsPerPerson} = ${breakdown.dataFee} 积分`, 'info', 'complete', '');
+    addLog(`   • 总消耗: ${breakdown.totalCost} 积分`, 'info', 'complete', '');
+    addLog(`   • 当前余额: ${creditTracker.getCurrentBalance()} 积分`, 'info', 'complete', '');
+    
     addLog(`⏱️ 总耗时: ${formatDuration(stats.totalDuration)}`, 'info', 'complete', '');
     if (stats.resultsWithPhone > 0) {
       addLog(`📈 验证成功率: ${stats.verifySuccessRate}%`, 'info', 'complete', '');
     }
-    // ==================== 结算退还机制 ====================
-    const settlement = await settleCredits(userId, frozenAmount, stats.creditsUsed, task.taskId);
-    
-    addLog('──────────────────────────────', 'info', 'complete', '');
-    addLog(`💰 费用明细:`, 'info', 'complete', '');
-    addLog(`   • 预扣积分: ${frozenAmount} 积分`, 'info', 'complete', '');
-    addLog(`   • 实际消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
-    if (settlement.refundAmount > 0) {
-      addLog(`   • ✅ 已退还: ${settlement.refundAmount} 积分`, 'success', 'complete', '✅');
-    }
-    addLog(`   • 当前余额: ${settlement.newBalance} 积分`, 'info', 'complete', '');
     
     // 费用效率分析
     addLog(`📈 费用效率:`, 'info', 'complete', '');
@@ -974,7 +1005,7 @@ export async function executeSearchV3(
       const costPerResult = stats.creditsUsed / stats.totalResults;
       addLog(`   • 每条结果成本: ${costPerResult.toFixed(2)} 积分`, 'info', 'complete', '');
     }
-    if (stats.totalResults > 0) {
+    if (stats.totalResults > 0 && stats.creditsUsed > 0) {
       addLog(`   • 数据效率: ${(stats.totalResults / stats.creditsUsed).toFixed(2)} 条/积分`, 'info', 'complete', '');
     }
     
@@ -1009,15 +1040,14 @@ export async function executeSearchV3(
     progress.status = 'failed';
     addLog(`❌ 搜索任务失败: ${error.message}`, 'error', 'complete', '❌');
     
-    // ==================== 失败时的结算退还 ====================
-    const settlement = await settleCredits(userId, frozenAmount, stats.creditsUsed, task.taskId);
-    addLog(`💰 失败结算:`, 'info', 'complete', '');
-    addLog(`   • 预扣积分: ${frozenAmount} 积分`, 'info', 'complete', '');
-    addLog(`   • 已消耗: ${stats.creditsUsed} 积分`, 'info', 'complete', '');
-    if (settlement.refundAmount > 0) {
-      addLog(`   • ✅ 已退还: ${settlement.refundAmount} 积分`, 'success', 'complete', '✅');
-    }
-    addLog(`   • 当前余额: ${settlement.newBalance} 积分`, 'info', 'complete', '');
+    // ==================== 实时扣费：失败时已扣除的积分不退还 ====================
+    const failBreakdown = creditTracker.getCostBreakdown();
+    stats.creditsUsed = failBreakdown.totalCost;
+    addLog(`💰 失败结算 (实时扣费):`, 'info', 'complete', '');
+    addLog(`   • 搜索费: ${failBreakdown.searchFee} 积分`, 'info', 'complete', '');
+    addLog(`   • 数据费: ${failBreakdown.dataFee} 积分`, 'info', 'complete', '');
+    addLog(`   • 已消耗: ${failBreakdown.totalCost} 积分`, 'info', 'complete', '');
+    addLog(`   • 当前余额: ${creditTracker.getCurrentBalance()} 积分`, 'info', 'complete', '');
     
     const statsLog: SearchLogEntry = {
       timestamp: formatTimestamp(),
