@@ -53,6 +53,13 @@ import {
   TpsRealtimeCreditTracker,
   formatTpsCostBreakdown,
 } from "./realtimeCredits";
+import {
+  getConcurrencyStats,
+  getActiveTasks,
+  recordTaskStart,
+  recordTaskComplete,
+  recordTaskProgress,
+} from "./concurrencyMonitor";
 
 // 统一队列并发配置 (v5.0 智能动态并发池)
 const TOTAL_CONCURRENCY = TPS_POOL_CONFIG.GLOBAL_MAX_CONCURRENCY;  // 40 总并发 (4×10)
@@ -404,6 +411,18 @@ export const tpsRouter = router({
         filename: `DataReach_TPS_${task.taskId}_${new Date().toISOString().split("T")[0]}.csv`,
       };
     }),
+
+  // ==================== 并发监控 API ====================
+  
+  // 获取并发统计信息
+  getConcurrencyStats: protectedProcedure.query(async () => {
+    return getConcurrencyStats();
+  }),
+
+  // 获取活跃任务列表
+  getActiveTasks: protectedProcedure.query(async () => {
+    return getActiveTasks();
+  }),
 });
 
 // ==================== 实时扣分模式搜索执行逻辑 (v4.0) ====================

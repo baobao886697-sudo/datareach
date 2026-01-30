@@ -1280,6 +1280,47 @@ export default function Admin() {
                   </ul>
                 </CardContent>
               </Card>
+
+              {/* 并发监控面板 */}
+              <Card className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 border-slate-700/50 md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-cyan-400" />
+                    并发监控
+                  </CardTitle>
+                  <CardDescription className="text-slate-400">
+                    实时查看 TPS 搜索任务的并发状态
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-cyan-400">4</div>
+                      <div className="text-xs text-slate-400">最大线程数</div>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-green-400">10</div>
+                      <div className="text-xs text-slate-400">每线程并发</div>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-yellow-400">40</div>
+                      <div className="text-xs text-slate-400">全局最大并发</div>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-purple-400">5s</div>
+                      <div className="text-xs text-slate-400">请求超时</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-700">
+                    <p className="text-xs text-slate-500">
+                      <strong className="text-white">智能并发池策略：</strong><br/>
+                      • 小任务 (≤50条): 2线程 × 5并发 = 10并发<br/>
+                      • 中任务 (51-150条): 3线程 × 8并发 = 24并发<br/>
+                      • 大任务 (&gt;150条): 4线程 × 10并发 = 40并发
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
         )}

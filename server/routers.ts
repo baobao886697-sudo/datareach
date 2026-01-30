@@ -18,6 +18,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { tpsRouter } from "./tps/router";
+import { clearTpsConfigCache } from "./tps/runtimeConfig";
 import { anywhoRouter } from "./anywho/router";
 import { spfRouter } from "./spf/router";
 import { linkedinRouter } from "./linkedin/router";
@@ -1186,6 +1187,13 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         await setConfig(input.key, input.value, (ctx as any).adminUser?.username || 'admin', input.description);
+        
+        // 实时清除 TPS 配置缓存（配置热重载）
+        if (input.key.startsWith('TPS_')) {
+          clearTpsConfigCache();
+          console.log(`[Admin] TPS 配置已更新: ${input.key}, 缓存已清除`);
+        }
+        
         await logAdmin(
           (ctx as any).adminUser?.username || 'admin',
           'update_config',
