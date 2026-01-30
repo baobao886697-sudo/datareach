@@ -879,14 +879,14 @@ export async function executeSearchV3(
     stats.creditsUsed = breakdown.totalCost;
     stats.creditsFinal = breakdown.totalCost;
     
-    // 简洁最终结果日志：一行汇总
-    if (finalStatus === 'stopped') {
-      addLog(`⏹️ 已停止 | 结果: ${stats.totalResults} 条 | 有电话: ${stats.resultsWithPhone} | 消耗: ${breakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'warning', 'complete', '');
-    } else if (finalStatus === 'insufficient_credits') {
-      addLog(`⚠️ 积分不足 | 结果: ${stats.totalResults} 条 | 有电话: ${stats.resultsWithPhone} | 消耗: ${breakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'warning', 'complete', '');
-    } else {
-      addLog(`✅ 完成 | 结果: ${stats.totalResults} 条 | 有电话: ${stats.resultsWithPhone} | 消耗: ${breakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'success', 'complete', '');
-    }
+    // 数据流向说明日志
+    const statusIcon = finalStatus === 'stopped' ? '⏹️ 已停止' : 
+                       finalStatus === 'insufficient_credits' ? '⚠️ 积分不足' : '✅ 完成';
+    const logLevel = finalStatus === 'completed' ? 'success' : 'warning';
+    
+    addLog(`${statusIcon} | 总结果: ${stats.totalResults} 条 | 有电话: ${stats.resultsWithPhone} 条 | 验证通过: ${stats.resultsVerified} 条`, logLevel, 'complete', '');
+    addLog(`💰 消耗: ${breakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'info', 'complete', '');
+    addLog(`📥 CSV导出: ${stats.resultsVerified} 条验证通过的记录`, 'info', 'complete', '');
 
     const statsLog: SearchLogEntry = {
       timestamp: formatTimestamp(),
