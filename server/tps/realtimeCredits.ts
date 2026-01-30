@@ -423,24 +423,8 @@ export function formatTpsCostBreakdown(
   searchCostPerPage: number,
   detailCostPerPage: number
 ): string[] {
-  const lines: string[] = [];
-  
-  lines.push(`═══════════════════════════════════════════════════`);
-  lines.push(`💰 费用明细`);
-  lines.push(`═══════════════════════════════════════════════════`);
-  lines.push(`📋 搜索页: ${breakdown.searchPages} 页 × ${searchCostPerPage.toFixed(2)} = ${breakdown.searchCost.toFixed(1)} 积分`);
-  lines.push(`📋 详情页: ${breakdown.detailPages} 页 × ${detailCostPerPage.toFixed(2)} = ${breakdown.detailCost.toFixed(1)} 积分`);
-  lines.push(`───────────────────────────────────────────────────`);
-  lines.push(`📊 本次消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
-  lines.push(`📊 剩余余额: ${currentBalance.toFixed(1)} 积分`);
-  lines.push(`📊 获取结果: ${totalResults} 条`);
-  
-  if (totalResults > 0) {
-    const costPerResult = breakdown.totalCost / totalResults;
-    lines.push(`📊 每条成本: ${costPerResult.toFixed(2)} 积分`);
-  }
-  
-  lines.push(`═══════════════════════════════════════════════════`);
-  
-  return lines;
+  // 简洁专业版（参考 SPF 风格）- 只输出一行汇总
+  return [
+    `📊 结果: ${totalResults} 条 | 消耗: ${breakdown.totalCost.toFixed(1)} 积分 | 余额: ${currentBalance.toFixed(1)} 积分`
+  ];
 }

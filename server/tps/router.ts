@@ -338,25 +338,29 @@ export const tpsRouter = router({
         return digits;
       };
       
+      // 从全名解析 firstName 和 lastName
+      const parseName = (fullName: string): { firstName: string; lastName: string } => {
+        if (!fullName) return { firstName: "", lastName: "" };
+        const parts = fullName.trim().split(/\s+/);
+        if (parts.length === 1) {
+          return { firstName: parts[0], lastName: "" };
+        }
+        // 第一个词是 firstName，最后一个词是 lastName
+        return { firstName: parts[0], lastName: parts[parts.length - 1] };
+      };
+      
       // CSV 表头
       const headers = [
         "姓名",
         "名",
         "姓",
         "年龄",
-        "出生年份",
         "城市",
         "州",
         "完整地址",
         "电话",
         "电话类型",
         "运营商",
-        "电话年份",
-        "邮箱",
-        "婚姻状态",
-        "配偶姓名",
-        "就业状态",
-        "关联企业",
         "房产价值",
         "搜索姓名",
         "搜索地点",
@@ -366,31 +370,27 @@ export const tpsRouter = router({
       ];
       
       // CSV 数据行
-      const rows = results.data.map((r: any) => [
-        r.name || "",
-        r.firstName || "",
-        r.lastName || "",
-        r.age?.toString() || "",
-        r.birthYear?.toString() || "",
-        r.city || "",
-        r.state || "",
-        r.location || "",
-        formatPhone(r.phone || ""),
-        r.phoneType || "",
-        r.carrier || "",
-        r.phoneYear?.toString() || "",
-        r.email || "",
-        r.maritalStatus || "",
-        r.spouseName || "",
-        r.employment || "",
-        r.businesses || "",
-        r.propertyValue?.toString() || "",
-        r.searchName || "",
-        r.searchLocation || "",
-        r.detailLink || "",
-        "TruePeopleSearch",
-        new Date().toISOString().split("T")[0],
-      ]);
+      const rows = results.data.map((r: any) => {
+        const { firstName, lastName } = parseName(r.name || "");
+        return [
+          r.name || "",
+          firstName,
+          lastName,
+          r.age?.toString() || "",
+          r.city || "",
+          r.state || "",
+          r.location || (r.city && r.state ? `${r.city}, ${r.state}` : ""),
+          formatPhone(r.phone || ""),
+          r.phoneType || "",
+          r.carrier || "",
+          r.propertyValue?.toString() || "",
+          r.searchName || "",
+          r.searchLocation || "",
+          r.detailLink ? `https://www.truepeoplesearch.com${r.detailLink}` : "",
+          "TruePeopleSearch",
+          new Date().toISOString().split("T")[0],
+        ];
+      });
       
       // 生成 CSV 内容
       const BOM = "\uFEFF";
@@ -463,38 +463,18 @@ async function executeTpsSearchRealtimeDeduction(
     }
   }
   
-  // 增强启动日志
-  addLog(`═══════════════════════════════════════════════════`);
-  addLog(`🔍 开始 TPS 搜索 (v4.0 实时扣分模式)`);
-  addLog(`═══════════════════════════════════════════════════`);
-  
-  // 显示搜索配置
-  addLog(`📋 搜索配置:`);
-  addLog(`   • 搜索模式: ${input.mode === 'nameOnly' ? '仅姓名搜索' : '姓名+地点组合搜索'}`);
-  addLog(`   • 搜索姓名: ${input.names.join(', ')}`);
+  // 启动日志（简洁专业版，参考 SPF 风格）
+  addLog(`🚀 TPS 搜索任务启动`);
+  addLog(`📋 搜索组合: ${subTasks.length} 个任务`);
   if (input.mode === 'nameLocation' && input.locations) {
-    addLog(`   • 搜索地点: ${input.locations.join(', ')}`);
+    addLog(`📋 搜索: ${input.names.join(', ')} @ ${input.locations.join(', ')}`);
+  } else {
+    addLog(`📋 搜索: ${input.names.join(', ')}`);
   }
-  addLog(`   • 搜索组合: ${subTasks.length} 个任务`);
-  addLog(`   • 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
   
   // 显示过滤条件
   const filters = input.filters || {};
-  addLog(`📋 过滤条件:`);
-  addLog(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
-  if (filters.minPropertyValue && filters.minPropertyValue > 0) addLog(`   • 最低房产价值: $${filters.minPropertyValue.toLocaleString()}`);
-  if (filters.excludeTMobile) addLog(`   • 排除运营商: T-Mobile`);
-  if (filters.excludeComcast) addLog(`   • 排除运营商: Comcast`);
-  if (filters.excludeLandline) addLog(`   • 排除座机号码`);
-  
-  // 显示计费标准
-  addLog(`💰 计费标准:`);
-  addLog(`   • 搜索页: ${searchCost} 积分/页`);
-  addLog(`   • 详情页: ${detailCost} 积分/页`);
-  addLog(`   • 扣费模式: 实时扣除（用多少扣多少）`);
-  
-  addLog(`═══════════════════════════════════════════════════`);
-  addLog(`🧵 并发配置: 搜索 ${SEARCH_CONCURRENCY} 任务并发 / 详情 ${TOTAL_CONCURRENCY} 并发`);
+  addLog(`📋 过滤条件: 年龄 ${filters.minAge || 50}-${filters.maxAge || 79} 岁`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
@@ -628,24 +608,16 @@ async function executeTpsSearchRealtimeDeduction(
     
     await runConcurrentSearches();
     
-    // 搜索阶段完成日志
-    addLog(`════════ 搜索阶段完成 ════════`);
-    addLog(`📊 搜索页请求: ${totalSearchPages} 页`);
-    addLog(`📊 待获取详情: ${allDetailTasks.length} 条`);
-    addLog(`📊 年龄预过滤: ${totalFilteredOut} 条被排除`);
-    if (totalSkippedDeceased > 0) {
-      addLog(`📊 排除已故: ${totalSkippedDeceased} 条 (Deceased)`);
-    }
-    addLog(`📊 当前消耗: ${creditTracker.getTotalDeducted().toFixed(1)} 积分`);
-    addLog(`📊 剩余余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+    // 搜索阶段完成日志（简洁版）
+    addLog(`✅ 搜索完成: ${totalSearchPages} 页, 找到 ${allDetailTasks.length} 条待获取`);
     
     if (stoppedDueToCredits) {
-      addLog(`⚠️ 搜索阶段因积分不足提前停止`);
+      addLog(`⚠️ 积分不足，停止搜索`);
     }
     
     // ==================== 阶段二：智能并发池获取详情（v5.0 实时扣费） ====================
     if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
-      addLog(`📋 阶段二：智能并发池获取详情（最大 ${TOTAL_CONCURRENCY} 并发）...`);
+      addLog(`📋 开始获取详情...`);
       
       // 使用智能并发池获取详情
       const detailResult = await fetchDetailsWithSmartPool(
@@ -735,7 +707,7 @@ async function executeTpsSearchRealtimeDeduction(
     const finalStatus = stoppedDueToCredits ? "insufficient_credits" : "completed";
     
     if (stoppedDueToCredits) {
-      addLog(`⚠️ 任务因积分不足提前停止，已返回已获取的 ${totalResults} 条结果`);
+      addLog(`⚠️ 任务因积分不足提前结束`);
       
       // 更新任务状态为 insufficient_credits
       const database = await getDb();
@@ -772,15 +744,10 @@ async function executeTpsSearchRealtimeDeduction(
     });
     
   } catch (error: any) {
-    addLog(`❌ 搜索任务失败: ${error.message}`);
+    addLog(`❌ 任务失败: ${error.message}`);
     
-    // 生成费用明细
+    // 获取已消耗的费用
     const costBreakdown = creditTracker.getCostBreakdown();
-    addLog(`💰 失败时费用明细:`);
-    addLog(`   • 搜索页: ${costBreakdown.searchPages} 页 × ${searchCost} = ${costBreakdown.searchCost.toFixed(1)} 积分`);
-    addLog(`   • 详情页: ${costBreakdown.detailPages} 页 × ${detailCost} = ${costBreakdown.detailCost.toFixed(1)} 积分`);
-    addLog(`   • 总消耗: ${costBreakdown.totalCost.toFixed(1)} 积分`);
-    addLog(`   • 剩余余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
     
     await failTpsSearchTask(taskDbId, error.message, logs);
     
