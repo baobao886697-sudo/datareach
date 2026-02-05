@@ -1,6 +1,7 @@
 /**
- * TruePeopleSearch 搜索页面 - 黄金模板 v2.0
+ * TruePeopleSearch 搜索页面 - 黄金模板 v2.1
  * 整合 TPS + SPF 最佳设计
+ * v2.1: 添加4种搜索模式支持（nameZip, nameCity, nameState, nameOnly）
  */
 
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -38,7 +39,9 @@ import {
   TrendingUp,
   Building,
   Calendar,
-  Shield
+  Shield,
+  Hash,
+  Map
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -128,12 +131,59 @@ const rainbowStyles = `
   }
 `;
 
+// 搜索模式类型
+type SearchMode = "nameZip" | "nameCity" | "nameState" | "nameOnly";
+
+// 搜索模式配置
+const SEARCH_MODES = {
+  nameZip: {
+    label: "名字 + 邮编",
+    icon: Hash,
+    description: "支持仅名字搜索，配合邮编定位",
+    namePlaceholder: "Tom\nJohn\nMichael",
+    nameHint: "可以只输入名字（First Name），不需要姓氏",
+    locationPlaceholder: "75201\n90210\n10001",
+    locationHint: "输入5位数美国邮编",
+    locationLabel: "邮编列表",
+  },
+  nameCity: {
+    label: "名字 + 城市州",
+    icon: MapPin,
+    description: "支持仅名字搜索，配合城市州定位",
+    namePlaceholder: "Tom\nJohn\nMichael",
+    nameHint: "可以只输入名字（First Name），不需要姓氏",
+    locationPlaceholder: "Dallas, TX\nLos Angeles, CA\nNew York, NY",
+    locationHint: "格式：城市, 州缩写（必须包含州）",
+    locationLabel: "城市州列表",
+  },
+  nameState: {
+    label: "名字 + 州",
+    icon: Map,
+    description: "在整个州范围内搜索",
+    namePlaceholder: "Tom Smith\nJohn Doe\nJane Wilson",
+    nameHint: "建议输入完整姓名以获得更精确的结果",
+    locationPlaceholder: "TX\nCA\nNY",
+    locationHint: "输入2位州缩写",
+    locationLabel: "州列表",
+  },
+  nameOnly: {
+    label: "仅姓名搜索",
+    icon: Users,
+    description: "全美范围搜索，需要完整姓名",
+    namePlaceholder: "John Smith\nJane Doe\nRobert Johnson",
+    nameHint: "必须输入完整姓名（名字 + 姓氏）",
+    locationPlaceholder: "",
+    locationHint: "",
+    locationLabel: "",
+  },
+};
+
 export default function TpsSearch() {
   const { user, loading } = useAuth();
   const [, setLocation] = useLocation();
   
-  // 搜索模式
-  const [mode, setMode] = useState<"nameOnly" | "nameLocation">("nameOnly");
+  // 搜索模式 - 默认使用 nameZip（最灵活）
+  const [mode, setMode] = useState<SearchMode>("nameZip");
   
   // 输入
   const [namesInput, setNamesInput] = useState("");
@@ -193,6 +243,15 @@ export default function TpsSearch() {
   const estimatedDetailPageCost = MAX_PREDEDUCT_DETAIL_PAGES * detailCost;
   const estimatedCost = estimatedSearchPageCost + estimatedDetailPageCost;
   
+  // 当前模式配置
+  const currentModeConfig = SEARCH_MODES[mode];
+  const needsLocation = mode !== "nameOnly";
+  
+  // 计算搜索组合数
+  const searchCombinations = needsLocation 
+    ? names.length * Math.max(locations.length, 1) 
+    : names.length;
+  
   // 提交搜索
   const searchMutation = trpc.tps.search.useMutation({
     onSuccess: (data) => {
@@ -214,9 +273,41 @@ export default function TpsSearch() {
       return;
     }
     
-    if (mode === "nameLocation" && locations.length === 0) {
-      toast.error("姓名+地点模式需要输入地点");
+    // 需要地点的模式必须输入地点
+    if (needsLocation && locations.length === 0) {
+      toast.error(`${currentModeConfig.label}模式需要输入${currentModeConfig.locationLabel}`);
       return;
+    }
+    
+    // 验证地点格式
+    if (mode === "nameCity") {
+      const invalidLocations = locations.filter(loc => !loc.includes(","));
+      if (invalidLocations.length > 0) {
+        toast.error("城市格式错误", {
+          description: `请使用"城市, 州"格式，如 "Dallas, TX"。以下地点格式不正确：${invalidLocations.slice(0, 3).join(", ")}${invalidLocations.length > 3 ? "..." : ""}`,
+        });
+        return;
+      }
+    }
+    
+    if (mode === "nameZip") {
+      const invalidZips = locations.filter(loc => !/^\d{5}$/.test(loc.trim()));
+      if (invalidZips.length > 0) {
+        toast.error("邮编格式错误", {
+          description: `请输入5位数字邮编。以下邮编格式不正确：${invalidZips.slice(0, 3).join(", ")}${invalidZips.length > 3 ? "..." : ""}`,
+        });
+        return;
+      }
+    }
+    
+    if (mode === "nameState") {
+      const invalidStates = locations.filter(loc => !/^[A-Z]{2}$/i.test(loc.trim()));
+      if (invalidStates.length > 0) {
+        toast.error("州缩写格式错误", {
+          description: `请输入2位州缩写，如 "TX"、"CA"。以下格式不正确：${invalidStates.slice(0, 3).join(", ")}${invalidStates.length > 3 ? "..." : ""}`,
+        });
+        return;
+      }
     }
     
     const userCredits = profile?.credits || 0;
@@ -229,7 +320,7 @@ export default function TpsSearch() {
     
     searchMutation.mutate({
       names,
-      locations: mode === "nameLocation" ? locations : undefined,
+      locations: needsLocation ? locations : undefined,
       mode,
       filters: filters,  // 始终传递过滤条件（包含默认值）
     });
@@ -310,22 +401,23 @@ export default function TpsSearch() {
             <CardContent className="p-4 text-center">
               <Shield className="w-8 h-8 text-blue-400 mx-auto mb-2" />
               <h3 className="font-semibold text-blue-400">运营商信息</h3>
-              <p className="text-xs text-muted-foreground">精准过滤运营商</p>
+              <p className="text-xs text-muted-foreground">精准过滤号码</p>
             </CardContent>
           </Card>
           <Card className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/30 hover:border-purple-500/50 transition-colors">
             <CardContent className="p-4 text-center">
-              <Building className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-              <h3 className="font-semibold text-purple-400">建造年份</h3>
-              <p className="text-xs text-muted-foreground">房屋建造信息</p>
+              <Calendar className="w-8 h-8 text-purple-400 mx-auto mb-2" />
+              <h3 className="font-semibold text-purple-400">年龄筛选</h3>
+              <p className="text-xs text-muted-foreground">精准定位目标人群</p>
             </CardContent>
           </Card>
         </div>
 
+        {/* 主内容区 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 左侧：搜索表单 */}
           <div className="lg:col-span-2 space-y-6">
-            {/* 搜索模式选择 */}
+            {/* 搜索模式选择 - 4种模式 */}
             <Card className="rainbow-border">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -333,74 +425,99 @@ export default function TpsSearch() {
                   搜索模式
                 </CardTitle>
                 <CardDescription>
-                  选择搜索方式：仅姓名搜索或姓名+地点组合搜索
+                  选择搜索方式：支持仅名字搜索（配合邮编/城市州）或完整姓名搜索
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Tabs value={mode} onValueChange={(v) => setMode(v as "nameOnly" | "nameLocation")}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="nameOnly" className="flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      仅姓名搜索
-                    </TabsTrigger>
-                    <TabsTrigger value="nameLocation" className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4" />
-                      姓名 + 地点
-                    </TabsTrigger>
+                <Tabs value={mode} onValueChange={(v) => setMode(v as SearchMode)}>
+                  <TabsList className="grid w-full grid-cols-4">
+                    {(Object.keys(SEARCH_MODES) as SearchMode[]).map((modeKey) => {
+                      const config = SEARCH_MODES[modeKey];
+                      const IconComponent = config.icon;
+                      return (
+                        <TabsTrigger key={modeKey} value={modeKey} className="flex items-center gap-1 text-xs">
+                          <IconComponent className="h-3 w-3" />
+                          <span className="hidden sm:inline">{config.label}</span>
+                          <span className="sm:hidden">{config.label.split(" ")[0]}</span>
+                        </TabsTrigger>
+                      );
+                    })}
                   </TabsList>
                   
-                  <TabsContent value="nameOnly" className="mt-4 space-y-4">
-                    <div>
-                      <Label htmlFor="names">姓名列表（每行一个）</Label>
-                      <Textarea
-                        id="names"
-                        placeholder="John Smith&#10;Jane Doe&#10;Robert Johnson"
-                        value={namesInput}
-                        onChange={(e) => setNamesInput(e.target.value)}
-                        className="mt-2 min-h-[200px] font-mono bg-slate-800/50"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        已输入 {names.length} 个姓名
-                      </p>
-                    </div>
-                  </TabsContent>
+                  {/* 模式说明 */}
+                  <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                    <p className="text-sm text-amber-400 flex items-center gap-2">
+                      <Info className="h-4 w-4 flex-shrink-0" />
+                      {currentModeConfig.description}
+                    </p>
+                  </div>
                   
-                  <TabsContent value="nameLocation" className="mt-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                  {/* 输入区域 */}
+                  <div className="mt-4 space-y-4">
+                    {needsLocation ? (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="names">姓名列表（每行一个）</Label>
+                          <Textarea
+                            id="names"
+                            placeholder={currentModeConfig.namePlaceholder}
+                            value={namesInput}
+                            onChange={(e) => setNamesInput(e.target.value)}
+                            className="mt-2 min-h-[150px] font-mono bg-slate-800/50"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {currentModeConfig.nameHint}
+                          </p>
+                          <p className="text-xs text-emerald-400 mt-1">
+                            已输入 {names.length} 个姓名
+                          </p>
+                        </div>
+                        <div>
+                          <Label htmlFor="locations">{currentModeConfig.locationLabel}（每行一个）</Label>
+                          <Textarea
+                            id="locations"
+                            placeholder={currentModeConfig.locationPlaceholder}
+                            value={locationsInput}
+                            onChange={(e) => setLocationsInput(e.target.value)}
+                            className="mt-2 min-h-[150px] font-mono bg-slate-800/50"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {currentModeConfig.locationHint}
+                          </p>
+                          <p className="text-xs text-emerald-400 mt-1">
+                            已输入 {locations.length} 个地点
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
                       <div>
-                        <Label htmlFor="names2">姓名列表（每行一个）</Label>
+                        <Label htmlFor="names">姓名列表（每行一个）</Label>
                         <Textarea
-                          id="names2"
-                          placeholder="John Smith&#10;Jane Doe"
+                          id="names"
+                          placeholder={currentModeConfig.namePlaceholder}
                           value={namesInput}
                           onChange={(e) => setNamesInput(e.target.value)}
-                          className="mt-2 min-h-[150px] font-mono bg-slate-800/50"
+                          className="mt-2 min-h-[200px] font-mono bg-slate-800/50"
                         />
                         <p className="text-xs text-muted-foreground mt-1">
+                          {currentModeConfig.nameHint}
+                        </p>
+                        <p className="text-xs text-emerald-400 mt-1">
                           已输入 {names.length} 个姓名
                         </p>
                       </div>
-                      <div>
-                        <Label htmlFor="locations">地点列表（每行一个）</Label>
-                        <Textarea
-                          id="locations"
-                          placeholder="Los Angeles, CA&#10;New York, NY&#10;Chicago, IL"
-                          value={locationsInput}
-                          onChange={(e) => setLocationsInput(e.target.value)}
-                          className="mt-2 min-h-[150px] font-mono bg-slate-800/50"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                          已输入 {locations.length} 个地点
+                    )}
+                    
+                    {/* 搜索组合数提示 */}
+                    {needsLocation && (
+                      <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                        <p className="text-sm text-blue-400 flex items-center gap-2">
+                          <Info className="h-4 w-4" />
+                          将搜索 {names.length} × {locations.length} = {searchCombinations} 个组合
                         </p>
                       </div>
-                    </div>
-                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                      <p className="text-sm text-blue-400 flex items-center gap-2">
-                        <Info className="h-4 w-4" />
-                        将搜索 {names.length} × {locations.length} = {names.length * locations.length} 个组合
-                      </p>
-                    </div>
-                  </TabsContent>
+                    )}
+                  </div>
                 </Tabs>
               </CardContent>
             </Card>
@@ -453,73 +570,81 @@ export default function TpsSearch() {
                       )}
                     </div>
                   </div>
-                  
+
                   {/* 年龄范围 */}
                   <div>
-                    <Label>年龄范围: {filters.minAge} - {filters.maxAge} 岁</Label>
-                    <div className="flex gap-4 mt-2">
+                    <Label className="flex items-center gap-2 mb-4">
+                      <Calendar className="h-4 w-4" />
+                      年龄范围: {filters.minAge} - {filters.maxAge} 岁
+                    </Label>
+                    <div className="px-2">
                       <Slider
                         value={[filters.minAge, filters.maxAge]}
-                        onValueChange={([min, max]) => setFilters(f => ({ ...f, minAge: min, maxAge: max }))}
                         min={18}
-                        max={99}
+                        max={100}
                         step={1}
+                        onValueChange={([min, max]) => setFilters(f => ({ ...f, minAge: min, maxAge: max }))}
+                        className="w-full"
                       />
                     </div>
+                    <div className="flex justify-between text-xs text-muted-foreground mt-2">
+                      <span>18岁</span>
+                      <span>100岁</span>
+                    </div>
+                  </div>
+
+                  {/* 房产价值 */}
+                  <div>
+                    <Label className="flex items-center gap-2 mb-2">
+                      <Home className="h-4 w-4" />
+                      最低房产价值
+                    </Label>
+                    <Input
+                      type="number"
+                      value={filters.minPropertyValue}
+                      onChange={(e) => setFilters(f => ({ ...f, minPropertyValue: parseInt(e.target.value) || 0 }))}
+                      placeholder="0"
+                      className="bg-slate-800/50"
+                    />
                     <p className="text-xs text-muted-foreground mt-1">
-                      过滤掉不在此年龄范围内的记录
+                      设置为 0 表示不限制
                     </p>
                   </div>
 
-                  
-                  {/* 房产价值 */}
-                  <div>
-                    <Label>最低房产价值: ${filters.minPropertyValue.toLocaleString()}</Label>
-                    <Slider
-                      value={[filters.minPropertyValue]}
-                      onValueChange={([v]) => setFilters(f => ({ ...f, minPropertyValue: v }))}
-                      min={0}
-                      max={10000000}
-                      step={100000}
-                      className="mt-2"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      过滤掉房产价值低于此金额的记录
-                    </p>
-                  </div>
-                  
-                  {/* 排除运营商 */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>排除 T-Mobile 号码</Label>
-                      <p className="text-xs text-muted-foreground">过滤掉 T-Mobile 运营商的号码</p>
+                  {/* 运营商过滤 */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>排除 T-Mobile 号码</Label>
+                        <p className="text-xs text-muted-foreground">过滤掉 T-Mobile 运营商的号码</p>
+                      </div>
+                      <Switch
+                        checked={filters.excludeTMobile}
+                        onCheckedChange={(v) => setFilters(f => ({ ...f, excludeTMobile: v }))}
+                      />
                     </div>
-                    <Switch
-                      checked={filters.excludeTMobile}
-                      onCheckedChange={(v) => setFilters(f => ({ ...f, excludeTMobile: v }))}
-                    />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>排除 Comcast 号码</Label>
-                      <p className="text-xs text-muted-foreground">过滤掉 Comcast/Spectrum 运营商的号码</p>
+                    
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>排除 Comcast 号码</Label>
+                        <p className="text-xs text-muted-foreground">过滤掉 Comcast/Spectrum 运营商的号码</p>
+                      </div>
+                      <Switch
+                        checked={filters.excludeComcast}
+                        onCheckedChange={(v) => setFilters(f => ({ ...f, excludeComcast: v }))}
+                      />
                     </div>
-                    <Switch
-                      checked={filters.excludeComcast}
-                      onCheckedChange={(v) => setFilters(f => ({ ...f, excludeComcast: v }))}
-                    />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>排除固话号码</Label>
-                      <p className="text-xs text-muted-foreground">过滤掉 Landline 类型的固定电话号码</p>
+                    
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>排除固话号码</Label>
+                        <p className="text-xs text-muted-foreground">过滤掉 Landline 类型的固定电话号码</p>
+                      </div>
+                      <Switch
+                        checked={filters.excludeLandline}
+                        onCheckedChange={(v) => setFilters(f => ({ ...f, excludeLandline: v }))}
+                      />
                     </div>
-                    <Switch
-                      checked={filters.excludeLandline}
-                      onCheckedChange={(v) => setFilters(f => ({ ...f, excludeLandline: v }))}
-                    />
                   </div>
                 </CardContent>
               )}
@@ -633,14 +758,14 @@ export default function TpsSearch() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* 核心优势1: 最新数据 */}
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
-                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                    <TrendingUp className="h-5 w-5 text-amber-400" />
+                {/* 核心优势1: 灵活搜索 */}
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
+                  <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                    <Search className="h-5 w-5 text-cyan-400" />
                   </div>
                   <div>
-                    <p className="font-bold text-amber-300">华侨/美国人最新数据</p>
-                    <p className="text-xs text-muted-foreground">实时同步美国公开数据库，数据新鲜度行业领先</p>
+                    <p className="font-bold text-cyan-300">灵活搜索模式</p>
+                    <p className="text-xs text-muted-foreground">支持仅名字搜索，配合邮编/城市州精准定位</p>
                   </div>
                 </div>
                 
@@ -668,17 +793,6 @@ export default function TpsSearch() {
                     <p className="text-xs text-muted-foreground">获取目标人物的房产估值，精准筛选高净值客户</p>
                   </div>
                 </div>
-                
-                {/* 核心优势4: 精准筛选 */}
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/20">
-                  <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                    <Zap className="h-5 w-5 text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-blue-300">多维度精准筛选</p>
-                    <p className="text-xs text-muted-foreground">年龄、运营商、号码类型、房产价值多条件过滤</p>
-                  </div>
-                </div>
               </CardContent>
             </Card>
 
@@ -693,11 +807,11 @@ export default function TpsSearch() {
               <CardContent className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-xs font-bold text-black">1</div>
-                  <p className="text-sm">选择搜索模式（仅姓名 / 姓名+地点）</p>
+                  <p className="text-sm">选择搜索模式（推荐：名字+邮编）</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-xs font-bold text-black">2</div>
-                  <p className="text-sm">输入姓名列表，每行一个姓名</p>
+                  <p className="text-sm">输入姓名和地点列表，每行一个</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-xs font-bold text-black">3</div>
@@ -731,4 +845,4 @@ export default function TpsSearch() {
     </DashboardLayout>
   );
 }
-// TPS Golden Template v2.0
+// TPS Golden Template v2.1 - 支持4种搜索模式

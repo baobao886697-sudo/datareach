@@ -79,7 +79,13 @@ const tpsFiltersSchema = z.object({
 const tpsSearchInputSchema = z.object({
   names: z.array(z.string().min(1)).min(1).max(100),
   locations: z.array(z.string()).optional(),
-  mode: z.enum(["nameOnly", "nameLocation"]),
+  // v2.1: 支持4种搜索模式
+  // nameZip: 名字+邮编（支持仅名字）
+  // nameCity: 名字+城市州（支持仅名字）
+  // nameState: 名字+州
+  // nameOnly: 仅姓名（需要完整姓名）
+  // 兼容旧模式：nameLocation 映射到 nameCity
+  mode: z.enum(["nameOnly", "nameLocation", "nameZip", "nameCity", "nameState"]),
   filters: tpsFiltersSchema,
 });
 
@@ -466,11 +472,18 @@ async function executeTpsSearchRealtimeDeduction(
   // 构建子任务列表
   const subTasks: Array<{ name: string; location: string; index: number }> = [];
   
-  if (input.mode === "nameOnly") {
+  // v2.1: 支持4种搜索模式
+  // nameOnly: 仅姓名（需要完整姓名，全美搜索）
+  // nameZip/nameCity/nameState/nameLocation: 需要地点
+  const needsLocation = input.mode !== "nameOnly";
+  
+  if (!needsLocation) {
+    // 仅姓名模式
     for (let i = 0; i < input.names.length; i++) {
       subTasks.push({ name: input.names[i], location: "", index: i });
     }
   } else {
+    // 需要地点的模式
     const locations = input.locations && input.locations.length > 0 
       ? input.locations 
       : [""];
@@ -482,10 +495,20 @@ async function executeTpsSearchRealtimeDeduction(
     }
   }
   
+  // 搜索模式名称映射
+  const modeNames: Record<string, string> = {
+    nameZip: "名字+邮编",
+    nameCity: "名字+城市州",
+    nameState: "名字+州",
+    nameOnly: "仅姓名",
+    nameLocation: "姓名+地点",  // 兼容旧模式
+  };
+  
   // 启动日志（简洁专业版，参考 SPF 风格）
   addLog(`🚀 TPS 搜索任务启动`);
+  addLog(`📋 搜索模式: ${modeNames[input.mode] || input.mode}`);
   addLog(`📋 搜索组合: ${subTasks.length} 个任务`);
-  if (input.mode === 'nameLocation' && input.locations) {
+  if (needsLocation && input.locations) {
     addLog(`📋 搜索: ${input.names.join(', ')} @ ${input.locations.join(', ')}`);
   } else {
     addLog(`📋 搜索: ${input.names.join(', ')}`);
