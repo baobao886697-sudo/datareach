@@ -406,6 +406,8 @@ export const tpsSearchResults = mysqlTable("tps_search_results", {
   yearBuilt: int("yearBuilt"),
   company: varchar("company", { length: 200 }),     // 公司
   jobTitle: varchar("jobTitle", { length: 200 }),   // 职位
+  email: varchar("email", { length: 500 }),          // 邮箱地址（可能有多个，用逗号分隔）
+  spouse: varchar("spouse", { length: 200 }),        // 配偶姓名（无配偶则为空）
   detailLink: varchar("detailLink", { length: 500 }),
   fromCache: boolean("fromCache").default(false).notNull(), // 是否来自缓存
   createdAt: timestamp("createdAt").defaultNow().notNull(),

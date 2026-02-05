@@ -567,6 +567,8 @@ async function ensureTables() {
       { name: 'fromCache', definition: 'BOOLEAN DEFAULT FALSE' },
       { name: 'company', definition: 'VARCHAR(200)' },
       { name: 'jobTitle', definition: 'VARCHAR(200)' },
+      { name: 'email', definition: 'VARCHAR(500)' },
+      { name: 'spouse', definition: 'VARCHAR(200)' },
     ];
     
     for (const col of resultsColumnsToAdd) {

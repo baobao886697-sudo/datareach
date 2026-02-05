@@ -594,6 +594,8 @@ export default function TpsTask() {
                       <TableHead>房产价值</TableHead>
                       <TableHead>公司</TableHead>
                       <TableHead>职位</TableHead>
+                      <TableHead>邮箱</TableHead>
+                      <TableHead>婚姻状态</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -652,6 +654,12 @@ export default function TpsTask() {
                         </TableCell>
                         <TableCell className="text-sm text-gray-400">
                           {result.jobTitle || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-400">
+                          {result.email || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-400">
+                          {result.spouse || "可能单身"}
                         </TableCell>
                       </TableRow>
                     ))}

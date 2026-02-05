@@ -166,6 +166,8 @@ export interface TpsDetailResult {
   yearBuilt?: number;
   company?: string;      // 公司
   jobTitle?: string;     // 职位
+  email?: string;        // 邮箱地址（多个用逗号分隔）
+  spouse?: string;       // 配偶姓名（无配偶则为空）
   detailLink?: string;
   fromCache?: boolean;  // 标记是否来自缓存
 }
@@ -513,6 +515,46 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
     }
   });
   
+  // 提取邮箱地址 (Email Addresses 区块)
+  // 邮箱以纯文本形式显示在 div 中，使用正则表达式提取
+  let email: string | undefined;
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const allEmails = html.match(emailRegex) || [];
+  // 过滤掉网站相关邮箱
+  const personalEmails = allEmails.filter(e => 
+    !e.toLowerCase().includes('truepeoplesearch') && 
+    !e.toLowerCase().includes('example') &&
+    !e.toLowerCase().includes('scrape')
+  );
+  if (personalEmails.length > 0) {
+    // 去重并用逗号分隔
+    email = [...new Set(personalEmails)].join(', ');
+  }
+  
+  // 提取配偶信息 (Possible Relatives 区块)
+  // HTML结构: <span class="dt-sb"><b>Possible Spouse</b></span>
+  let spouse: string | undefined;
+  
+  // 方法1: 查找包含 "Possible Spouse" 的元素
+  $('a[data-link-to-more="relative"]').each((_, el) => {
+    const $el = $(el);
+    const parentContainer = $el.parent();
+    const containerText = parentContainer.text();
+    
+    // 检查是否标记为 Possible Spouse
+    if (containerText.includes('Possible Spouse') && !spouse) {
+      spouse = $el.find('span').text().trim() || $el.text().trim();
+    }
+  });
+  
+  // 方法2: 备用方法 - 直接搜索 "Possible Spouse" 文本
+  if (!spouse) {
+    const spouseMatch = html.match(/data-link-to-more="relative"[^>]*>\s*<span>([^<]+)<\/span>.*?<b>Possible Spouse<\/b>/s);
+    if (spouseMatch) {
+      spouse = spouseMatch[1].trim();
+    }
+  }
+  
   // 优化：提取所有电话号码，然后按 reportYear 排序取最新的
   // 这样确保即使 TPS 更新数据，也能自动获取最新年份的号码
   const allPhones: TpsDetailResult[] = [];
@@ -573,6 +615,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       yearBuilt,
       company,
       jobTitle,
+      email,
+      spouse,
       detailLink: searchResult.detailLink,
     });
   });
@@ -615,6 +659,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
         yearBuilt,
         company,
         jobTitle,
+        email,
+        spouse,
         detailLink: searchResult.detailLink,
       });
     }
@@ -628,6 +674,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       location: city && state ? `${city}, ${state}` : (city || state || ''),
       company,
       jobTitle,
+      email,
+      spouse,
       detailLink: searchResult.detailLink,
     });
   }

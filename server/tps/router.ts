@@ -368,6 +368,8 @@ export const tpsRouter = router({
         "房产价值",
         "公司",
         "职位",
+        "邮箱",
+        "婚姻状态",
         "详情链接",
         "数据来源",
         "获取时间",
@@ -375,6 +377,8 @@ export const tpsRouter = router({
       
       // CSV 数据行
       const rows = results.data.map((r: any) => {
+        // 婚姻状态：有配偶显示配偶名字，无配偶显示"可能单身"
+        const maritalStatus = r.spouse ? r.spouse : "可能单身";
         return [
           r.name || "",
           r.age?.toString() || "",
@@ -386,6 +390,8 @@ export const tpsRouter = router({
           r.propertyValue?.toString() || "",
           r.company || "",
           r.jobTitle || "",
+          r.email || "",
+          maritalStatus,
           r.detailLink ? `https://www.truepeoplesearch.com${r.detailLink}` : "",
           "TruePeopleSearch",
           new Date().toISOString().split("T")[0],
