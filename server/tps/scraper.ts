@@ -581,7 +581,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       phoneType = 'Wireless';
     } else if (containerText.includes('Landline') || containerText.includes('landline')) {
       phoneType = 'Landline';
-    } else if (containerText.includes('VoIP') || containerText.includes('voip')) {
+    } else if (containerText.toLowerCase().includes('voip')) {
       phoneType = 'VoIP';
     }
     let carrier = '';
@@ -646,7 +646,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       let phoneType = '';
       if (html.includes('Wireless')) phoneType = 'Wireless';
       else if (html.includes('Landline')) phoneType = 'Landline';
-      else if (html.includes('VoIP')) phoneType = 'VoIP';
+      else if (html.toLowerCase().includes('voip')) phoneType = 'VoIP';
       results.push({
         name,
         age,
