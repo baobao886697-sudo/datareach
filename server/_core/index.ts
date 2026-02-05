@@ -565,6 +565,8 @@ async function ensureTables() {
       { name: 'isPrimary', definition: 'BOOLEAN DEFAULT FALSE' },
       { name: 'yearBuilt', definition: 'INT' },
       { name: 'fromCache', definition: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'company', definition: 'VARCHAR(200)' },
+      { name: 'jobTitle', definition: 'VARCHAR(200)' },
     ];
     
     for (const col of resultsColumnsToAdd) {
