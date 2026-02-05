@@ -569,7 +569,38 @@ async function ensureTables() {
       )
     `);
     console.log("[Database] TPS search results table ready");
-    // 表已重建，无需额外的 ALTER TABLE 操作
+    
+    // 添加缺失的字段到 tps_search_results 表（确保所有列都存在）
+    const resultsColumnsToAdd = [
+      { name: 'searchName', definition: 'VARCHAR(200)' },
+      { name: 'searchLocation', definition: 'VARCHAR(200)' },
+      { name: 'location', definition: 'VARCHAR(200)' },
+      { name: 'phone', definition: 'VARCHAR(50)' },
+      { name: 'phoneType', definition: 'VARCHAR(50)' },
+      { name: 'carrier', definition: 'VARCHAR(100)' },
+      { name: 'reportYear', definition: 'INT' },
+      { name: 'isPrimary', definition: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'propertyValue', definition: 'INT DEFAULT 0' },
+      { name: 'yearBuilt', definition: 'INT' },
+      { name: 'fromCache', definition: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'company', definition: 'VARCHAR(200)' },
+      { name: 'jobTitle', definition: 'VARCHAR(200)' },
+      { name: 'email', definition: 'VARCHAR(500)' },
+      { name: 'spouse', definition: 'VARCHAR(200)' },
+    ];
+    
+    for (const col of resultsColumnsToAdd) {
+      try {
+        await db.execute(sql.raw(`ALTER TABLE tps_search_results ADD COLUMN ${col.name} ${col.definition}`));
+        console.log(`[Database] Added column ${col.name} to tps_search_results`);
+      } catch (e: any) {
+        // 忽略字段已存在的错误
+        if (!e.message?.includes('Duplicate column')) {
+          console.log(`[Database] Column ${col.name} already exists or error:`, e.message);
+        }
+      }
+    }
+    console.log("[Database] TPS search results columns sync completed");
     
     // ========== Anywho 相关表 ==========
     
