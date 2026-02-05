@@ -318,7 +318,10 @@ async function verifyAgentLogin(email: string, password: string) {
   }
   
   // 生成JWT token
-  if (!AGENT_JWT_SECRET) {\n    throw new Error(\"系统配置错误：JWT密钥未设置\");\n  }\n  const token = jwt.sign(
+  if (!AGENT_JWT_SECRET) {
+    throw new Error("系统配置错误：JWT密钥未设置");
+  }
+  const token = jwt.sign(
     { 
       userId: user.id, 
       email: user.email,
