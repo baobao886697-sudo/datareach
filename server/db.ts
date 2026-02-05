@@ -119,24 +119,39 @@ export async function getAllUsers(page: number = 1, limit: number = 20, search?:
   if (!db) return { users: [], total: 0 };
   const offset = (page - 1) * limit;
   
-  // 使用原生SQL查询以获取代理信息
-  let whereClause = '';
+  // 使用参数化查询防止 SQL 注入
+  let result;
+  let countResult;
+  
   if (search) {
-    whereClause = `WHERE u.email LIKE '%${search.replace(/'/g, "''")}%' OR u.name LIKE '%${search.replace(/'/g, "''")}%'`;
+    // 使用参数化查询处理搜索条件
+    const searchPattern = `%${search}%`;
+    result = await db.execute(sql`
+      SELECT u.*, 
+             (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
+      FROM users u
+      WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+      ORDER BY u.createdAt DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    
+    countResult = await db.execute(sql`
+      SELECT COUNT(*) as count FROM users u 
+      WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+    `);
+  } else {
+    result = await db.execute(sql`
+      SELECT u.*, 
+             (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
+      FROM users u
+      ORDER BY u.createdAt DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    
+    countResult = await db.execute(sql`
+      SELECT COUNT(*) as count FROM users u
+    `);
   }
-  
-  const result = await db.execute(sql.raw(`
-    SELECT u.*, 
-           (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
-    FROM users u
-    ${whereClause}
-    ORDER BY u.createdAt DESC
-    LIMIT ${limit} OFFSET ${offset}
-  `));
-  
-  const countResult = await db.execute(sql.raw(`
-    SELECT COUNT(*) as count FROM users u ${whereClause}
-  `));
   
   return { 
     users: (result[0] as any[]).map(u => ({

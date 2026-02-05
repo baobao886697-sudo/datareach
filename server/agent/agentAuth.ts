@@ -4,8 +4,10 @@
 
 import jwt from "jsonwebtoken";
 import { getUserById } from "../db";
+import { ENV } from "../_core/env";
 
-const AGENT_JWT_SECRET = process.env.AGENT_JWT_SECRET || process.env.JWT_SECRET || 'agent-secret-key-change-in-production';
+// JWT密钥 - 从环境变量获取，不再使用硬编码默认值
+const AGENT_JWT_SECRET = ENV.agentJwtSecret;
 
 export interface AgentUser {
   userId: number;
@@ -19,6 +21,11 @@ export interface AgentUser {
  */
 export async function verifyAgentToken(token: string): Promise<AgentUser | null> {
   try {
+    if (!AGENT_JWT_SECRET) {
+      console.error("[SECURITY] AGENT_JWT_SECRET is not configured");
+      return null;
+    }
+    
     const decoded = jwt.verify(token, AGENT_JWT_SECRET) as any;
     if (!decoded.userId || !decoded.isAgent) {
       return null;

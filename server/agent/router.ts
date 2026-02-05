@@ -38,8 +38,10 @@ import {
 import { logAdmin } from "../db";
 import { verifyAgentToken as verifyAgentTokenAuth, getAgentTokenFromContext, getAuthenticatedAgentId } from "./agentAuth";
 
-// JWT密钥
-const AGENT_JWT_SECRET = process.env.AGENT_JWT_SECRET || process.env.JWT_SECRET || 'agent-secret-key-change-in-production';
+import { ENV } from '../_core/env';
+
+// JWT密钥 - 从环境变量获取，不再使用硬编码默认值
+const AGENT_JWT_SECRET = ENV.agentJwtSecret;
 
 // 代理认证中间件 - 验证代理JWT token
 interface AgentContext {
@@ -141,24 +143,41 @@ async function createAgentApplication(data: {
   return { success: true };
 }
 
-// 获取所有代理申请
+// 获取所有代理申请 - 使用参数化查询防止 SQL 注入
 async function getAgentApplications(status?: string, page: number = 1, limit: number = 20) {
   const db = getDb();
   const offset = (page - 1) * limit;
   
-  let query = `SELECT * FROM agent_applications`;
-  if (status) {
-    query += ` WHERE status = '${status}'`;
-  }
-  query += ` ORDER BY createdAt DESC LIMIT ${limit} OFFSET ${offset}`;
+  // 验证 status 参数只能是预定义的合法值
+  const validStatuses = ['pending', 'approved', 'rejected'];
+  const sanitizedStatus = status && validStatuses.includes(status) ? status : null;
   
-  const applications = await db.execute(sql.raw(query));
+  let applications;
+  let countResult;
   
-  let countQuery = `SELECT COUNT(*) as count FROM agent_applications`;
-  if (status) {
-    countQuery += ` WHERE status = '${status}'`;
+  if (sanitizedStatus) {
+    applications = await db.execute(sql`
+      SELECT * FROM agent_applications 
+      WHERE status = ${sanitizedStatus}
+      ORDER BY createdAt DESC 
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    
+    countResult = await db.execute(sql`
+      SELECT COUNT(*) as count FROM agent_applications 
+      WHERE status = ${sanitizedStatus}
+    `);
+  } else {
+    applications = await db.execute(sql`
+      SELECT * FROM agent_applications 
+      ORDER BY createdAt DESC 
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    
+    countResult = await db.execute(sql`
+      SELECT COUNT(*) as count FROM agent_applications
+    `);
   }
-  const countResult = await db.execute(sql.raw(countQuery));
   
   return {
     applications: (applications[0] as any[]),
