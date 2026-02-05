@@ -313,28 +313,34 @@ export async function saveTpsSearchResults(
   if (results.length === 0) return;
   
   const database = await db();
+  // 辅助函数：截断字符串以防止超出数据库列长度限制
+  const truncate = (str: string | undefined, maxLen: number): string => {
+    const s = str || '';
+    return s.length > maxLen ? s.slice(0, maxLen) : s;
+  };
+  
   const values = results.map(r => ({
     taskId: taskDbId,
     subTaskIndex,
-    searchName,
-    searchLocation,
-    name: r.name || '',
+    searchName: truncate(searchName, 200),
+    searchLocation: truncate(searchLocation, 200),
+    name: truncate(r.name, 200),
     age: r.age ?? null,
-    city: r.city || '',
-    state: r.state || '',
-    location: r.location || '',
-    phone: r.phone || '',
-    phoneType: r.phoneType || '',
-    carrier: r.carrier || '',
+    city: truncate(r.city, 100),
+    state: truncate(r.state, 50),
+    location: truncate(r.location, 200),
+    phone: truncate(r.phone, 50),
+    phoneType: truncate(r.phoneType, 50),
+    carrier: truncate(r.carrier, 100),
     reportYear: r.reportYear ?? null,
     isPrimary: r.isPrimary ?? false,
     propertyValue: r.propertyValue ?? 0,
     yearBuilt: r.yearBuilt ?? null,
-    company: r.company || '',
-    jobTitle: r.jobTitle || '',
-    email: r.email || '',
-    spouse: r.spouse || '',
-    detailLink: r.detailLink || '',
+    company: truncate(r.company, 200),
+    jobTitle: truncate(r.jobTitle, 200),
+    email: truncate(r.email, 500),
+    spouse: truncate(r.spouse, 200),
+    detailLink: truncate(r.detailLink, 500),
     fromCache: r.fromCache ?? false,
   }));
   
