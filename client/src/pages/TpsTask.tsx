@@ -592,7 +592,8 @@ export default function TpsTask() {
                       <TableHead>运营商</TableHead>
                       <TableHead>报告年份</TableHead>
                       <TableHead>房产价值</TableHead>
-                      <TableHead>建造年份</TableHead>
+                      <TableHead>公司</TableHead>
+                      <TableHead>职位</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -647,7 +648,10 @@ export default function TpsTask() {
                           ) : "-"}
                         </TableCell>
                         <TableCell className="text-sm text-gray-400">
-                          {result.yearBuilt || "-"}
+                          {result.company || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-400">
+                          {result.jobTitle || "-"}
                         </TableCell>
                       </TableRow>
                     ))}

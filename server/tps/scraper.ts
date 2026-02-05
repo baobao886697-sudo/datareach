@@ -164,6 +164,8 @@ export interface TpsDetailResult {
   isPrimary?: boolean;
   propertyValue?: number;
   yearBuilt?: number;
+  company?: string;      // 公司
+  jobTitle?: string;     // 职位
   detailLink?: string;
   fromCache?: boolean;  // 标记是否来自缓存
 }
@@ -492,6 +494,25 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       }
     }
   }
+  // 提取公司和职位信息 (Education and Employment 区块)
+  // HTML结构: <div class="col-6 mb-2">Company<br /><b>公司名</b></div>
+  let company: string | undefined;
+  let jobTitle: string | undefined;
+  
+  // 查找包含 Company 和 Job Title 的 col-6 元素
+  $('.col-6.mb-2').each((_, el) => {
+    const $el = $(el);
+    const text = $el.text().trim();
+    const boldText = $el.find('b').text().trim();
+    
+    if (text.startsWith('Company') && boldText && !company) {
+      company = boldText;
+    }
+    if (text.startsWith('Job Title') && boldText && !jobTitle) {
+      jobTitle = boldText;
+    }
+  });
+  
   // 优化：提取所有电话号码，然后按 reportYear 排序取最新的
   // 这样确保即使 TPS 更新数据，也能自动获取最新年份的号码
   const allPhones: TpsDetailResult[] = [];
@@ -550,6 +571,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       isPrimary,
       propertyValue,
       yearBuilt,
+      company,
+      jobTitle,
       detailLink: searchResult.detailLink,
     });
   });
@@ -590,6 +613,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
         phoneType,
         propertyValue,
         yearBuilt,
+        company,
+        jobTitle,
         detailLink: searchResult.detailLink,
       });
     }
@@ -601,6 +626,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
       city,
       state,
       location: city && state ? `${city}, ${state}` : (city || state || ''),
+      company,
+      jobTitle,
       detailLink: searchResult.detailLink,
     });
   }
