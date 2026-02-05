@@ -537,7 +537,9 @@ async function ensureTables() {
     }
     
     // 21. TPS 搜索结果表 - 先删除旧表再重建以确保字段一致
-    await db.execute(sql`DROP TABLE IF EXISTS tps_search_results`);
+    console.log("[Database] ===== Starting TPS search results table migration =====");
+    try {
+      await db.execute(sql`DROP TABLE IF EXISTS tps_search_results`);
     console.log("[Database] Dropped old tps_search_results table");
     await db.execute(sql`
       CREATE TABLE tps_search_results (
@@ -601,6 +603,30 @@ async function ensureTables() {
       }
     }
     console.log("[Database] TPS search results columns sync completed");
+    } catch (tpsError: any) {
+      console.error("[Database] !!!!! TPS TABLE MIGRATION FAILED !!!!!", tpsError.message);
+      // 尝试使用 ALTER TABLE 添加缺失的列
+      console.log("[Database] Attempting to add missing columns via ALTER TABLE...");
+      const columnsToAdd = [
+        'searchName VARCHAR(200)', 'searchLocation VARCHAR(200)', 'location VARCHAR(200)',
+        'phone VARCHAR(50)', 'phoneType VARCHAR(50)', 'carrier VARCHAR(100)',
+        'reportYear INT', 'isPrimary BOOLEAN DEFAULT FALSE', 'propertyValue INT DEFAULT 0',
+        'yearBuilt INT', 'company VARCHAR(200)', 'jobTitle VARCHAR(200)',
+        'email VARCHAR(500)', 'spouse VARCHAR(200)', 'fromCache BOOLEAN DEFAULT FALSE'
+      ];
+      for (const colDef of columnsToAdd) {
+        const colName = colDef.split(' ')[0];
+        try {
+          await db.execute(sql.raw(`ALTER TABLE tps_search_results ADD COLUMN ${colDef}`));
+          console.log(`[Database] Added column ${colName} to tps_search_results`);
+        } catch (e: any) {
+          if (!e.message?.includes('Duplicate column')) {
+            console.log(`[Database] Column ${colName} error:`, e.message?.slice(0, 100));
+          }
+        }
+      }
+    }
+    console.log("[Database] ===== TPS search results table migration completed =====");
     
     // ========== Anywho 相关表 ==========
     
