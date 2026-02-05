@@ -384,13 +384,13 @@ export default function TpsSearch() {
                         <Label htmlFor="locations">地点列表（每行一个）</Label>
                         <Textarea
                           id="locations"
-                          placeholder="Los Angeles, CA&#10;New York, NY&#10;Chicago, IL"
+                          placeholder="75201（邮编）&#10;Dallas, TX（城市州）&#10;TX（州）"
                           value={locationsInput}
                           onChange={(e) => setLocationsInput(e.target.value)}
                           className="mt-2 min-h-[150px] font-mono bg-slate-800/50"
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                          已输入 {locations.length} 个地点
+                          已输入 {locations.length} 个地点 · 支持邮编、城市州、或州
                         </p>
                       </div>
                     </div>
