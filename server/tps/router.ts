@@ -380,6 +380,17 @@ export const tpsRouter = router({
       const rows = results.data.map((r: any) => {
         // 婚姻状态：有配偶显示配偶名字，无配偶显示"可能单身"
         const maritalStatus = r.spouse ? r.spouse : "可能单身";
+        
+        // 从其他邮箱中剔除主邮箱
+        const primaryEmail = r.primaryEmail || "";
+        let otherEmails = r.email || "";
+        if (primaryEmail && otherEmails) {
+          // 将邮箱字符串分割成数组，过滤掉主邮箱，再重新组合
+          const emailList = otherEmails.split(",").map((e: string) => e.trim());
+          const filteredEmails = emailList.filter((e: string) => e.toLowerCase() !== primaryEmail.toLowerCase());
+          otherEmails = filteredEmails.join(", ");
+        }
+        
         return [
           r.name || "",
           r.age?.toString() || "",
@@ -391,8 +402,8 @@ export const tpsRouter = router({
           r.propertyValue?.toString() || "",
           r.company || "",
           r.jobTitle || "",
-          r.primaryEmail || "",
-          r.email || "",
+          primaryEmail,
+          otherEmails,
           maritalStatus,
           r.detailLink ? `https://www.truepeoplesearch.com${r.detailLink}` : "",
           "TruePeopleSearch",
