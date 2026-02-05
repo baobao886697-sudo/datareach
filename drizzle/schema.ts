@@ -404,6 +404,8 @@ export const tpsSearchResults = mysqlTable("tps_search_results", {
   isPrimary: boolean("isPrimary").default(false),
   propertyValue: int("propertyValue").default(0),
   yearBuilt: int("yearBuilt"),
+  company: varchar("company", { length: 200 }),     // 公司
+  jobTitle: varchar("jobTitle", { length: 200 }),   // 职位
   detailLink: varchar("detailLink", { length: 500 }),
   fromCache: boolean("fromCache").default(false).notNull(), // 是否来自缓存
   createdAt: timestamp("createdAt").defaultNow().notNull(),

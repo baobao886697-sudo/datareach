@@ -302,6 +302,8 @@ export async function saveTpsSearchResults(
     isPrimary?: boolean;    // 可选
     propertyValue?: number; // 可选
     yearBuilt?: number | null;
+    company?: string;       // 可选，公司
+    jobTitle?: string;      // 可选，职位
     detailLink?: string;    // 可选，从 scraper.ts 传入
     fromCache?: boolean;    // 可选，标记是否来自缓存
   }>
@@ -326,6 +328,8 @@ export async function saveTpsSearchResults(
     isPrimary: r.isPrimary ?? false,
     propertyValue: r.propertyValue ?? 0,
     yearBuilt: r.yearBuilt ?? null,
+    company: r.company || '',
+    jobTitle: r.jobTitle || '',
     detailLink: r.detailLink || '',
     fromCache: r.fromCache ?? false,
   }));
