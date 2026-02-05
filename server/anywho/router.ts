@@ -357,26 +357,19 @@ export const anywhoRouter = router({
       
       console.log(`[exportResults] 总共获取 ${allResults.length} 条结果`);
       
-      // CSV 表头
+      // CSV 表头（精简版，与 SPF 格式保持一致）
       const headers = [
         "序号",
         "姓名",
-        "名",
-        "姓",
         "年龄",
-        "婚姻状况",
-        "城市",
-        "州",
-        "完整地址",
+        "地点",
         "当前住址",
-        "主号码",
-        "主号码标识",
+        "电话",
         "电话类型",
-        "运营商",
+        "婚姻状况",
         "邮箱",
         "是否已故",
         "详情链接",
-        "搜索姓名",
         "数据来源",
         "获取时间",
       ];
@@ -398,25 +391,21 @@ export const anywhoRouter = router({
           return cleanPhone ? "1" + cleanPhone : "";
         };
         
+        // 合并城市和州为地点
+        const location = [r.city, r.state].filter(Boolean).join(", ");
+        
         return [
           index + 1,                                    // 序号
           r.name || "",                                 // 姓名
-          r.firstName || "",                            // 名
-          r.lastName || "",                             // 姓
           r.age || "",                                  // 年龄
-          r.marriageStatus || "",                       // 婚姻状况
-          r.city || "",                                 // 城市
-          r.state || "",                                // 州
-          r.location || "",                             // 完整地址
+          location,                                     // 地点（城市, 州）
           r.currentAddress || "",                       // 当前住址
-          formatPhone(r.phone),                         // 主号码（加1）
-          r.isPrimary ? "是" : "否",                    // 主号码标识
+          formatPhone(r.phone),                         // 电话（加1）
           r.phoneType || "",                            // 电话类型
-          r.carrier || "",                              // 运营商
+          r.marriageStatus || "",                       // 婚姻状况
           emails,                                       // 邮箱
           r.isDeceased ? "是" : "否",                   // 是否已故
           r.detailLink || "",                           // 详情链接
-          r.searchName || "",                           // 搜索姓名
           r.fromCache ? "缓存" : "实时获取",            // 数据来源
           r.createdAt ? new Date(r.createdAt).toLocaleString("zh-CN") : "", // 获取时间
         ];
