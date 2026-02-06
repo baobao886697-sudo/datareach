@@ -366,9 +366,63 @@ export default function Search() {
 
   const credits = profile?.credits || 0;
 
+  // ========== 维护模式配置 ==========
+  // 设置为 true 启用维护模式，设置为 false 恢复正常
+  const MAINTENANCE_MODE = true;
+  // ==================================
+
   return (
     <DashboardLayout>
       <style>{rainbowStyles}</style>
+      
+      {/* 维护模式遮罩层 */}
+      {MAINTENANCE_MODE && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ backdropFilter: 'blur(8px)' }}>
+          {/* 半透明背景 */}
+          <div className="absolute inset-0 bg-slate-950/80"></div>
+          
+          {/* 维护提示卡片 */}
+          <div className="relative z-10 text-center space-y-6 max-w-lg mx-auto px-6">
+            {/* 维护图标 */}
+            <div className="relative">
+              <div className="w-32 h-32 mx-auto rounded-full bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center border-2 border-amber-500/30">
+                <svg className="w-16 h-16 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+              </div>
+              <div className="absolute inset-0 w-32 h-32 mx-auto rounded-full border-2 border-amber-500/20 animate-ping" style={{ animationDuration: '2s' }} />
+            </div>
+            
+            {/* 维护文字 */}
+            <div className="space-y-4">
+              <h2 className="text-3xl font-bold text-white">系统维护中</h2>
+              <p className="text-lg text-slate-300">LinkedIn 搜索功能正在进行系统升级维护</p>
+              <p className="text-sm text-slate-400">预计很快恢复，感谢您的耐心等待</p>
+            </div>
+            
+            {/* 维护进度条（装饰性） */}
+            <div className="w-full max-w-xs mx-auto">
+              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-amber-500 to-orange-500 animate-pulse"
+                  style={{ width: '60%' }}
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">维护进行中...</p>
+            </div>
+            
+            {/* 返回按钮 */}
+            <Button 
+              variant="outline" 
+              onClick={() => window.history.back()}
+              className="border-amber-500/50 hover:bg-amber-500/10 text-amber-400"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              返回上一页
+            </Button>
+          </div>
+        </div>
+      )}
       
       {/* 全屏加载遮罩 */}
       {isSearching && (
