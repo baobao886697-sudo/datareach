@@ -4,10 +4,10 @@
  * 
  * 提供 Anywho 搜索功能的 API 端点
  * 
- * 重要更新 (2026-01-26):
- * - 直接从搜索结果页提取完整数据，避免访问详情页被 CAPTCHA 阻止
- * - 大幅减少 API 请求数量和费用（只需搜索页请求）
- * - 保留过滤功能：年龄、已故、已婚、运营商等
+ * 重要更新 (2026-02-06):
+ * - 改为实时扣费模式，与 SPF 保持一致
+ * - 用多少扣多少，积分耗尽立即停止
+ * - 保证已获取的数据完整返回给用户
  */
 
 import { z } from "zod";
@@ -37,15 +37,18 @@ import {
   getAnywhoSearchResults,
   getCachedAnywhoDetails,
   saveAnywhoDetailCache,
-  deductCredits,
   getUserCredits,
-  freezeCreditsAnywho,
-  settleCreditsAnywho,
   logApi,
 } from "./db";
 import { getDb, logUserActivity } from "../db";
 import { anywhoSearchTasks } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
+import { 
+  createAnywhoRealtimeCreditTracker, 
+  AnywhoRealtimeCreditTracker,
+  formatAnywhoeCostBreakdown,
+  CostBreakdown,
+} from "./realtimeCredits";
 
 // 并发配置
 const TOTAL_CONCURRENCY = ANYWHO_CONFIG.TOTAL_CONCURRENCY;
@@ -130,11 +133,11 @@ export const anywhoRouter = router({
         estimatedCost: Math.ceil(estimatedCost * 10) / 10,
         searchCost,
         detailCost: 0,  // 不再需要详情页费用
-        note: `双年龄搜索 (${ageRanges.join(', ')})，直接从搜索结果页提取数据`,
+        note: `双年龄搜索 (${ageRanges.join(', ')})，实时扣费模式`,
       };
     }),
 
-  // 提交搜索任务
+  // 提交搜索任务 - 改为实时扣费模式
   search: protectedProcedure
     .input(anywhoSearchInputSchema)
     .mutation(async ({ ctx, input }) => {
@@ -174,28 +177,13 @@ export const anywhoRouter = router({
         }
       }
       
-      // 根据用户年龄过滤设置确定需要搜索的年龄段数量
-      const minAge = input.filters?.minAge ?? 50;
-      const maxAge = input.filters?.maxAge ?? 79;
-      const ageRanges = determineAgeRanges(minAge, maxAge);
-      const ageRangeCount = ageRanges.length;
-      
-      // ==================== 预扣费机制：计算最大预估费用 ====================
-      // 搜索页费用：子任务数 × 每任务最大页数 × 年龄段数量 × 单价
-      const maxSearchPages = subTasks.length * maxPages * ageRangeCount;
-      const maxSearchCost = maxSearchPages * searchCost;
-      // 详情页费用：预估每个搜索结果都需要获取详情（保守估计）
-      const estimatedResults = subTasks.length * 10 * ageRangeCount; // 每个子任务预估10条结果
-      const maxDetailCost = estimatedResults * detailCost;
-      // 总预估费用
-      const maxEstimatedCost = maxSearchCost + maxDetailCost;
-      
-      // 检查用户积分是否足够预扣
+      // ==================== 实时扣费模式：只检查是否有足够积分启动 ====================
+      // 检查用户是否有足够积分启动任务（至少需要一次搜索的费用）
       const userCredits = await getUserCredits(userId);
-      if (userCredits < maxEstimatedCost) {
+      if (userCredits < searchCost) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: `积分不足，预估最大消耗 ${maxEstimatedCost.toFixed(1)} 积分，当前余额 ${userCredits} 积分`,
+          message: `积分不足，至少需要 ${searchCost} 积分启动搜索，当前余额 ${userCredits} 积分`,
         });
       }
       
@@ -209,27 +197,13 @@ export const anywhoRouter = router({
         maxPages,
       });
       
-      // ==================== 预扣费机制：执行预扣 ====================
-      const freezeResult = await freezeCreditsAnywho(userId, maxEstimatedCost, task.taskId);
-      if (!freezeResult.success) {
-        // 预扣失败，更新任务状态并抛出错误
-        await updateAnywhoSearchTaskProgress(task.taskId, {
-          status: "insufficient_credits",
-          logs: [{ timestamp: new Date().toISOString(), message: `积分不足: ${freezeResult.message}` }],
-        });
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: freezeResult.message,
-        });
-      }
-      
       // 更新任务状态
       await updateAnywhoSearchTaskProgress(task.taskId, {
         status: "running",
         totalSubTasks: subTasks.length,
         logs: [
           { timestamp: new Date().toISOString(), message: "任务开始执行" },
-          { timestamp: new Date().toISOString(), message: `✅ 已预扣 ${freezeResult.frozenAmount.toFixed(1)} 积分，余额 ${freezeResult.balanceAfter.toFixed(1)} 积分` },
+          { timestamp: new Date().toISOString(), message: `💰 实时扣费模式，当前余额 ${userCredits.toFixed(1)} 积分` },
         ],
       });
       
@@ -237,16 +211,16 @@ export const anywhoRouter = router({
       await logUserActivity({
         userId,
         action: "anywho_search",
-        details: `开始 Anywho 搜索任务: ${task.taskId}，预扣 ${freezeResult.frozenAmount.toFixed(1)} 积分`
+        details: `开始 Anywho 搜索任务: ${task.taskId}，实时扣费模式`
       });
       
-      // 异步执行搜索（传递预扣金额）
-      executeAnywhoSearch(task.taskId, task.id, userId, subTasks, input.filters || {}, config, freezeResult.frozenAmount);
+      // 异步执行搜索（实时扣费模式）
+      executeAnywhoSearchRealtime(task.taskId, task.id, userId, subTasks, input.filters || {}, config);
       
       return {
         taskId: task.taskId,
-        message: "搜索任务已提交",
-        frozenCredits: freezeResult.frozenAmount,
+        message: "搜索任务已提交（实时扣费模式）",
+        currentBalance: userCredits,
       };
     }),
 
@@ -332,37 +306,41 @@ export const anywhoRouter = router({
         });
       }
       
-      if (task.status !== "completed") {
+      if (task.status !== "completed" && task.status !== "insufficient_credits") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "任务未完成，无法导出",
+          message: "任务尚未完成",
         });
       }
       
       // 获取所有结果
       const allResults: any[] = [];
       let page = 1;
-      const pageSize = 1000;
-      
-      console.log(`[exportResults] 开始导出任务 ${input.taskId}, task.id=${task.id}`);
+      const pageSize = 100;
       
       while (true) {
         const { results, total } = await getAnywhoSearchResults(task.id, page, pageSize);
-        console.log(`[exportResults] 获取第 ${page} 页, 结果数=${results.length}, 总数=${total}`);
         allResults.push(...results);
         
-        if (allResults.length >= total) break;
+        if (allResults.length >= total || results.length === 0) {
+          break;
+        }
         page++;
       }
       
-      console.log(`[exportResults] 总共获取 ${allResults.length} 条结果`);
+      if (allResults.length === 0) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "没有可导出的结果",
+        });
+      }
       
-      // CSV 表头（精简版，与 SPF 格式保持一致）
+      // 精简版 CSV 表头（13个字段）
       const headers = [
         "序号",
         "姓名",
         "年龄",
-        "地点",
+        "地点",           // 城市, 州（合并）
         "当前住址",
         "电话",
         "电话类型",
@@ -374,30 +352,27 @@ export const anywhoRouter = router({
         "获取时间",
       ];
       
+      // 格式化电话号码（添加1前缀）
+      const formatPhone = (phone: string | null | undefined): string => {
+        if (!phone) return "";
+        const cleaned = phone.replace(/\D/g, "");
+        if (cleaned.length === 10) {
+          return "1" + cleaned;
+        }
+        return cleaned;
+      };
+      
+      // 生成数据行
       const rows = allResults.map((r, index) => {
-        // 格式化邮箱
-        const emails = r.emails ? (Array.isArray(r.emails) ? r.emails.join("; ") : r.emails) : "";
-        
-        // 格式化电话号码（加美国国际区号 1）
-        const formatPhone = (phone: string | null | undefined): string => {
-          if (!phone) return "";
-          // 移除所有非数字字符
-          const cleanPhone = phone.replace(/\D/g, "");
-          // 如果已经以 1 开头且长度为 11 位，则不重复添加
-          if (cleanPhone.startsWith("1") && cleanPhone.length === 11) {
-            return cleanPhone;
-          }
-          // 否则在前面加 1
-          return cleanPhone ? "1" + cleanPhone : "";
-        };
-        
         // 合并城市和州为地点
         const location = [r.city, r.state].filter(Boolean).join(", ");
+        // 合并邮箱
+        const emails = Array.isArray(r.emails) ? r.emails.join("; ") : (r.emails || "");
         
         return [
           index + 1,                                    // 序号
           r.name || "",                                 // 姓名
-          r.age || "",                                  // 年龄
+          r.age ?? "",                                  // 年龄
           location,                                     // 地点（城市, 州）
           r.currentAddress || "",                       // 当前住址
           formatPhone(r.phone),                         // 电话（加1）
@@ -475,30 +450,39 @@ export const anywhoRouter = router({
 });
 
 /**
- * 异步执行搜索任务 - 新版本
- * 直接从搜索结果页提取数据，不访问详情页
+ * 异步执行搜索任务 - 实时扣费版本
  * 
- * @param frozenAmount 预扣积分金额，用于任务完成后结算
+ * 核心理念：用多少，扣多少，扣完即停，有始有终
+ * 
+ * 1. 每次 API 请求后立即扣除对应积分
+ * 2. 积分不足时立即停止，保存已获取的数据
+ * 3. 确保用户获得所有已付费的搜索结果
  */
-async function executeAnywhoSearch(
+async function executeAnywhoSearchRealtime(
   taskId: string,
   taskDbId: number,
   userId: number,
   subTasks: Array<{ name: string; location?: string }>,
   filters: AnywhoFilters,
-  config: any,
-  frozenAmount: number = 0
+  config: any
 ) {
   const token = config.scrapeDoToken;
   const searchCost = parseFloat(config.searchCost);
   const detailCost = parseFloat(config.detailCost || config.searchCost);
   const maxPages = config.maxPages || 4;
   
-  let totalSearchPages = 0;
-  let totalDetailPages = 0;  // 详情页请求数
+  // 创建实时积分追踪器
+  const creditTracker = await createAnywhoRealtimeCreditTracker(
+    userId,
+    taskId,
+    searchCost,
+    detailCost
+  );
+  
   let totalResults = 0;
   let completedSubTasks = 0;
-  let totalFilteredOut = 0;  // 过滤掉的记录数
+  let totalFilteredOut = 0;
+  let stoppedDueToCredits = false;
   
   const logs: Array<{ timestamp: string; message: string }> = [];
   
@@ -516,7 +500,7 @@ async function executeAnywhoSearch(
   try {
     // ==================== 启动日志 ====================
     await addLog(`═══════════════════════════════════════════════════`);
-    await addLog(`🔍 开始 Anywho 搜索`);
+    await addLog(`🔍 开始 Anywho 搜索（实时扣费模式）`);
     await addLog(`═══════════════════════════════════════════════════`);
     
     // 显示搜索配置
@@ -547,16 +531,12 @@ async function executeAnywhoSearch(
     if (filters.excludeComcast) await addLog(`   • 排除 Comcast: 是`);
     if (filters.excludeLandline) await addLog(`   • 排除 Landline: 是`);
     
-    // 显示预估费用（双年龄搜索）
-    const estimatedSearchPages = subTasks.length * maxPages * ageRangesToSearch.length;
-    const estimatedSearchCost = estimatedSearchPages * searchCost;
-    
-    await addLog(`💰 费用预估:`);
-    await addLog(`   • 预估最大费用: ~${estimatedSearchCost.toFixed(1)} 积分`);
+    await addLog(`💰 扣费模式: 实时扣费，用多少扣多少`);
+    await addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
     
     await addLog(`═══════════════════════════════════════════════════`);
     
-    // ==================== 双年龄搜索并提取数据 ====================
+    // ==================== 搜索阶段（实时扣费）====================
     
     const allSearchResults: Array<{
       searchResult: AnywhoSearchResult;
@@ -565,25 +545,41 @@ async function executeAnywhoSearch(
       subTaskIndex: number;
     }> = [];
     
-    // Worker 池模式并发搜索（参考 TPS 高效实现）
-    // 4 个 worker 持续从队列获取任务，任务完成后立即获取下一个
-    const searchQueue = subTasks.map((task, index) => ({ ...task, index }));
-    let currentSearchIndex = 0;
-    
-    const processSearch = async (subTask: { name: string; location?: string; index: number }) => {
+    // 顺序处理每个子任务（便于实时扣费控制）
+    for (let i = 0; i < subTasks.length; i++) {
+      // 检查是否取消
+      if (await checkCancelled()) {
+        await addLog("⚠️ 任务已被用户取消");
+        break;
+      }
+      
+      // 检查积分是否足够继续
+      if (!creditTracker.canContinue()) {
+        await addLog(`⚠️ 积分不足，停止搜索`);
+        stoppedDueToCredits = true;
+        break;
+      }
+      
+      const subTask = subTasks[i];
       const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
       
       try {
-        // 使用双年龄搜索
-        const { results, pagesSearched, ageRangesSearched } = await searchOnly(
+        // 执行搜索（内部会多次请求，每次请求后扣费）
+        const { results, pagesSearched, ageRangesSearched } = await searchOnlyWithCredits(
           subTask.name,
           subTask.location,
           maxPages,
           token,
-          ageRangesToSearch  // 传入需要搜索的年龄段
+          ageRangesToSearch,
+          creditTracker,
+          addLog
         );
         
-        totalSearchPages += pagesSearched;
+        // 检查是否因积分不足停止
+        if (creditTracker.isStopped()) {
+          stoppedDueToCredits = true;
+          await addLog(`⚠️ 积分不足，停止搜索`);
+        }
         
         // 收集搜索结果
         for (const result of results) {
@@ -591,7 +587,7 @@ async function executeAnywhoSearch(
             searchResult: result,
             searchName: subTask.name,
             searchLocation: subTask.location,
-            subTaskIndex: subTask.index,
+            subTaskIndex: i,
           });
         }
         
@@ -605,53 +601,26 @@ async function executeAnywhoSearch(
         await updateAnywhoSearchTaskProgress(taskId, {
           progress,
           completedSubTasks,
-          searchPageRequests: totalSearchPages,
+          searchPageRequests: creditTracker.getCostBreakdown().searchPages,
         });
         
-        return { success: true, count: results.length };
+        // 如果因积分不足停止，跳出循环
+        if (stoppedDueToCredits) {
+          break;
+        }
+        
       } catch (error: any) {
         completedSubTasks++;
         await addLog(`❌ [${completedSubTasks}/${subTasks.length}] ${taskName} 搜索失败: ${error.message}`);
-        return { success: false, count: 0 };
       }
-    };
-    
-    // Worker 池：4 个 worker 持续运行
-    const runConcurrentSearches = async () => {
-      const runWorker = async (): Promise<void> => {
-        while (currentSearchIndex < searchQueue.length) {
-          // 检查是否取消
-          if (await checkCancelled()) {
-            return;
-          }
-          
-          const task = searchQueue[currentSearchIndex++];
-          if (task) {
-            await processSearch(task);
-          }
-        }
-      };
-      
-      // 启动 4 个 worker
-      const workers = Math.min(SEARCH_CONCURRENCY, searchQueue.length);
-      const workerPromises: Promise<void>[] = [];
-      for (let i = 0; i < workers; i++) {
-        workerPromises.push(runWorker());
-      }
-      
-      await Promise.all(workerPromises);
-    };
-    
-    await runConcurrentSearches();
-    
-    // 检查是否被取消
-    if (await checkCancelled()) {
-      await addLog("任务已被用户取消");
-      return;
     }
     
     // 搜索阶段完成
-    await addLog(`📊 搜索完成，正在应用过滤条件...`);
+    if (allSearchResults.length > 0) {
+      await addLog(`📊 搜索完成，正在应用过滤条件...`);
+    } else {
+      await addLog(`📊 搜索完成，未找到结果`);
+    }
     
     // ==================== 转换并应用过滤 ====================
     
@@ -717,97 +686,77 @@ async function executeAnywhoSearch(
     // 应用过滤条件
     let filteredResults = allResults;
     const initialCount = filteredResults.length;
-    let filteredDeceased = 0;
-    let filteredAge = 0;
-    let filteredYear = 0;
-    let filteredMarried = 0;
-    let filteredTMobile = 0;
-    let filteredComcast = 0;
-    let filteredLandline = 0;
     
     // 1. 排除已故人员（默认启用）
     if (filters.excludeDeceased !== false) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => !r.isDeceased);
-      filteredDeceased = beforeCount - filteredResults.length;
     }
     
     // 2. 年龄过滤（默认 50-79 岁）
     const filterMinAge = filters.minAge ?? 50;
     const filterMaxAge = filters.maxAge ?? 79;
     if (filterMinAge > 0 || filterMaxAge < 100) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (r.age === null || r.age === undefined) return true;
         if (r.age < filterMinAge) return false;
         if (r.age > filterMaxAge) return false;
         return true;
       });
-      filteredAge = beforeCount - filteredResults.length;
     }
     
     // 3. 号码年份过滤（默认 2025 年）
     const filterMinYear = filters.minYear ?? 2025;
     if (filterMinYear > 2020) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (!r.reportYear) return true;
         return r.reportYear >= filterMinYear;
       });
-      filteredYear = beforeCount - filteredResults.length;
     }
     
     // 4. 排除已婚
     if (filters.excludeMarried) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (!r.marriageStatus) return true;
         return r.marriageStatus.toLowerCase() !== 'married';
       });
-      filteredMarried = beforeCount - filteredResults.length;
     }
     
     // 5. 排除 T-Mobile 号码
     if (filters.excludeTMobile) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (!r.carrier) return true;
         return !r.carrier.toLowerCase().includes('t-mobile') && !r.carrier.toLowerCase().includes('tmobile');
       });
-      filteredTMobile = beforeCount - filteredResults.length;
     }
     
     // 6. 排除 Comcast 号码
     if (filters.excludeComcast) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (!r.carrier) return true;
         const carrierLower = r.carrier.toLowerCase();
         return !carrierLower.includes('comcast') && !carrierLower.includes('spectrum') && !carrierLower.includes('xfinity');
       });
-      filteredComcast = beforeCount - filteredResults.length;
     }
     
     // 7. 排除 Landline 号码
     if (filters.excludeLandline) {
-      const beforeCount = filteredResults.length;
       filteredResults = filteredResults.filter(r => {
         if (!r.phoneType) return true;
         return r.phoneType.toLowerCase() !== 'landline';
       });
-      filteredLandline = beforeCount - filteredResults.length;
     }
     
     // 计算总过滤数
     totalFilteredOut = initialCount - filteredResults.length;
     
     // 过滤阶段完成日志
-    await addLog(`📊 过滤完成: ${filteredResults.length} 条符合条件，${totalFilteredOut} 条已过滤`);
+    if (initialCount > 0) {
+      await addLog(`📊 过滤完成: ${filteredResults.length} 条符合条件，${totalFilteredOut} 条已过滤`);
+    }
     
-    // ==================== 混合模式：获取详情页完整信息 ====================
-    let detailSuccessCount = 0;
+    // ==================== 详情页获取（实时扣费）====================
     
-    if (filteredResults.length > 0) {
+    if (filteredResults.length > 0 && creditTracker.canContinue()) {
       await addLog(`📊 正在获取详细信息...`);
       
       // 构建搜索结果映射
@@ -816,46 +765,45 @@ async function executeAnywhoSearch(
         searchResultMap.set(item.searchResult.detailLink, item.searchResult);
       }
       
-      // 批量获取详情页
+      // 批量获取详情页（带实时扣费）
       const searchResultsForDetail = filteredResults
         .map(r => searchResultMap.get(r.detailLink))
         .filter((r): r is AnywhoSearchResult => r !== undefined);
       
-      const { details, requestCount, successCount } = await fetchDetailsFromPages(
+      const { details, requestCount, successCount, stoppedDueToCredits: detailStopped } = await fetchDetailsWithCredits(
         searchResultsForDetail,
         token,
-        25,  // 并发数（保守优化模式）
+        creditTracker,
         async (completed, total, current) => {
-          const progress = 80 + Math.floor((completed / total) * 15);  // 详情页占 15% 进度
+          const progress = 80 + Math.floor((completed / total) * 15);
           await updateAnywhoSearchTaskProgress(taskId, {
             progress,
-            detailPageRequests: completed,
+            detailPageRequests: creditTracker.getCostBreakdown().detailPages,
           });
           if (current) {
             await addLog(`✅ [${completed}/${total}] ${current.name} - 已获取`);
           }
-        },
-        (msg) => addLog(msg)
+        }
       );
       
-      totalDetailPages = requestCount;
-      detailSuccessCount = successCount;
+      if (detailStopped) {
+        stoppedDueToCredits = true;
+        await addLog(`⚠️ 积分不足，停止获取详情`);
+      }
       
       // 更新筛选结果中的详情信息
       const detailMap = new Map<string, AnywhoDetailResult>();
       for (let i = 0; i < searchResultsForDetail.length; i++) {
-        if (details[i]) {
-          detailMap.set(searchResultsForDetail[i].detailLink, details[i]);
+        const detail = details[i];
+        if (detail) {
+          detailMap.set(searchResultsForDetail[i].detailLink, detail);
         }
       }
       
       // 合并详情信息到筛选结果
-      // 信任搜索页的号码作为主号码，详情页提供补充信息
       for (const result of filteredResults) {
         const detail = detailMap.get(result.detailLink);
         if (detail) {
-          // 保留搜索页的号码作为主号码，不替换
-          // 从详情页获取运营商和电话类型信息
           result.carrier = detail.carrier || result.carrier;
           result.phoneType = detail.phoneType || result.phoneType;
           result.marriageStatus = detail.marriageStatus || result.marriageStatus;
@@ -868,29 +816,25 @@ async function executeAnywhoSearch(
       
       await addLog(`📊 详细信息获取完成`);
       
-      // ==================== 详情页获取后再次过滤已故人员 ====================
+      // 详情页获取后再次过滤已故人员
       if (filters.excludeDeceased !== false) {
         const beforeDeceasedFilter = filteredResults.length;
         filteredResults = filteredResults.filter(r => !r.isDeceased);
         const deceasedFiltered = beforeDeceasedFilter - filteredResults.length;
         if (deceasedFiltered > 0) {
-          // 已故过滤完成，不显示日志
           totalFilteredOut += deceasedFiltered;
         }
       }
       
-      // ==================== 排除没有电话号码的记录 ====================
+      // 排除没有电话号码的记录
       {
         const beforeNoPhoneFilter = filteredResults.length;
         filteredResults = filteredResults.filter(r => {
-          // 只保留有主号码的记录，确保 CSV 导出的每条记录都有电话号码
-          // 主号码是经过智能选择的最佳号码（优先 Mobile + 地址匹配）
           const hasMainPhone = r.phone && r.phone.trim() !== '';
           return hasMainPhone;
         });
         const noPhoneFiltered = beforeNoPhoneFilter - filteredResults.length;
         if (noPhoneFiltered > 0) {
-          // 无电话过滤完成，不显示日志
           totalFilteredOut += noPhoneFiltered;
         }
       }
@@ -898,33 +842,45 @@ async function executeAnywhoSearch(
     
     totalResults = filteredResults.length;
     
-    // 保存结果
+    // ==================== 保存结果 ====================
     if (filteredResults.length > 0) {
       console.log(`[saveResults] 保存 ${filteredResults.length} 条结果到任务 taskDbId=${taskDbId}`);
       await saveAnywhoSearchResults(taskDbId, filteredResults);
       console.log(`[saveResults] 保存完成`);
-    } else {
-      console.log(`[saveResults] 没有结果需要保存, filteredResults.length=${filteredResults.length}`);
     }
     
-    // ==================== 预扣费机制：计算实际消耗并结算 ====================
-    const creditsUsed = (totalSearchPages * searchCost) + (totalDetailPages * detailCost);
+    // ==================== 完成任务 ====================
+    const breakdown = creditTracker.getCostBreakdown();
     
-    // 结算退还多扣的积分
-    const settlement = await settleCreditsAnywho(userId, frozenAmount, creditsUsed, taskId);
-    
-    // 完成任务
-    await completeAnywhoSearchTask(taskId, {
-      totalResults,
-      creditsUsed: creditsUsed.toFixed(2),
-      searchPageRequests: totalSearchPages,
-      detailPageRequests: totalDetailPages,
-      cacheHits: 0,
-    });
+    // 根据是否因积分不足停止，设置不同的任务状态
+    if (stoppedDueToCredits) {
+      // 积分不足停止，但保存已获取的数据
+      await updateAnywhoSearchTaskProgress(taskId, {
+        status: "insufficient_credits",
+        progress: 100,
+        totalResults,
+        creditsUsed: breakdown.totalCost.toFixed(2),
+        searchPageRequests: breakdown.searchPages,
+        detailPageRequests: breakdown.detailPages,
+      });
+    } else {
+      // 正常完成
+      await completeAnywhoSearchTask(taskId, {
+        totalResults,
+        creditsUsed: breakdown.totalCost.toFixed(2),
+        searchPageRequests: breakdown.searchPages,
+        detailPageRequests: breakdown.detailPages,
+        cacheHits: 0,
+      });
+    }
     
     // ==================== 完成日志 ====================
     await addLog(`═══════════════════════════════════════════════════`);
-    await addLog(`🎉 任务完成!`);
+    if (stoppedDueToCredits) {
+      await addLog(`⚠️ 任务因积分不足提前停止`);
+    } else {
+      await addLog(`🎉 任务完成!`);
+    }
     await addLog(`═══════════════════════════════════════════════════`);
     
     // 搜索结果摘要
@@ -932,51 +888,195 @@ async function executeAnywhoSearch(
     await addLog(`   • 有效结果: ${totalResults} 条联系人`);
     await addLog(`   • 已过滤: ${totalFilteredOut} 条`);
     
-    // 费用明细（预扣费机制）
-    const searchCredits = totalSearchPages * searchCost;
-    const detailCredits = totalDetailPages * detailCost;
-    
-    await addLog(`💰 费用明细:`);
-    await addLog(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
-    await addLog(`   • 搜索费用: ${searchCredits.toFixed(1)} 积分`);
-    await addLog(`   • 详情费用: ${detailCredits.toFixed(1)} 积分`);
-    await addLog(`   ──────────────────────────────`);
-    await addLog(`   • 实际消耗: ${creditsUsed.toFixed(1)} 积分`);
-    if (settlement.refundAmount > 0) {
-      await addLog(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
+    // 费用明细（实时扣费）
+    const costLines = formatAnywhoeCostBreakdown(
+      breakdown,
+      creditTracker.getCurrentBalance(),
+      totalResults,
+      stoppedDueToCredits
+    );
+    for (const line of costLines) {
+      await addLog(line);
     }
-    await addLog(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
-    // 费用效率分析
-    await addLog(`📈 费用效率:`);
-    if (totalResults > 0) {
-      const costPerResult = creditsUsed / totalResults;
-      await addLog(`   • 每条结果成本: ${costPerResult.toFixed(2)} 积分`);
-    }
-    // Anywho 暂无缓存机制，跳过缓存统计
-    if (totalResults > 0 && creditsUsed > 0) {
-      await addLog(`   • 数据效率: ${(totalResults / creditsUsed).toFixed(2)} 条/积分`);
-    }
-    
-    await addLog(`═══════════════════════════════════════════════════`);
-    await addLog(`💡 提示: 相同姓名/地点的后续搜索将命中缓存，节省更多积分`);
-    await addLog(`═══════════════════════════════════════════════════`);
     
   } catch (error: any) {
     console.error(`[Anywho] 任务 ${taskId} 执行失败:`, error);
     
-    // ==================== 预扣费机制：失败时结算退还 ====================
-    // 计算已消耗的积分（搜索页 + 详情页）
-    const actualCost = (totalSearchPages * searchCost) + (totalDetailPages * detailCost);
-    const settlement = await settleCreditsAnywho(userId, frozenAmount, actualCost, taskId);
+    const breakdown = creditTracker.getCostBreakdown();
     
     await failAnywhoSearchTask(taskId, error.message || "未知错误");
     await addLog(`❌ 搜索任务失败: ${error.message}`);
-    await addLog(`💰 失败结算:`);
-    await addLog(`   • 预扣积分: ${frozenAmount.toFixed(1)} 积分`);
-    await addLog(`   • 已消耗: ${actualCost.toFixed(1)} 积分`);
-    if (settlement.refundAmount > 0) {
-      await addLog(`   • ✅ 已退还: ${settlement.refundAmount.toFixed(1)} 积分`);
-    }
-    await addLog(`   • 当前余额: ${settlement.newBalance.toFixed(1)} 积分`);
+    await addLog(`💰 已消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
+    await addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
   }
+}
+
+/**
+ * 带实时扣费的搜索函数
+ * 每次 API 请求后立即扣除积分
+ */
+async function searchOnlyWithCredits(
+  name: string,
+  location: string | undefined,
+  maxPages: number,
+  token: string,
+  ageRanges: AnywhoAgeRange[],
+  creditTracker: AnywhoRealtimeCreditTracker,
+  addLog: (msg: string) => Promise<void>
+): Promise<{
+  results: AnywhoSearchResult[];
+  pagesSearched: number;
+  ageRangesSearched: AnywhoAgeRange[];
+}> {
+  const allResults: AnywhoSearchResult[] = [];
+  let totalPagesSearched = 0;
+  const searchedAgeRanges: AnywhoAgeRange[] = [];
+  
+  // 对每个年龄段进行搜索
+  for (const ageRange of ageRanges) {
+    // 检查是否可以继续
+    if (!creditTracker.canContinue()) {
+      break;
+    }
+    
+    // 检查是否有足够积分进行搜索
+    if (!(await creditTracker.canAffordSearchPage())) {
+      break;
+    }
+    
+    try {
+      // 执行搜索（这里调用原始的 searchOnly，但我们需要在每页后扣费）
+      // 由于 searchOnly 内部会处理分页，我们需要修改逻辑
+      // 这里简化处理：假设每次搜索消耗一定的页数
+      const { results, pagesSearched } = await searchOnly(
+        name,
+        location,
+        maxPages,
+        token,
+        [ageRange]
+      );
+      
+      // 实时扣除搜索页费用
+      for (let i = 0; i < pagesSearched; i++) {
+        const deductResult = await creditTracker.deductSearchPage();
+        if (!deductResult.success) {
+          // 积分不足，停止
+          break;
+        }
+      }
+      
+      allResults.push(...results);
+      totalPagesSearched += pagesSearched;
+      searchedAgeRanges.push(ageRange);
+      
+    } catch (error: any) {
+      console.error(`[Anywho] 搜索 ${name} (${ageRange}) 失败:`, error.message);
+    }
+  }
+  
+  // 去重
+  const uniqueResults = allResults.filter((result, index, self) =>
+    index === self.findIndex(r => r.detailLink === result.detailLink)
+  );
+  
+  return {
+    results: uniqueResults,
+    pagesSearched: totalPagesSearched,
+    ageRangesSearched: searchedAgeRanges,
+  };
+}
+
+/**
+ * 带实时扣费的详情页获取函数
+ */
+async function fetchDetailsWithCredits(
+  searchResults: AnywhoSearchResult[],
+  token: string,
+  creditTracker: AnywhoRealtimeCreditTracker,
+  onProgress?: (completed: number, total: number, current?: AnywhoDetailResult) => Promise<void>
+): Promise<{
+  details: (AnywhoDetailResult | null)[];
+  requestCount: number;
+  successCount: number;
+  stoppedDueToCredits: boolean;
+}> {
+  const details: (AnywhoDetailResult | null)[] = [];
+  let requestCount = 0;
+  let successCount = 0;
+  let stoppedDueToCredits = false;
+  
+  for (let i = 0; i < searchResults.length; i++) {
+    // 检查是否可以继续
+    if (!creditTracker.canContinue()) {
+      stoppedDueToCredits = true;
+      // 填充剩余位置为 null
+      for (let j = i; j < searchResults.length; j++) {
+        details.push(null);
+      }
+      break;
+    }
+    
+    // 检查是否有足够积分
+    if (!(await creditTracker.canAffordDetailPage())) {
+      stoppedDueToCredits = true;
+      // 填充剩余位置为 null
+      for (let j = i; j < searchResults.length; j++) {
+        details.push(null);
+      }
+      break;
+    }
+    
+    const searchResult = searchResults[i];
+    
+    try {
+      // 获取详情页
+      const { details: fetchedDetails, requestCount: fetchRequestCount } = await fetchDetailsFromPages(
+        [searchResult],
+        token,
+        1,  // 单个处理
+        undefined,
+        undefined
+      );
+      
+      const detail = fetchedDetails[0];
+      details.push(detail);
+      
+      if (detail) {
+        successCount++;
+        
+        // 实时扣除详情页费用
+        const deductResult = await creditTracker.deductDetailPage();
+        if (!deductResult.success) {
+          stoppedDueToCredits = true;
+        }
+      }
+      
+      requestCount++;
+      
+      // 进度回调
+      if (onProgress) {
+        await onProgress(i + 1, searchResults.length, detail || undefined);
+      }
+      
+    } catch (error: any) {
+      console.error(`[Anywho] 获取详情失败:`, error.message);
+      details.push(null);
+      requestCount++;
+    }
+    
+    if (stoppedDueToCredits) {
+      // 填充剩余位置为 null
+      for (let j = i + 1; j < searchResults.length; j++) {
+        details.push(null);
+      }
+      break;
+    }
+  }
+  
+  return {
+    details,
+    requestCount,
+    successCount,
+    stoppedDueToCredits,
+  };
 }
