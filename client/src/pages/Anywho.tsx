@@ -284,7 +284,7 @@ export default function Anywho() {
             </div>
             <div className="flex items-center gap-1">
               <Users className="w-4 h-4" />
-              <span>已有 3,891 人关注</span>
+              <span>敬请期待</span>
             </div>
             <div className="flex items-center gap-1">
               <Award className="w-4 h-4" />
@@ -327,13 +327,13 @@ export default function Anywho() {
                   </Badge>
                 </div>
                 <p className="text-muted-foreground mb-5 max-w-2xl text-base">
-                  <span className="text-pink-400 font-semibold">全网最准确的婚姻状态信息！</span>
+                  <span className="text-pink-400 font-semibold">全网最准确的婚姻状况信息！</span>
                   通过整合政府婚姻登记记录、法院档案、社交媒体分析等多源数据，
                   为您提供目标人员的<span className="text-yellow-400 font-semibold">真实婚姻状况</span>。
                   无论是商务背调还是个人了解，都能获得可靠信息。
                 </p>
                 
-                {/* 婚姻状态类型展示 */}
+                {/* 婚姻状况类型展示 */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-green-500/10 border border-green-500/30">
                     <div className="w-3 h-3 rounded-full bg-green-500"></div>

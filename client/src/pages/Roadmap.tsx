@@ -70,7 +70,7 @@ const roadmapItems: RoadmapItem[] = [
     icon: Twitter,
     status: "in-progress",
     progress: 65,
-    eta: "2026年2月",
+    eta: "2026年Q1",
     category: "data-source",
     features: ["用户资料获取", "推文分析", "关注者数据", "话题追踪"]
   },
@@ -81,7 +81,7 @@ const roadmapItems: RoadmapItem[] = [
     icon: Mail,
     status: "in-progress",
     progress: 45,
-    eta: "2026年2月",
+    eta: "2026年Q1",
     category: "ai",
     features: ["个性化模板", "多语言支持", "A/B 测试", "发送时机优化"]
   },
@@ -92,7 +92,7 @@ const roadmapItems: RoadmapItem[] = [
     icon: FileSpreadsheet,
     status: "in-progress",
     progress: 80,
-    eta: "2026年1月底",
+    eta: "2026年Q1",
     category: "automation",
     features: ["Excel 导出", "CSV 导出", "自定义字段", "批量下载"]
   },

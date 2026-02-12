@@ -35,7 +35,7 @@ const menuItems: Array<{ icon: React.ComponentType<{ className?: string }>; labe
   { icon: UserSearch, label: "PeopleSearchNow", path: "/people-search-now", isNew: true },
   { icon: SearchCheck, label: "SearchPeopleFree", path: "/spf/search", isRainbow: true },
   { icon: Sparkles, label: "Anywho", path: "/anywho", isRainbow: true },
-  { icon: Rocket, label: "正在开发", path: "/roadmap" },
+  { icon: Rocket, label: "产品路线图", path: "/roadmap" },
   { icon: History, label: "历史记录", path: "/history" },
   { icon: Wallet, label: "积分充值", path: "/recharge" },
   { icon: MessageCircle, label: "联系我们", path: "/feedback" },

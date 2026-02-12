@@ -76,11 +76,11 @@ export default function PeopleSearchNow() {
           <div className="flex items-center gap-4 text-white/80 text-sm">
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
-              <span>预计上线：2026年Q1</span>
+              <span>即将上线</span>
             </div>
             <div className="flex items-center gap-1">
               <Users className="w-4 h-4" />
-              <span>已有 1,234 人关注</span>
+              <span>敬请期待</span>
             </div>
           </div>
         </div>

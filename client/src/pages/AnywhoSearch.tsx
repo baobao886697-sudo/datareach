@@ -605,7 +605,7 @@ export default function AnywhoSearch() {
                         <Heart className="h-5 w-5 text-pink-400" />
                         <div>
                           <Label>排除已婚人员</Label>
-                          <p className="text-xs text-muted-foreground">过滤掉婚姻状态为"已婚"的记录</p>
+                          <p className="text-xs text-muted-foreground">过滤掉婚姻状况为“已婚”的记录</p>
                         </div>
                       </div>
                       <Switch

@@ -1,6 +1,6 @@
 /**
- * LinkedIn 搜索历史页面 - 黄金模板 v2.0
- * 统一七彩鎏金风格（LinkedIn 蓝色主题）
+ * 搜索历史页面 - 黄金模板 v2.0
+ * 统一七彩鍯金风格
  */
 
 import { useState } from "react";
@@ -34,14 +34,13 @@ import {
   AlertCircle,
   Star,
   Plus,
-  Linkedin,
   Target,
   Zap,
   Users,
 } from "lucide-react";
 
 
-// 七彩鎏金动画样式 - LinkedIn 蓝色主题
+// 七彩鍯金动画样式 - 蓝色主题
 const rainbowStyles = `
   @keyframes rainbow-flow {
     0% { background-position: 0% 50%; }
@@ -204,11 +203,11 @@ export default function History() {
                   <span className="text-sm text-blue-400">任务记录</span>
                 </div>
                 <h1 className="text-2xl font-bold rainbow-text flex items-center gap-2">
-                  <Linkedin className="h-6 w-6 text-blue-500" />
-                  LinkedIn 搜索历史
+                  <HistoryIcon className="h-6 w-6 text-blue-500" />
+                  搜索历史
                 </h1>
                 <p className="text-slate-400 mt-1">
-                  查看您的 LinkedIn 搜索任务记录，结果保留180天
+                  查看您的搜索任务记录，结果保留180天
                 </p>
               </div>
             </div>
@@ -408,11 +407,11 @@ export default function History() {
             ) : (
               <div className="text-center py-16">
                 <div className="w-20 h-20 rounded-2xl bg-slate-800/50 flex items-center justify-center mx-auto mb-4 rainbow-glow">
-                  <Linkedin className="h-10 w-10 text-blue-400" />
+                  <HistoryIcon className="h-10 w-10 text-blue-400" />
                 </div>
                 <h3 className="text-xl font-semibold text-white">暂无搜索记录</h3>
                 <p className="text-slate-400 mt-2">
-                  开始您的第一次 LinkedIn 搜索
+                  开始您的第一次搜索
                 </p>
                 <Link href="/search">
                   <Button className="mt-6 rainbow-btn text-white border-0 shadow-lg shadow-blue-500/25">
