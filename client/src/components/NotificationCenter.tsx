@@ -86,12 +86,27 @@ export function NotificationCenter() {
     );
   };
 
+  const getAnnouncementTypeIcon = (type: string) => {
+    switch (type) {
+      case "info":
+        return <Info className="h-3.5 w-3.5 text-blue-400" />;
+      case "success":
+        return <Check className="h-3.5 w-3.5 text-green-400" />;
+      case "warning":
+        return <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />;
+      case "error":
+        return <AlertTriangle className="h-3.5 w-3.5 text-red-400" />;
+      default:
+        return <Info className="h-3.5 w-3.5 text-blue-400" />;
+    }
+  };
+
   const getAnnouncementTypeBadge = (type: string) => {
     const styles: Record<string, string> = {
-      info: "bg-blue-500/20 text-blue-400",
-      success: "bg-green-500/20 text-green-400",
-      warning: "bg-orange-500/20 text-orange-400",
-      error: "bg-red-500/20 text-red-400",
+      info: "bg-blue-500/20 text-blue-400 text-xs",
+      success: "bg-green-500/20 text-green-400 text-xs",
+      warning: "bg-orange-500/20 text-orange-400 text-xs",
+      error: "bg-red-500/20 text-red-400 text-xs",
     };
     const labels: Record<string, string> = {
       info: "信息",
@@ -100,7 +115,7 @@ export function NotificationCenter() {
       error: "紧急",
     };
     return (
-      <Badge className={styles[type] || "bg-slate-500/20 text-slate-400"}>
+      <Badge className={styles[type] || "bg-slate-500/20 text-slate-400 text-xs"}>
         {labels[type] || type}
       </Badge>
     );
@@ -142,14 +157,19 @@ export function NotificationCenter() {
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
+            <>
+              {/* 红色闪烁脉冲动画背景 */}
+              <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 animate-ping opacity-75" />
+              {/* 红色数字标记 */}
+              <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-bold shadow-lg shadow-red-500/50">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            </>
           )}
         </Button>
       </PopoverTrigger>
       <PopoverContent 
-        className="w-96 p-0 bg-slate-900 border-slate-700"
+        className="w-[420px] p-0 bg-slate-900 border-slate-700"
         align="end"
       >
         {/* 头部 */}
@@ -157,6 +177,11 @@ export function NotificationCenter() {
           <h3 className="font-semibold text-white flex items-center gap-2">
             <Bell className="h-4 w-4 text-orange-400" />
             消息通知
+            {unreadCount > 0 && (
+              <Badge className="bg-red-500/20 text-red-400 text-xs ml-1">
+                {unreadCount} 条未读
+              </Badge>
+            )}
           </h3>
           {unreadCount > 0 && (
             <Button
@@ -171,13 +196,16 @@ export function NotificationCenter() {
           )}
         </div>
 
-        <ScrollArea className="max-h-[400px]">
+        <ScrollArea className="max-h-[520px]">
           {/* 公告区域 */}
           {announcements && announcements.length > 0 && (
             <div className="p-3 border-b border-slate-700 bg-orange-500/5">
               <div className="flex items-center gap-2 mb-2">
                 <Megaphone className="h-4 w-4 text-orange-400" />
                 <span className="text-sm font-medium text-orange-400">系统公告</span>
+                <Badge className="bg-orange-500/20 text-orange-400 text-xs">
+                  {announcements.length}
+                </Badge>
               </div>
               {announcements.map((announcement: any) => {
                 const isExpanded = expandedAnnouncements.has(announcement.id);
@@ -187,32 +215,25 @@ export function NotificationCenter() {
                     key={announcement.id}
                     className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 mb-2 last:mb-0"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <h4 className="font-medium text-white text-sm truncate">{announcement.title}</h4>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        {getAnnouncementTypeIcon(announcement.type)}
+                        <h4 className="font-medium text-white text-sm leading-snug break-words">{announcement.title}</h4>
                       </div>
-                      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         {announcement.isPinned && (
                           <Pin className="h-3 w-3 text-orange-400" />
                         )}
-                        {(announcement.type === "error" || announcement.type === "warning") && (
-                          <Badge className={
-                            announcement.type === "error" 
-                              ? "bg-red-500/20 text-red-400 text-xs" 
-                              : "bg-orange-500/20 text-orange-400 text-xs"
-                          }>
-                            {announcement.type === "error" ? "紧急" : "警告"}
-                          </Badge>
-                        )}
+                        {getAnnouncementTypeBadge(announcement.type)}
                       </div>
                     </div>
-                    <p className={`text-slate-400 text-xs mt-1 whitespace-pre-line ${!isExpanded && isLongContent ? "line-clamp-2" : ""}`}>
+                    <p className={`text-slate-400 text-xs mt-2 whitespace-pre-line leading-relaxed ${!isExpanded && isLongContent ? "line-clamp-2" : ""}`}>
                       {announcement.content}
                     </p>
                     {isLongContent && (
                       <button
                         onClick={() => toggleAnnouncementExpand(announcement.id)}
-                        className="text-cyan-400 text-xs mt-1 flex items-center gap-1 hover:text-cyan-300 transition-colors"
+                        className="text-cyan-400 text-xs mt-1.5 flex items-center gap-1 hover:text-cyan-300 transition-colors"
                       >
                         {isExpanded ? (
                           <>收起 <ChevronUp className="h-3 w-3" /></>
@@ -243,7 +264,7 @@ export function NotificationCenter() {
                       className={`p-3 rounded-lg border transition-colors cursor-pointer ${
                         message.isRead
                           ? "bg-slate-800/30 border-slate-700/30"
-                          : "bg-slate-800/50 border-slate-700/50 hover:bg-slate-800"
+                          : "bg-slate-800/50 border-cyan-500/30 hover:bg-slate-800 hover:border-cyan-500/50"
                       }`}
                       onClick={() => {
                         if (!message.isRead) {
@@ -261,7 +282,10 @@ export function NotificationCenter() {
                         <div className="flex items-center gap-2">
                           {getTypeBadge(message.type)}
                           {!message.isRead && (
-                            <span className="h-2 w-2 rounded-full bg-blue-500" />
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500" />
+                            </span>
                           )}
                         </div>
                       </div>
