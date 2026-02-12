@@ -92,6 +92,7 @@ import {
   getUserMessages,
   markMessageAsRead,
   markAllMessagesAsRead,
+  getUnreadMessageCount,
   logUserActivity,
   getUserActivityLogs,
   logError,
@@ -1975,8 +1976,8 @@ export const appRouter = router({
       if (!ctx.user) {
         throw new TRPCError({ code: "UNAUTHORIZED" });
       }
-      const result = await getUserMessages(ctx.user.id, 1, 1);
-      return { count: result.unreadCount };
+      const count = await getUnreadMessageCount(ctx.user.id);
+      return { count };
     }),
   }),
 

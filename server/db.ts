@@ -1261,6 +1261,17 @@ export async function markAllMessagesAsRead(userId: number): Promise<boolean> {
   return true;
 }
 
+// 获取未读消息数量（优化版，不需要查询完整消息列表）
+export async function getUnreadMessageCount(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  
+  const result = await db.select({ count: sql<number>`count(*)` })
+    .from(userMessages)
+    .where(and(eq(userMessages.userId, userId), eq(userMessages.isRead, false)));
+  return result[0]?.count || 0;
+}
+
 // ============ 用户活动日志 ============
 
 // 记录用户活动

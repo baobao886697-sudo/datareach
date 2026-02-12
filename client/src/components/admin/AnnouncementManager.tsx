@@ -150,7 +150,13 @@ export function AnnouncementManager() {
       success: "bg-green-500/20 text-green-400 border-green-500/30",
       error: "bg-red-500/20 text-red-400 border-red-500/30",
     };
-    return <Badge className={styles[type] || styles.info}>{type}</Badge>;
+    const labels: Record<string, string> = {
+      info: "信息",
+      warning: "警告",
+      success: "成功",
+      error: "紧急",
+    };
+    return <Badge className={styles[type] || styles.info}>{labels[type] || type}</Badge>;
   };
 
   return (
@@ -212,7 +218,10 @@ export function AnnouncementManager() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getTypeIcon(announcement.type)}
-                        <span className="text-white font-medium">{announcement.title}</span>
+                        <div>
+                          <span className="text-white font-medium">{announcement.title}</span>
+                          <p className="text-slate-500 text-xs mt-0.5 line-clamp-1 max-w-xs">{announcement.content}</p>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>{getTypeBadge(announcement.type)}</TableCell>
@@ -332,7 +341,7 @@ export function AnnouncementManager() {
                     <SelectItem value="info">信息</SelectItem>
                     <SelectItem value="success">成功</SelectItem>
                     <SelectItem value="warning">警告</SelectItem>
-                    <SelectItem value="error">错误</SelectItem>
+                    <SelectItem value="error">紧急</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
