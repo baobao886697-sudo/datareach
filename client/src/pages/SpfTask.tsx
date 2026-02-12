@@ -237,7 +237,7 @@ export default function SpfTask() {
       link.href = url;
       link.download = data.fileName;
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
       toast.success("导出成功");
     } catch (error: any) {
       toast.error("导出失败", { description: error.message });
