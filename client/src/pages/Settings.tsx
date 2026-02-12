@@ -9,7 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
-  Settings, Lock, Eye, EyeOff, CheckCircle, Shield, User, Mail, Calendar, Coins, Loader2, ArrowLeft, KeyRound
+  Settings, Lock, Eye, EyeOff, CheckCircle, Shield, User, Mail, Calendar, Coins, Loader2, ArrowLeft, KeyRound, AlertCircle, XCircle
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -25,37 +25,43 @@ export default function SettingsPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordChanged, setPasswordChanged] = useState(false);
 
+  // 内联消息状态
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   const changePasswordMutation = trpc.user.changePassword.useMutation({
     onSuccess: () => {
       setPasswordChanged(true);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("密码修改成功");
+      setMessage({ type: "success", text: "密码修改成功！下次登录请使用新密码。" });
+      try { toast.success("密码修改成功"); } catch (_) {}
     },
-    onError: (error) => {
-      toast.error(error.message || "密码修改失败");
+    onError: (error: any) => {
+      setMessage({ type: "error", text: error.message || "密码修改失败，请稍后重试" });
+      try { toast.error(error.message || "密码修改失败"); } catch (_) {}
     },
   });
 
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage(null);
 
     // 前端验证
     if (!currentPassword) {
-      toast.error("请输入当前密码");
+      setMessage({ type: "error", text: "请输入当前密码" });
       return;
     }
     if (newPassword.length < 8) {
-      toast.error("新密码至少8位");
+      setMessage({ type: "error", text: "新密码至少8位" });
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("两次输入的新密码不一致");
+      setMessage({ type: "error", text: "两次输入的新密码不一致" });
       return;
     }
     if (currentPassword === newPassword) {
-      toast.error("新密码不能与当前密码相同");
+      setMessage({ type: "error", text: "新密码不能与当前密码相同" });
       return;
     }
 
@@ -164,7 +170,7 @@ export default function SettingsPage() {
                   您的密码已成功更新，下次登录请使用新密码
                 </p>
                 <Button
-                  onClick={() => setPasswordChanged(false)}
+                  onClick={() => { setPasswordChanged(false); setMessage(null); }}
                   variant="outline"
                   className="border-slate-700 text-slate-300 hover:bg-slate-800"
                 >
@@ -174,6 +180,29 @@ export default function SettingsPage() {
             ) : (
               /* 修改密码表单 */
               <form onSubmit={handleChangePassword} className="space-y-5">
+                {/* 内联消息提示 */}
+                {message && (
+                  <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${
+                    message.type === "error"
+                      ? "bg-red-900/30 border-red-700/50 text-red-300"
+                      : "bg-green-900/30 border-green-700/50 text-green-300"
+                  }`}>
+                    {message.type === "error" ? (
+                      <XCircle className="w-4 h-4 flex-shrink-0" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                    )}
+                    <span>{message.text}</span>
+                    <button
+                      type="button"
+                      onClick={() => setMessage(null)}
+                      className="ml-auto text-slate-400 hover:text-white"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* 当前密码 */}
                 <div className="space-y-2">
                   <Label htmlFor="currentPassword" className="text-slate-300">
@@ -186,7 +215,7 @@ export default function SettingsPage() {
                       type={showCurrentPassword ? "text" : "password"}
                       placeholder="请输入当前密码"
                       value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      onChange={(e) => { setCurrentPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
                       required
                     />
@@ -212,7 +241,7 @@ export default function SettingsPage() {
                       type={showNewPassword ? "text" : "password"}
                       placeholder="请输入新密码（至少8位）"
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onChange={(e) => { setNewPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
                       required
                       minLength={8}
@@ -242,7 +271,7 @@ export default function SettingsPage() {
                       type={showConfirmPassword ? "text" : "password"}
                       placeholder="请再次输入新密码"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => { setConfirmPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
                       required
                     />
