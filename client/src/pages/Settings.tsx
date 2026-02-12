@@ -43,8 +43,7 @@ export default function SettingsPage() {
     },
   });
 
-  const handleChangePassword = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleChangePassword = () => {
     setMessage(null);
 
     // 前端验证
@@ -179,7 +178,7 @@ export default function SettingsPage() {
               </div>
             ) : (
               /* 修改密码表单 */
-              <form onSubmit={handleChangePassword} className="space-y-5">
+              <div className="space-y-5">
                 {/* 内联消息提示 */}
                 {message && (
                   <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${
@@ -217,7 +216,6 @@ export default function SettingsPage() {
                       value={currentPassword}
                       onChange={(e) => { setCurrentPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
-                      required
                     />
                     <button
                       type="button"
@@ -243,8 +241,6 @@ export default function SettingsPage() {
                       value={newPassword}
                       onChange={(e) => { setNewPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
-                      required
-                      minLength={8}
                     />
                     <button
                       type="button"
@@ -273,7 +269,6 @@ export default function SettingsPage() {
                       value={confirmPassword}
                       onChange={(e) => { setConfirmPassword(e.target.value); setMessage(null); }}
                       className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-cyan-500 focus:ring-cyan-500/20"
-                      required
                     />
                     <button
                       type="button"
@@ -311,7 +306,8 @@ export default function SettingsPage() {
 
                 {/* 提交按钮 */}
                 <Button
-                  type="submit"
+                  type="button"
+                  onClick={handleChangePassword}
                   disabled={changePasswordMutation.isPending || !currentPassword || newPassword.length < 8 || newPassword !== confirmPassword}
                   className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white py-5 disabled:opacity-50"
                 >
@@ -327,7 +323,7 @@ export default function SettingsPage() {
                     </>
                   )}
                 </Button>
-              </form>
+              </div>
             )}
           </CardContent>
         </Card>
