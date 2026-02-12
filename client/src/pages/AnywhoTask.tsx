@@ -559,7 +559,7 @@ export default function AnywhoTask() {
                       <TableCell className="font-medium">{result.name || '-'}</TableCell>
                       <TableCell>{result.age || '-'}</TableCell>
                       <TableCell className="max-w-[200px] truncate">
-                        {result.address || '-'}
+                        {result.currentAddress || '-'}
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         {result.phone || '-'}
