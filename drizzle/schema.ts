@@ -11,7 +11,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }).notNull().unique(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
   name: text("name"),
-  credits: int("credits").default(0).notNull(), // 初始0积分
+  credits: decimal("credits", { precision: 10, scale: 2 }).default("0").notNull(), // 支持小数积分
   status: mysqlEnum("status", ["active", "disabled"]).default("active").notNull(),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   emailVerified: boolean("emailVerified").default(false),
@@ -57,7 +57,7 @@ export const rechargeOrders = mysqlTable("recharge_orders", {
   id: int("id").autoincrement().primaryKey(),
   orderId: varchar("orderId", { length: 32 }).notNull().unique(),
   userId: int("userId").notNull(),
-  credits: int("credits").notNull(),
+  credits: decimal("credits", { precision: 10, scale: 2 }).notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   walletAddress: varchar("walletAddress", { length: 100 }).notNull(),
   network: varchar("network", { length: 20 }).default("TRC20").notNull(),
@@ -82,7 +82,7 @@ export const searchTasks = mysqlTable("search_tasks", {
   params: json("params").notNull(),
   requestedCount: int("requestedCount").notNull(),
   actualCount: int("actualCount").default(0),
-  creditsUsed: int("creditsUsed").default(0),
+  creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0"),
   status: mysqlEnum("status", ["pending", "running", "completed", "failed", "stopped", "insufficient_credits"]).default("pending").notNull(),
   progress: int("progress").default(0),
   logs: json("logs").$type<Array<{ timestamp: string; level: string; message: string }>>(),
@@ -124,8 +124,8 @@ export type GlobalCache = typeof globalCache.$inferSelect;
 export const creditLogs = mysqlTable("credit_logs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  amount: int("amount").notNull(), // 正数增加，负数减少
-  balanceAfter: int("balanceAfter").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(), // 正数增加，负数减少
+  balanceAfter: decimal("balanceAfter", { precision: 10, scale: 2 }).notNull(),
   type: mysqlEnum("type", ["recharge", "search", "admin_add", "admin_deduct", "refund", "admin_adjust", "bonus"]).notNull(),
   description: text("description"),
   relatedOrderId: varchar("relatedOrderId", { length: 32 }),
@@ -143,7 +143,7 @@ export const searchLogs = mysqlTable("search_logs", {
   params: json("params"),
   requestedCount: int("requestedCount"),
   actualCount: int("actualCount"),
-  creditsUsed: int("creditsUsed"),
+  creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }),
   cacheHit: boolean("cacheHit").default(false),
   status: varchar("status", { length: 20 }),
   errorMessage: text("errorMessage"),
@@ -192,7 +192,7 @@ export const apiLogs = mysqlTable("api_logs", {
   responseTime: int("responseTime"), // 毫秒
   success: boolean("success").default(true),
   errorMessage: text("errorMessage"),
-  creditsUsed: int("creditsUsed").default(0),
+  creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

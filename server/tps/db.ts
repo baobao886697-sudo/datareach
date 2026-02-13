@@ -445,7 +445,7 @@ export async function saveTpsDetailCache(
 export async function getUserCredits(userId: number): Promise<number> {
   const database = await db();
   const result = await database.select({ credits: users.credits }).from(users).where(eq(users.id, userId));
-  return result[0]?.credits || 0;
+  return parseFloat(String(result[0]?.credits)) || 0;
 }
 
 /**
@@ -474,7 +474,7 @@ export async function logCreditChange(
   await database.insert(creditLogs).values({
     userId,
     amount: Math.round(amount * 10) / 10,
-    balanceAfter: result[0]?.credits || 0,
+    balanceAfter: parseFloat(String(result[0]?.credits)) || 0,
     type,
     description,
     relatedTaskId,
@@ -547,7 +547,7 @@ export async function freezeCredits(
     .from(users)
     .where(eq(users.id, userId));
   
-  const currentBalance = result[0]?.credits || 0;
+  const currentBalance = parseFloat(String(result[0]?.credits)) || 0;
   const roundedAmount = Math.ceil(amount * 10) / 10;
   
   // 检查余额是否足够
@@ -612,7 +612,7 @@ export async function settleCredits(
     .from(users)
     .where(eq(users.id, userId));
   
-  let currentBalance = result[0]?.credits || 0;
+  let currentBalance = parseFloat(String(result[0]?.credits)) || 0;
   
   if (refundAmount > 0) {
     // 退还多扣的积分

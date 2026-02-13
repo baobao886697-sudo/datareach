@@ -424,7 +424,7 @@ export async function deductCredits(
     .where(eq(users.id, userId))
     .limit(1);
   
-  const currentCredits = user[0]?.credits || 0;
+  const currentCredits = parseFloat(String(user[0]?.credits)) || 0;
   const balanceAfter = currentCredits - roundedAmount;
   
   // 扣除积分
@@ -458,7 +458,7 @@ export async function getUserCredits(userId: number): Promise<number> {
     .where(eq(users.id, userId))
     .limit(1);
   
-  return result[0]?.credits || 0;
+  return parseFloat(String(result[0]?.credits)) || 0;
 }
 
 /**
@@ -554,7 +554,7 @@ export async function freezeCreditsAnywho(
     .where(eq(users.id, userId))
     .limit(1);
   
-  const currentCredits = user[0]?.credits || 0;
+  const currentCredits = parseFloat(String(user[0]?.credits)) || 0;
   
   // 检查余额是否足够
   if (currentCredits < roundedAmount) {
@@ -627,7 +627,7 @@ export async function settleCreditsAnywho(
     .where(eq(users.id, userId))
     .limit(1);
   
-  const currentCredits = user[0]?.credits || 0;
+  const currentCredits = parseFloat(String(user[0]?.credits)) || 0;
   
   if (refundAmount > 0) {
     // 退还多扣的积分

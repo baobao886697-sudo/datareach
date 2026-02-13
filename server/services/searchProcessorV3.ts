@@ -396,8 +396,9 @@ export async function executeSearchV3(
   const maxEstimatedCost = currentSearchCredits + requestedCount * currentPhoneCreditsPerPerson;
   
   // 检查积分是否足够
-  if (user.credits < maxEstimatedCost) {
-    throw new Error(`积分不足，预估最大消耗 ${maxEstimatedCost} 积分（搜索费 ${currentSearchCredits} + 数据费 ${requestedCount} × ${currentPhoneCreditsPerPerson}），当前余额 ${user.credits} 积分`);
+  const userCreditsVal = parseFloat(String(user.credits)) || 0;
+  if (userCreditsVal < maxEstimatedCost) {
+    throw new Error(`积分不足，预估最大消耗 ${maxEstimatedCost} 积分（搜索费 ${currentSearchCredits} + 数据费 ${requestedCount} × ${currentPhoneCreditsPerPerson}），当前余额 ${userCreditsVal} 积分`);
   }
 
   const searchHash = generateSearchHash(searchName, searchTitle, searchState, requestedCount);

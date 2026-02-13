@@ -278,7 +278,7 @@ export const appRouter = router({
             id: user.id,
             email: user.email,
             name: user.name,
-            credits: user.credits,
+            credits: parseFloat(String(user.credits)) || 0,
             role: user.role,
           },
         };
@@ -338,7 +338,7 @@ export const appRouter = router({
         id: user.id,
         email: user.email,
         name: user.name,
-        credits: user.credits,
+        credits: parseFloat(String(user.credits)) || 0,
         role: user.role,
         emailVerified: user.emailVerified,
         createdAt: user.createdAt,
@@ -919,7 +919,7 @@ export const appRouter = router({
 
         return {
           orderId: order.orderId,
-          credits: order.credits,
+          credits: parseFloat(String(order.credits)) || 0,
           baseCredits: input.credits,      // 基础积分
           bonusCredits: bonusCredits,      // 赠送积分
           bonusPercent: bonusPercent,      // 赠送比例

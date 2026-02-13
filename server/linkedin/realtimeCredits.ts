@@ -102,7 +102,7 @@ export class LinkedInRealtimeCreditTracker {
       .from(users)
       .where(eq(users.id, this.userId));
     
-    this.currentBalance = result[0]?.credits || 0;
+    this.currentBalance = parseFloat(String(result[0]?.credits)) || 0;
     return this.currentBalance;
   }
   
@@ -259,7 +259,7 @@ export class LinkedInRealtimeCreditTracker {
         .from(users)
         .where(eq(users.id, this.userId));
       
-      const newBalance = newBalanceResult[0]?.credits || 0;
+      const newBalance = parseFloat(String(newBalanceResult[0]?.credits)) || 0;
       
       // 记录扣费日志
       const description = type === 'search' 
@@ -311,7 +311,7 @@ export class LinkedInRealtimeCreditTracker {
       .from(users)
       .where(eq(users.id, this.userId));
     
-    this.currentBalance = result[0]?.credits || 0;
+    this.currentBalance = parseFloat(String(result[0]?.credits)) || 0;
   }
   
   /**

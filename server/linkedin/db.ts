@@ -38,17 +38,18 @@ export async function freezeCredits(
   const roundedAmount = Math.ceil(amount * 10) / 10;
   
   // 检查余额是否足够
-  if (user.credits < roundedAmount) {
+  const userCredits = parseFloat(String(user.credits)) || 0;
+  if (userCredits < roundedAmount) {
     return {
       success: false,
       frozenAmount: 0,
-      currentBalance: user.credits,
-      message: `积分不足，需要 ${roundedAmount} 积分，当前余额 ${user.credits} 积分`,
+      currentBalance: userCredits,
+      message: `积分不足，需要 ${roundedAmount} 积分，当前余额 ${userCredits} 积分`,
     };
   }
   
   // 预扣积分
-  const newBalance = user.credits - roundedAmount;
+  const newBalance = userCredits - roundedAmount;
   await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
   
   // 记录预扣日志
@@ -92,7 +93,7 @@ export async function settleCredits(
   const user = userResult.length > 0 ? userResult[0] : undefined;
   if (!user) return { refundAmount: 0, actualCost: roundedActualCost, newBalance: 0 };
   
-  let currentBalance = user.credits;
+  let currentBalance = parseFloat(String(user.credits)) || 0;
   
   if (refundAmount > 0) {
     // 退还多扣的积分
@@ -124,7 +125,7 @@ export async function getUserCredits(userId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
   const result = await db.select({ credits: users.credits }).from(users).where(eq(users.id, userId)).limit(1);
-  return result.length > 0 ? result[0].credits : 0;
+  return result.length > 0 ? parseFloat(String(result[0].credits)) || 0 : 0;
 }
 
 // ============ 搜索任务操作 ============

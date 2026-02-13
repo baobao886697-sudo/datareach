@@ -172,7 +172,8 @@ export async function updateUserStatus(userId: number, status: "active" | "disab
 
 export async function getUserCredits(userId: number): Promise<number> {
   const user = await getUserById(userId);
-  return user?.credits || 0;
+  const raw = user?.credits;
+  return raw ? parseFloat(String(raw)) : 0;
 }
 
 export async function deductCredits(userId: number, amount: number, type: "search" | "admin_deduct" | "refund", description: string, relatedTaskId?: string): Promise<boolean> {
@@ -182,9 +183,10 @@ export async function deductCredits(userId: number, amount: number, type: "searc
   if (!user) return false;
   
   // 支持负数金额（退款）
-  if (amount > 0 && user.credits < amount) return false;
+  const userCredits = parseFloat(String(user.credits)) || 0;
+  if (amount > 0 && userCredits < amount) return false;
   
-  const newBalance = user.credits - amount; // 负数amount会增加余额
+  const newBalance = userCredits - amount; // 负数amount会增加余额
   await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
   await db.insert(creditLogs).values({ userId, amount: -amount, balanceAfter: newBalance, type, description, relatedTaskId });
   return true;
@@ -195,9 +197,10 @@ export async function addCredits(userId: number, amount: number, type: "recharge
   if (!db) return { success: false };
   const user = await getUserById(userId);
   if (!user) return { success: false };
-  const newBalance = user.credits + amount;
-  await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
-  await db.insert(creditLogs).values({ userId, amount, balanceAfter: newBalance, type, description, relatedOrderId, relatedTaskId });
+  const userCredits = parseFloat(String(user.credits)) || 0;
+  const newBalance = userCredits + amount;
+  await db.update(users).set({ credits: String(newBalance) }).where(eq(users.id, userId));
+  await db.insert(creditLogs).values({ userId, amount: String(amount), balanceAfter: String(newBalance), type, description, relatedOrderId, relatedTaskId });
   return { success: true, newBalance };
 }
 
@@ -223,17 +226,18 @@ export async function freezeCreditsLinkedIn(
   const roundedAmount = Math.ceil(amount * 10) / 10;
   
   // 检查余额是否足够
-  if (user.credits < roundedAmount) {
+  const userCredits = parseFloat(String(user.credits)) || 0;
+  if (userCredits < roundedAmount) {
     return {
       success: false,
       frozenAmount: 0,
-      currentBalance: user.credits,
-      message: `积分不足，需要 ${roundedAmount} 积分，当前余额 ${user.credits} 积分`,
+      currentBalance: userCredits,
+      message: `积分不足，需要 ${roundedAmount} 积分，当前余额 ${userCredits} 积分`,
     };
   }
   
   // 预扣积分
-  const newBalance = user.credits - roundedAmount;
+  const newBalance = userCredits - roundedAmount;
   await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
   
   // 记录预扣日志
@@ -275,7 +279,7 @@ export async function settleCreditsLinkedIn(
   const user = await getUserById(userId);
   if (!user) return { refundAmount: 0, actualCost: roundedActualCost, newBalance: 0 };
   
-  let currentBalance = user.credits;
+  let currentBalance = parseFloat(String(user.credits)) || 0;
   
   if (refundAmount > 0) {
     // 退还多扣的积分
@@ -418,7 +422,7 @@ export async function confirmRechargeOrder(orderId: string, txId: string, receiv
   const order = await getRechargeOrder(orderId);
   if (!order || order.status !== "pending") return false;
   await db.update(rechargeOrders).set({ status: "paid", txId, receivedAmount, paidAt: new Date() }).where(eq(rechargeOrders.orderId, orderId));
-  const creditResult = await addCredits(order.userId, order.credits, "recharge", `充值订单 ${orderId}`, orderId);
+  const creditResult = await addCredits(order.userId, parseFloat(String(order.credits)) || 0, "recharge", `充值订单 ${orderId}`, orderId);
   
   // 计算并创建代理佣金
   try {
@@ -433,7 +437,7 @@ export async function confirmRechargeOrder(orderId: string, txId: string, receiv
   // 自动发送充值到账通知给用户
   try {
     const newBalance = creditResult.newBalance ?? 0;
-    const creditsFormatted = order.credits.toLocaleString();
+    const creditsFormatted = (parseFloat(String(order.credits)) || 0).toLocaleString();
     const balanceFormatted = newBalance.toLocaleString();
     const amountStr = order.amount;
     
@@ -888,7 +892,7 @@ export async function getSearchStats(): Promise<{
   
   return { 
     todaySearches: todayResult[0]?.count || 0, 
-    todayCreditsUsed: todayResult[0]?.credits || 0, 
+    todayCreditsUsed: parseFloat(String(todayResult[0]?.credits)) || 0, 
     totalSearches: totalResult[0]?.count || 0, 
     cacheHitRate: 0,
     fuzzySearches: fuzzyResult[0]?.count || 0,
@@ -1631,7 +1635,7 @@ export async function refundOrder(orderId: string, adminNote?: string): Promise<
   if (!order || order.status !== 'paid') return false;
   
   // 扣除用户积分
-  const deductResult = await deductCredits(order.userId, order.credits, 'admin_deduct', `订单退款: ${orderId}`);
+  const deductResult = await deductCredits(order.userId, parseFloat(String(order.credits)) || 0, 'admin_deduct', `订单退款: ${orderId}`);
   if (!deductResult) return false;
   
   // 更新订单状态
@@ -1973,7 +1977,7 @@ export async function getUserCreditStats(userId: number): Promise<{
   
   // 获取用户当前余额
   const user = await db.select({ credits: users.credits }).from(users).where(eq(users.id, userId)).limit(1);
-  const currentBalance = user[0]?.credits || 0;
+  const currentBalance = parseFloat(String(user[0]?.credits)) || 0;
   
   // 按类型统计积分变动
   const typeStats = await db.select({

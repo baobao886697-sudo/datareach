@@ -299,8 +299,9 @@ export async function previewSearch(
   }
 
   const estimatedCredits = searchCredits + totalAvailable * phoneCreditsPerPerson;
-  const canAfford = user.credits >= estimatedCredits;
-  const maxAffordable = Math.floor((user.credits - searchCredits) / phoneCreditsPerPerson);
+  const userCreditsNum = parseFloat(String(user.credits)) || 0;
+  const canAfford = userCreditsNum >= estimatedCredits;
+  const maxAffordable = Math.floor((userCreditsNum - searchCredits) / phoneCreditsPerPerson);
 
   return {
     success: true,
@@ -309,7 +310,7 @@ export async function previewSearch(
     searchCredits,
     phoneCreditsPerPerson,
     canAfford,
-    userCredits: user.credits,
+    userCredits: userCreditsNum,
     maxAffordable: Math.max(0, maxAffordable),
     searchParams: { name: searchName, title: searchTitle, state: searchState, limit: requestedCount, ageMin, ageMax, mode },
     cacheHit,
