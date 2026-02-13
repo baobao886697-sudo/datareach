@@ -294,6 +294,7 @@ export default function Recharge() {
                   />
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-yellow-400 font-medium">USDT</span>
                 </div>
+                <p className="text-xs text-slate-500 mt-1">最低充值 50 USDT</p>
               </div>
 
               {/* 费用明细 */}
