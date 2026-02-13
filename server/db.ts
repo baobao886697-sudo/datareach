@@ -156,6 +156,7 @@ export async function getAllUsers(page: number = 1, limit: number = 20, search?:
   return { 
     users: (result[0] as any[]).map(u => ({
       ...u,
+      credits: parseFloat(String(u.credits)) || 0,
       agentEmail: u.agentEmail || null,
     })), 
     total: (countResult[0] as any[])[0]?.count || 0 
@@ -199,8 +200,8 @@ export async function addCredits(userId: number, amount: number, type: "recharge
   if (!user) return { success: false };
   const userCredits = parseFloat(String(user.credits)) || 0;
   const newBalance = userCredits + amount;
-  await db.update(users).set({ credits: String(newBalance) }).where(eq(users.id, userId));
-  await db.insert(creditLogs).values({ userId, amount: String(amount), balanceAfter: String(newBalance), type, description, relatedOrderId, relatedTaskId });
+  await db.update(users).set({ credits: newBalance }).where(eq(users.id, userId));
+  await db.insert(creditLogs).values({ userId, amount, balanceAfter: newBalance, type, description, relatedOrderId, relatedTaskId });
   return { success: true, newBalance };
 }
 
@@ -310,7 +311,7 @@ export async function getCreditLogs(userId: number, page: number = 1, limit: num
   const offset = (page - 1) * limit;
   const result = await db.select().from(creditLogs).where(eq(creditLogs.userId, userId)).orderBy(desc(creditLogs.createdAt)).limit(limit).offset(offset);
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(creditLogs).where(eq(creditLogs.userId, userId));
-  return { logs: result, total: countResult[0]?.count || 0 };
+  return { logs: result.map(l => ({ ...l, amount: parseFloat(String(l.amount)) || 0, balanceAfter: parseFloat(String(l.balanceAfter)) || 0 })), total: countResult[0]?.count || 0 };
 }
 
 // ============ 系统配置相关 ============
@@ -398,7 +399,9 @@ export async function getRechargeOrder(orderId: string): Promise<RechargeOrder |
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(rechargeOrders).where(eq(rechargeOrders.orderId, orderId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  if (result.length === 0) return undefined;
+  const order = result[0];
+  return { ...order, credits: parseFloat(String(order.credits)) || 0 };
 }
 
 export async function getUserRechargeOrders(userId: number, page: number = 1, limit: number = 20): Promise<{ orders: RechargeOrder[]; total: number }> {
@@ -407,7 +410,7 @@ export async function getUserRechargeOrders(userId: number, page: number = 1, li
   const offset = (page - 1) * limit;
   const result = await db.select().from(rechargeOrders).where(eq(rechargeOrders.userId, userId)).orderBy(desc(rechargeOrders.createdAt)).limit(limit).offset(offset);
   const countResult = await db.select({ count: sql<number>`count(*)` }).from(rechargeOrders).where(eq(rechargeOrders.userId, userId));
-  return { orders: result, total: countResult[0]?.count || 0 };
+  return { orders: result.map(o => ({ ...o, credits: parseFloat(String(o.credits)) || 0 })), total: countResult[0]?.count || 0 };
 }
 
 export async function getPendingOrders(): Promise<RechargeOrder[]> {
@@ -472,7 +475,7 @@ export async function getAllRechargeOrders(page: number = 1, limit: number = 20,
   }
   const result = await query.orderBy(desc(rechargeOrders.createdAt)).limit(limit).offset(offset);
   const countResult = await countQuery;
-  return { orders: result, total: countResult[0]?.count || 0 };
+  return { orders: result.map(o => ({ ...o, credits: parseFloat(String(o.credits)) || 0 })), total: countResult[0]?.count || 0 };
 }
 
 // 更新订单状态
@@ -1043,12 +1046,12 @@ export async function getUserDetail(userId: number): Promise<{
   }).from(loginLogs).where(and(eq(loginLogs.userId, userId), eq(loginLogs.success, true)));
   
   return {
-    user,
+    user: { ...user, credits: parseFloat(String(user.credits)) || 0 },
     stats: {
       totalOrders: orderStats[0]?.count || 0,
-      totalSpent: orderStats[0]?.total || 0,
+      totalSpent: parseFloat(String(orderStats[0]?.total)) || 0,
       totalSearches: searchStats[0]?.count || 0,
-      totalCreditsUsed: searchStats[0]?.credits || 0,
+      totalCreditsUsed: parseFloat(String(searchStats[0]?.credits)) || 0,
       lastLoginAt: loginStats[0]?.lastLogin || null,
       loginCount: loginStats[0]?.count || 0
     }
@@ -1082,7 +1085,7 @@ export async function getUserSearchHistory(userId: number, page: number = 1, lim
     db.select({ count: sql<number>`count(*)` }).from(searchTasks).where(eq(searchTasks.userId, userId))
   ]);
   
-  return { searches, total: countResult[0]?.count || 0 };
+  return { searches: searches.map(s => ({ ...s, creditsUsed: parseFloat(String(s.creditsUsed)) || 0 })), total: countResult[0]?.count || 0 };
 }
 
 // 获取用户积分变动记录
@@ -1100,7 +1103,7 @@ export async function getUserCreditHistory(userId: number, page: number = 1, lim
     db.select({ count: sql<number>`count(*)` }).from(creditLogs).where(eq(creditLogs.userId, userId))
   ]);
   
-  return { logs, total: countResult[0]?.count || 0 };
+  return { logs: logs.map(l => ({ ...l, amount: parseFloat(String(l.amount)) || 0, balanceAfter: parseFloat(String(l.balanceAfter)) || 0 })), total: countResult[0]?.count || 0 };
 }
 
 // 获取用户登录记录

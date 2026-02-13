@@ -1279,7 +1279,7 @@ function AgentUsersDialog({ open, onOpenChange, agent }: { open: boolean; onOpen
                         <TableCell className="text-slate-500">{user.id}</TableCell>
                         <TableCell className="text-white">{user.email}</TableCell>
                         <TableCell className="text-slate-300">{user.name || '-'}</TableCell>
-                        <TableCell className="text-yellow-400">{user.credits}</TableCell>
+                        <TableCell className="text-yellow-400">{Number(user.credits || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-green-400">${user.totalRecharge}</TableCell>
                         <TableCell className="text-cyan-400">${user.totalCommission}</TableCell>
                         <TableCell className="text-slate-400 text-xs">
@@ -1313,7 +1313,7 @@ function AgentUsersDialog({ open, onOpenChange, agent }: { open: boolean; onOpen
                         <TableCell className="text-slate-500">{user.id}</TableCell>
                         <TableCell className="text-white">{user.email}</TableCell>
                         <TableCell className="text-slate-300">{user.name || '-'}</TableCell>
-                        <TableCell className="text-yellow-400">{user.credits}</TableCell>
+                        <TableCell className="text-yellow-400">{Number(user.credits || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-purple-400">{user.inviterEmail}</TableCell>
                         <TableCell className="text-slate-400 text-xs">
                           {new Date(user.createdAt).toLocaleDateString('zh-CN')}
