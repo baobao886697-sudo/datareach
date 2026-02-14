@@ -310,7 +310,7 @@ export default function History() {
                 <div>
                   <p className="text-sm text-muted-foreground">消耗积分</p>
                   <p className="text-2xl font-bold text-yellow-400 mt-1">
-                    {tasks.reduce((sum: number, t: any) => sum + (t.creditsUsed || 0), 0).toFixed(1)}
+                    {tasks.reduce((sum: number, t: any) => sum + (Number(t.creditsUsed) || 0), 0).toFixed(1)}
                   </p>
                 </div>
                 <Zap className="h-8 w-8 text-yellow-400" />
@@ -437,7 +437,7 @@ export default function History() {
                             </TableCell>
                             <TableCell className="text-center">
                               <span className="font-mono text-yellow-400">
-                                {task.creditsUsed?.toFixed(1) || 0}
+                                {Number(task.creditsUsed)?.toFixed(1) || 0}
                               </span>
                             </TableCell>
                             <TableCell className="text-slate-400">
