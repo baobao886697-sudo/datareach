@@ -24,23 +24,23 @@ import { ScrapeRateLimitError, ScrapeServerError } from './scrapeClient';
 // ============================================================================
 
 export const TPS_POOL_CONFIG = {
-  // 线程配置
-  MAX_THREADS: 4,                    // 最大虚拟线程数
-  MAX_CONCURRENCY_PER_THREAD: 10,    // 每线程最大并发数
-  GLOBAL_MAX_CONCURRENCY: 40,        // 全局最大并发 (4 × 10 = 40)
+  // 线程配置 (v7.1: 降低并发，配合全局信号量30硬顶)
+  MAX_THREADS: 3,                    // 最大虚拟线程数 (v7.1: 4→3)
+  MAX_CONCURRENCY_PER_THREAD: 7,     // 每线程最大并发数 (v7.1: 10→7)
+  GLOBAL_MAX_CONCURRENCY: 21,        // 全局最大并发 (3 × 7 = 21, v7.1: 40→21)
   
   // 任务规模阈值（基于详情页数量）
   SMALL_TASK_THRESHOLD: 50,          // 小任务: ≤50 条详情
   MEDIUM_TASK_THRESHOLD: 150,        // 中任务: 51-150 条详情
   // 大任务: >150 条详情
   
-  // 动态并发配置
+  // 动态并发配置 (v7.1: 全面降低，避免502)
   SMALL_TASK_THREADS: 2,             // 小任务线程数
-  SMALL_TASK_CONCURRENCY: 5,         // 小任务每线程并发
-  MEDIUM_TASK_THREADS: 3,            // 中任务线程数
-  MEDIUM_TASK_CONCURRENCY: 8,        // 中任务每线程并发
-  LARGE_TASK_THREADS: 4,             // 大任务线程数
-  LARGE_TASK_CONCURRENCY: 10,        // 大任务每线程并发
+  SMALL_TASK_CONCURRENCY: 4,         // 小任务每线程并发 (v7.1: 5→4)
+  MEDIUM_TASK_THREADS: 2,            // 中任务线程数 (v7.1: 3→2)
+  MEDIUM_TASK_CONCURRENCY: 5,        // 中任务每线程并发 (v7.1: 8→5)
+  LARGE_TASK_THREADS: 3,             // 大任务线程数 (v7.1: 4→3)
+  LARGE_TASK_CONCURRENCY: 5,         // 大任务每线程并发 (v7.1: 10→5)
   
   // 速率限制
   REQUEST_DELAY_MS: 100,             // 请求间隔 (毫秒)
@@ -433,11 +433,11 @@ export class TpsSmartConcurrencyPool<T, R> {
       
       let delayedSuccess = 0;
       
-      // v7.0: 使用新的虚拟线程池并行执行延后重试，而不是串行逐个重试
-      // 延后重试使用较低的并发度（2线程×5并发=10并发），避免再次压垮上游
+      // v7.1: 使用新的虚拟线程池并行执行延后重试，而不是串行逐个重试
+      // 延后重试使用更低的并发度（2线程×3并发=6并发），避免再次压夸上游
       const retryThreads: VirtualThread<T, R>[] = [];
       const retryThreadCount = Math.min(2, delayedRetryTasks.length);
-      const retryConcurrencyPerThread = 5;
+      const retryConcurrencyPerThread = 3;
       
       for (let i = 0; i < retryThreadCount; i++) {
         retryThreads.push(new VirtualThread<T, R>(100 + i, retryConcurrencyPerThread));

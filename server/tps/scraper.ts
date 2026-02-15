@@ -48,9 +48,9 @@ export const activeUserTracker = new ActiveUserTracker();
  * - 单用户: 享受 PER_USER_SOFT_CAP (40) 的完整并发
  * - 多用户: 按 GLOBAL_HARD_CAP / activeUsers 公平分配，但不低于 MIN_GUARANTEE
  */
-const GLOBAL_HARD_CAP = 60;           // 全局硬顶：所有用户总并发不超过60
-const PER_USER_SOFT_CAP = 40;         // 单用户软顶：独占时最多40并发
-const PER_USER_MIN_GUARANTEE = 10;    // 最低保障：每个用户至少10并发
+const GLOBAL_HARD_CAP = 30;           // 全局硬顶：所有用户总并发不超过30（v7.1: 从60降至30，避免详情阶段502）
+const PER_USER_SOFT_CAP = 20;         // 单用户软顶：独占时最多20并发（v7.1: 从40降至20）
+const PER_USER_MIN_GUARANTEE = 8;     // 最低保障：每个用户至少8并发
 
 class ElasticGlobalSemaphore {
   private currentGlobalCount: number = 0;
@@ -191,8 +191,8 @@ export async function fetchWithScrapedo(url: string, token: string, userId: numb
 
 export const TPS_CONFIG = {
   TASK_CONCURRENCY: 4,      // 同时执行的搜索任务数
-  SCRAPEDO_CONCURRENCY: 10, // 每个任务的 Scrape.do 并发数
-  TOTAL_CONCURRENCY: 40,    // 总并发数 (4 * 10)
+  SCRAPEDO_CONCURRENCY: 10, // 每个任务的 Scrape.do 并发数（受全局信号量限制，实际不会超过20）
+  TOTAL_CONCURRENCY: 20,    // 总并发数 (v7.1: 40→20，配合全局硬顒30)
   MAX_SAFE_PAGES: 25,       // 最大搜索页数
   SEARCH_COST: 0.3,         // 搜索页成本
   DETAIL_COST: 0.3,         // 详情页成本
