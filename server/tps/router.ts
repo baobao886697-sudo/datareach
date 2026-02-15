@@ -16,23 +16,19 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { 
   searchOnly,
-  fetchDetailsInBatch,
   TpsFilters, 
   TpsDetailResult,
   TpsSearchResult,
   DetailTask,
   DetailTaskWithIndex,
   TPS_CONFIG,
-  activeUserTracker,
 } from "./scraper";
 import { 
   fetchDetailsWithSmartPool,
   DetailProgressInfo,
+  BATCH_CONFIG,
 } from "./smartPoolExecutor";
-import {
-  TPS_POOL_CONFIG,
-  getTpsTaskScaleDescription,
-} from "./smartConcurrencyPool";
+// v8.0: smartConcurrencyPool 已废弃，分批配置从 smartPoolExecutor 导入
 import {
   getTpsConfig,
   createTpsSearchTask,
@@ -64,9 +60,8 @@ import {
 } from "./concurrencyMonitor";
 import { emitTaskProgress, emitTaskCompleted, emitTaskFailed, emitCreditsUpdate } from "../_core/wsEmitter";
 
-// 统一队列并发配置 (v7.3: 搜索和详情分离配置)
-const TOTAL_CONCURRENCY = TPS_POOL_CONFIG.GLOBAL_MAX_CONCURRENCY;  // 8 详情总并发 (2×4)
-const SEARCH_CONCURRENCY = 3;  // 搜索并发：固定3个名字同时搜索（不再依赖详情池配置）
+// v8.0: 搜索并发配置（详情并发由 BATCH_CONFIG 控制）
+const SEARCH_CONCURRENCY = 3;  // 搜索并发：固定3个名字同时搜索
 
 // 输入验证 schema
 const tpsFiltersSchema = z.object({
@@ -460,9 +455,8 @@ async function executeTpsSearchRealtimeDeduction(
   input: z.infer<typeof tpsSearchInputSchema>,
   userId: number
 ) {
-  // v7.0: 注册活跃用户，用于全局弹性并发调度
-  activeUserTracker.addUser(userId);
-  console.log(`[TPS] 用户 ${userId} 开始任务，当前活跃用户数: ${activeUserTracker.getActiveUserCount()}`);
+  // v8.0: 全局信号量已移除，并发由分批模式控制
+  console.log(`[TPS v8.0] 用户 ${userId} 开始任务`);
   
   const searchCost = parseFloat(config.searchCost);
   const detailCost = parseFloat(config.detailCost);
@@ -572,7 +566,6 @@ async function executeTpsSearchRealtimeDeduction(
         token,
         maxPages,
         input.filters || {},
-        userId,
         (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`)
       );
       
@@ -814,9 +807,7 @@ async function executeTpsSearchRealtimeDeduction(
     }
     emitTaskCompleted(userId, taskId, "tps", { totalResults, creditsUsed: creditTracker.getTotalDeducted(), status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
 
-    // v7.0: 注销活跃用户
-    activeUserTracker.removeUser(userId);
-    console.log(`[TPS] 用户 ${userId} 任务完成，当前活跃用户数: ${activeUserTracker.getActiveUserCount()}`);
+    console.log(`[TPS v8.0] 用户 ${userId} 任务完成`);
 
     // 记录用户活动日志
     await logUserActivity({
@@ -836,9 +827,7 @@ async function executeTpsSearchRealtimeDeduction(
     await failTpsSearchTask(taskDbId, error.message, logs);
     emitTaskFailed(userId, taskId, "tps", { error: error.message, creditsUsed: creditTracker.getTotalDeducted() });
     
-    // v7.0: 注销活跃用户
-    activeUserTracker.removeUser(userId);
-    console.log(`[TPS] 用户 ${userId} 任务失败，当前活跃用户数: ${activeUserTracker.getActiveUserCount()}`);
+    console.log(`[TPS v8.0] 用户 ${userId} 任务失败`);
     
     await logApi({
       userId,

@@ -1,205 +1,49 @@
 import * as cheerio from 'cheerio';
 
-// ==================== 全局弹性并发限制 (v7.0) ====================
-
-/**
- * 活跃用户追踪器 - 全局单例
- * 
- * 追踪当前有多少个独立用户正在运行TPS任务，
- * 用于动态计算每个用户的并发配额。
- */
-class ActiveUserTracker {
-  private activeUsers = new Map<number, number>(); // userId -> taskCount
-
-  addUser(userId: number): void {
-    const count = this.activeUsers.get(userId) || 0;
-    this.activeUsers.set(userId, count + 1);
-  }
-
-  removeUser(userId: number): void {
-    const count = this.activeUsers.get(userId) || 0;
-    if (count <= 1) {
-      this.activeUsers.delete(userId);
-    } else {
-      this.activeUsers.set(userId, count - 1);
-    }
-  }
-
-  getActiveUserCount(): number {
-    return this.activeUsers.size;
-  }
-
-  getUserTaskCount(userId: number): number {
-    return this.activeUsers.get(userId) || 0;
-  }
-}
-
-export const activeUserTracker = new ActiveUserTracker();
-
-/**
- * 分层弹性全局信号量 (Elastic Global Semaphore) v7.0
- * 
- * 三层控制:
- * 1. 全局硬顶 (GLOBAL_HARD_CAP): 绝对不可逾越的总并发上限，保护上游服务
- * 2. 用户软顶 (PER_USER_SOFT_CAP): 单用户独占时的最大并发
- * 3. 用户最低保障 (PER_USER_MIN_GUARANTEE): 多用户竞争时的最低并发保障
- * 
- * 动态分配逻辑:
- * - 单用户: 享受 PER_USER_SOFT_CAP (40) 的完整并发
- * - 多用户: 按 GLOBAL_HARD_CAP / activeUsers 公平分配，但不低于 MIN_GUARANTEE
- */
-const GLOBAL_HARD_CAP = 15;           // 全局硬顶：所有用户总并发不超过15（v7.3: 从30降至15，详情页对scrape.do压力远大于搜索页）
-const PER_USER_SOFT_CAP = 10;         // 单用户软顶：独占时最多10并发（v7.3: 从20降至10）
-const PER_USER_MIN_GUARANTEE = 5;     // 最低保障：每个用户至少5并发（v7.3: 从8降至5）
-
-class ElasticGlobalSemaphore {
-  private currentGlobalCount: number = 0;
-  private userCounts = new Map<number, number>(); // userId -> currentCount
-  private waitQueue: Array<{ userId: number; resolve: () => void }> = [];
-
-  /**
-   * 获取指定用户当前的动态并发上限
-   */
-  private getUserLimit(userId: number): number {
-    const activeUsers = activeUserTracker.getActiveUserCount() || 1;
-    const fairShare = Math.floor(GLOBAL_HARD_CAP / activeUsers);
-    return Math.max(PER_USER_MIN_GUARANTEE, Math.min(PER_USER_SOFT_CAP, fairShare));
-  }
-
-  /**
-   * 获取全局并发许可（带用户上下文）
-   */
-  async acquire(userId: number): Promise<void> {
-    const userCount = this.userCounts.get(userId) || 0;
-    const userLimit = this.getUserLimit(userId);
-
-    // 检查：全局未满 且 用户未超限
-    if (this.currentGlobalCount < GLOBAL_HARD_CAP && userCount < userLimit) {
-      this.currentGlobalCount++;
-      this.userCounts.set(userId, userCount + 1);
-      return;
-    }
-
-    // 需要排队等待
-    return new Promise<void>((resolve) => {
-      this.waitQueue.push({ userId, resolve });
-    });
-  }
-
-  /**
-   * 释放全局并发许可
-   */
-  release(userId: number): void {
-    const userCount = this.userCounts.get(userId) || 0;
-    if (userCount > 0) {
-      this.userCounts.set(userId, userCount - 1);
-      if (userCount - 1 === 0) {
-        this.userCounts.delete(userId);
-      }
-    }
-    this.currentGlobalCount = Math.max(0, this.currentGlobalCount - 1);
-
-    // 尝试唤醒等待队列中的下一个请求
-    this.tryWakeNext();
-  }
-
-  /**
-   * 尝试从等待队列中唤醒符合条件的请求
-   */
-  private tryWakeNext(): void {
-    for (let i = 0; i < this.waitQueue.length; i++) {
-      const waiter = this.waitQueue[i];
-      const userCount = this.userCounts.get(waiter.userId) || 0;
-      const userLimit = this.getUserLimit(waiter.userId);
-
-      if (this.currentGlobalCount < GLOBAL_HARD_CAP && userCount < userLimit) {
-        // 可以唤醒
-        this.waitQueue.splice(i, 1);
-        this.currentGlobalCount++;
-        this.userCounts.set(waiter.userId, userCount + 1);
-        waiter.resolve();
-        return;
-      }
-    }
-  }
-
-  getStatus() {
-    return {
-      globalCurrent: this.currentGlobalCount,
-      globalMax: GLOBAL_HARD_CAP,
-      perUserSoftCap: PER_USER_SOFT_CAP,
-      perUserMinGuarantee: PER_USER_MIN_GUARANTEE,
-      activeUsers: activeUserTracker.getActiveUserCount(),
-      waiting: this.waitQueue.length,
-      userCounts: Object.fromEntries(this.userCounts),
-    };
-  }
-}
-
-// 全局弹性信号量实例
-const globalSemaphore = new ElasticGlobalSemaphore();
-
-// 导出获取状态的函数（用于监控）
-export function getGlobalConcurrencyStatus() {
-  return globalSemaphore.getStatus();
-}
-
-// ==================== Scrape.do API ====================
+// ==================== Scrape.do API (v8.0 简化版) ====================
+//
+// v8.0 重构:
+// - 移除 ElasticGlobalSemaphore 和 ActiveUserTracker
+// - 移除 REQUEST_COOLDOWN_MS (请求冷却)
+// - 并发控制权完全交给新的"分批+延迟"执行器 (smartPoolExecutor.ts)
+// - fetchWithScrapedo 退化为纯HTTP客户端，仅保留重试逻辑
 
 import { fetchWithScrapeClient, ScrapeRateLimitError, ScrapeServerError } from './scrapeClient';
 
 // 超时配置
-const SCRAPE_TIMEOUT_MS = 20000;  // 20 秒超时，与详情阶段一致
+const SCRAPE_TIMEOUT_MS = 20000;  // 20 秒超时
 const SCRAPE_MAX_RETRIES = 1;    // 超时/网络错误最多重试 1 次
 
-// v7.3: 请求速率控制 - 每个请求完成后的强制冷却延迟
-// 目的：即使并发槽空闲，也不会立即发起下一个请求，避免压垂scrape.do
-const REQUEST_COOLDOWN_MS = 800;  // 每个请求完成后等待800ms再释放并发槽
-
 /**
- * 使用 Scrape.do API 获取页面（带全局弹性信号量控制）
+ * 使用 Scrape.do API 获取页面 (v8.0 简化版)
  * 
- * 搜索阶段和详情阶段统一使用此函数，确保全局并发不超过限制
- * 
- * v7.0 升级:
- * - 引入用户上下文，实现分层弹性并发控制
+ * 不再包含任何并发控制逻辑，并发由外部调用方管理。
+ * 仅保留 HTTP 层面的错误重试:
  * - 502 错误: 指数退避重试 (2s → 4s → 6s)，最多 3 次
  * - 429 错误: 即时重试 2 次（间隔 1s），仍失败则抛出 ScrapeRateLimitError
  * - 超时/网络错误: 保持原有重试逻辑
  */
-export async function fetchWithScrapedo(url: string, token: string, userId: number): Promise<string> {
-  // 获取全局并发许可（带用户上下文）
-  await globalSemaphore.acquire(userId);
-  
-  try {
-    // 使用共享的 scrapeClient 执行请求
-    return await fetchWithScrapeClient(url, token, {
-      timeoutMs: SCRAPE_TIMEOUT_MS,
-      maxRetries: SCRAPE_MAX_RETRIES,
-      retryDelayMs: 0,
-      enableLogging: true,
-      // 502 容错升级: 指数退避 2s → 4s → 6s
-      maxRetries502: 3,
-      retryBaseDelay502Ms: 2000,
-      // 429 即时重试: 2 次，间隔 1s
-      maxRetries429: 2,
-      retryDelay429Ms: 1000,
-    });
-  } finally {
-    // v7.3: 强制冷却延迟，控制请求速率
-    // 在释放信号量之前等待，确保每个并发槽不会立即被复用
-    await new Promise(resolve => setTimeout(resolve, REQUEST_COOLDOWN_MS));
-    // 确保释放全局并发许可
-    globalSemaphore.release(userId);
-  }
+export async function fetchWithScrapedo(url: string, token: string): Promise<string> {
+  return await fetchWithScrapeClient(url, token, {
+    timeoutMs: SCRAPE_TIMEOUT_MS,
+    maxRetries: SCRAPE_MAX_RETRIES,
+    retryDelayMs: 0,
+    enableLogging: true,
+    // 502 容错: 指数退避 2s → 4s → 6s
+    maxRetries502: 3,
+    retryBaseDelay502Ms: 2000,
+    // 429 即时重试: 2 次，间隔 1s
+    maxRetries429: 2,
+    retryDelay429Ms: 1000,
+  });
 }
 
 // ==================== 配置常量 ====================
 
 export const TPS_CONFIG = {
   TASK_CONCURRENCY: 4,      // 同时执行的搜索任务数
-  SCRAPEDO_CONCURRENCY: 10, // 每个任务的 Scrape.do 并发数（受全局信号量限制，实际不会超过20）
-  TOTAL_CONCURRENCY: 20,    // 总并发数 (v7.1: 40→20，配合全局硬顒30)
+  SCRAPEDO_CONCURRENCY: 10, // 每个任务的 Scrape.do 并发数（保留用于搜索阶段参考）
+  TOTAL_CONCURRENCY: 20,    // 总并发数（保留用于参考）
   MAX_SAFE_PAGES: 25,       // 最大搜索页数
   SEARCH_COST: 0.3,         // 搜索页成本
   DETAIL_COST: 0.3,         // 详情页成本
@@ -362,31 +206,38 @@ export function parseSearchPage(html: string): TpsSearchResult[] {
       }
     });
     
-    // 方法2: 正则方法 - 从文本中提取 "Age XX"
+    // 方法2: 正则方法 - 从卡片文本中提取
     if (age === undefined) {
-      const ageMatch = cardText.match(/Age\s+(\d+)/i);
+      const ageMatch = cardText.match(/Age\s*(\d+)/);
       if (ageMatch) {
-        age = parseInt(ageMatch[1], 10);
+        const parsed = parseInt(ageMatch[1], 10);
+        if (parsed > 0 && parsed < 150) {
+          age = parsed;
+        }
       }
     }
     
-    // 方法3: 回退到原有方法 - 第一个 content-value
-    if (age === undefined) {
-      const ageText = $card.find('.content-value').first().text().trim();
-      const ageMatch = ageText.match(/(\d+)/);
-      if (ageMatch) {
-        age = parseInt(ageMatch[1], 10);
-      }
+    // 提取地址
+    let location = '';
+    const addressElem = $card.find('.content-value').filter((_, el) => {
+      const prev = $(el).prev().text().trim();
+      return prev.includes('Lives in') || prev.includes('Address');
+    }).first();
+    if (addressElem.length) {
+      location = addressElem.text().trim();
     }
-    
-    // 提取位置
-    const location = $card.find('.content-value').eq(1).text().trim() || '';
     
     // 提取详情链接
-    const detailLink = $card.find('a[href*="/find/person/"]').first().attr('href') || '';
+    const detailLink = $card.attr('data-detail-link') || '';
     
-    if (detailLink) {
-      results.push({ name, age, location, detailLink, isDeceased });
+    if (name && detailLink) {
+      results.push({
+        name,
+        age,
+        location,
+        detailLink,
+        isDeceased,
+      });
     }
   });
   
@@ -498,6 +349,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
     }
   }
   
+  // 提取城市和州
   let city = '';
   let state = '';
   const title = $('title').text();
@@ -595,7 +447,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
   );
   if (personalEmails.length > 0) {
     // 去重并保持原始顺序（第一个是最相关的）
-    const uniqueEmails = [...new Set(personalEmails)];
+    const uniqueEmails = Array.from(new Set(personalEmails));
     // 主邮箱是第一个邮箱
     primaryEmail = uniqueEmails[0];
     // 所有邮箱用逗号分隔
@@ -620,7 +472,7 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
   
   // 方法2: 备用方法 - 直接搜索 "Possible Spouse" 文本
   if (!spouse) {
-    const spouseMatch = html.match(/data-link-to-more="relative"[^>]*>\s*<span>([^<]+)<\/span>.*?<b>Possible Spouse<\/b>/s);
+    const spouseMatch = html.match(/data-link-to-more="relative"[^>]*>[\s\S]*?<span>([^<]+)<\/span>[\s\S]*?<b>Possible Spouse<\/b>/);
     if (spouseMatch) {
       spouse = spouseMatch[1].trim();
     }
@@ -828,7 +680,8 @@ export interface SearchOnlyResult {
 /**
  * [OPTIMIZED] 仅执行搜索，并发获取所有页面
  * 
- * v7.0: 增加 userId 参数，传递给全局弹性信号量
+ * v8.0: 移除 userId 参数（不再需要全局信号量）
+ * 搜索阶段的并发由 router.ts 中的 SEARCH_CONCURRENCY 控制
  */
 export async function searchOnly(
   name: string,
@@ -836,7 +689,6 @@ export async function searchOnly(
   token: string,
   maxPages: number,
   filters: TpsFilters,
-  userId: number,
   onProgress?: (message: string) => void
 ): Promise<SearchOnlyResult> {
   let searchPageRequests = 0;
@@ -847,7 +699,7 @@ export async function searchOnly(
     const firstPageUrl = buildSearchUrl(name, location, 1);
     onProgress?.(`获取第一页...`);
     
-    const firstPageHtml = await fetchWithScrapedo(firstPageUrl, token, userId);
+    const firstPageHtml = await fetchWithScrapedo(firstPageUrl, token);
     searchPageRequests++;
     
     const { results: firstResults, totalRecords, hasNextPage } = parseSearchPageWithTotal(firstPageHtml);
@@ -882,7 +734,7 @@ export async function searchOnly(
       const retryUrls: string[] = [];  // 429/502 延后重试队列
       
       const pagePromises = remainingUrls.map(url => 
-        fetchWithScrapedo(url, token, userId).catch(err => {
+        fetchWithScrapedo(url, token).catch(err => {
           // 检测 429/502 错误，加入延后重试队列
           if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
             retryUrls.push(url);
@@ -916,7 +768,7 @@ export async function searchOnly(
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         const retryPromises = retryUrls.map(url =>
-          fetchWithScrapedo(url, token, userId).catch(err => {
+          fetchWithScrapedo(url, token).catch(err => {
             onProgress?.(`❌ 延后重试仍失败: ${err.message}`);
             return null;
           })
@@ -962,112 +814,11 @@ export async function searchOnly(
   }
 }
 
-// ==================== 详情获取函数 (保持不变) ====================
+// ==================== 详情获取类型定义 ====================
 
 export interface DetailTaskWithIndex {
   searchResult: TpsSearchResult;
   subTaskIndex: number;
   name: string;
   location: string;
-}
-
-export interface FetchDetailsResult {
-  results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }>;
-  stats: {
-    detailPageRequests: number;
-    cacheHits: number;
-    filteredOut: number;
-  };
-}
-
-export async function fetchDetailsInBatch(
-  tasks: DetailTaskWithIndex[],
-  token: string,
-  concurrency: number,
-  filters: TpsFilters,
-  onProgress: (message: string) => void,
-  getCachedDetails: (links: string[]) => Promise<Map<string, TpsDetailResult[]>>,
-  setCachedDetails: (items: Array<{ link: string; data: TpsDetailResult }>) => Promise<void>,
-  creditTracker?: any  // 可选的实时积分跟踪器
-): Promise<FetchDetailsResult> {
-  const results: Array<{ task: DetailTaskWithIndex; details: TpsDetailResult[] }> = [];
-  let detailPageRequests = 0;
-  let cacheHits = 0;
-  let filteredOut = 0;
-  let stoppedDueToCredits = false;
-  
-  const baseUrl = 'https://www.truepeoplesearch.com';
-  
-  // 去重详情链接
-  const uniqueLinks = Array.from(new Set(tasks.map(t => t.searchResult.detailLink)));
-  const tasksByLink = new Map<string, DetailTaskWithIndex[]>();
-  for (const task of tasks) {
-    const link = task.searchResult.detailLink;
-    if (!tasksByLink.has(link)) tasksByLink.set(link, []);
-    tasksByLink.get(link)!.push(task);
-  }
-  
-  const tasksToFetch: DetailTaskWithIndex[] = [];
-  for (const [link, linkTasks] of Array.from(tasksByLink.entries())) {
-    tasksToFetch.push(linkTasks[0]);
-  }
-  
-  onProgress(`\ud83d\udce5 \u5f85\u83b7\u53d6: ${tasksToFetch.length} \u6761`);
-  
-  const cacheToSave: Array<{ link: string; data: TpsDetailResult }> = [];
-  let completed = 0;
-  
-  if (tasksToFetch.length > 0 && !stoppedDueToCredits) {
-    const concurrencyPool = new Set<Promise<any>>();
-    for (const task of tasksToFetch) {
-      if (stoppedDueToCredits) break;
-      if (concurrencyPool.size >= concurrency) {
-        await Promise.race(concurrencyPool);
-      }
-      let promiseRef: Promise<void> | null = null;
-      const promise = (async () => {
-        const link = task.searchResult.detailLink;
-        const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
-        try {
-          const html = await fetchWithScrapedo(detailUrl, token, 0);
-          detailPageRequests++;
-          const details = parseDetailPage(html, task.searchResult);
-          for (const detail of details) {
-            if (detail.phone && detail.phone.length >= 10) {
-              cacheToSave.push({ link, data: detail });
-            }
-          }
-          const detailsWithFlag = details.map(d => ({ ...d, fromCache: false }));
-          const filtered = detailsWithFlag.filter(r => shouldIncludeResult(r, filters));
-          filteredOut += details.length - filtered.length;
-          const linkTasks2 = tasksByLink.get(link) || [task];
-          for (const t of linkTasks2) {
-            results.push({ task: t, details: filtered });
-          }
-        } catch (error: any) {
-          onProgress(`\u83b7\u53d6\u8be6\u60c5\u5931\u8d25: ${link} - ${error.message || error}`);
-        } finally {
-          completed++;
-          if (completed % 10 === 0 || completed === tasksToFetch.length) {
-            const percent = Math.round((completed / tasksToFetch.length) * 100);
-            onProgress(`\ud83d\udce5 \u8be6\u60c5\u8fdb\u5ea6: ${completed}/${tasksToFetch.length} (${percent}%)`);
-          }
-          if (promiseRef) concurrencyPool.delete(promiseRef);
-        }
-      })();
-      promiseRef = promise;
-      concurrencyPool.add(promise);
-    }
-    await Promise.all(Array.from(concurrencyPool));
-  }
-  
-  if (cacheToSave.length > 0) {
-    onProgress(`\u4fdd\u5b58\u7f13\u5b58: ${cacheToSave.length} \u6761...`);
-    await setCachedDetails(cacheToSave);
-  }
-  
-  return {
-    results,
-    stats: { detailPageRequests, cacheHits, filteredOut },
-  };
 }
