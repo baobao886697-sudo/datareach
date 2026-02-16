@@ -409,7 +409,6 @@ export const spfRouter = router({
         "地点",
         "电话",
         "电话类型",
-        "运营商",
         "电话年份",
         "婚姻状态",
         "配偶姓名",
@@ -467,7 +466,6 @@ export const spfRouter = router({
         r.city && r.state ? `${r.city}, ${r.state}` : (r.city || r.state || ""),
         formatPhone(r.phone),
         r.phoneType || "",
-        r.carrier || "",
         r.phoneYear?.toString() || "",
         r.maritalStatus || "",
         r.spouseName || "",
@@ -678,7 +676,6 @@ async function executeSpfSearchRealtimeDeduction(
         completedSubTasks: completedSearches,
         progress: searchProgress,
         searchPageRequests: totalSearchPages,
-        creditsUsed: creditTracker.getCostBreakdown().totalCost,
         logs,
       });
       emitTaskProgress(userId, taskId, "spf", { progress: searchProgress, completedSubTasks: completedSearches, totalSubTasks: subTasks.length, logs });
@@ -741,7 +738,7 @@ async function executeSpfSearchRealtimeDeduction(
           setCachedDetails // 保存数据用于 CSV 导出
         );
         
-        // 实时扣除详情页费用（逐条扣除 + 实时推送积分更新）
+        // 实时扣除详情页费用
         for (let i = 0; i < detailResult.stats.detailPageRequests; i++) {
           const deductResult = await creditTracker.deductDetailPage();
           if (!deductResult.success) {
@@ -750,9 +747,6 @@ async function executeSpfSearchRealtimeDeduction(
             break;
           }
         }
-        
-        // 扣除后立即推送积分更新和进度更新
-        emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
         
         totalDetailPages += detailResult.stats.detailPageRequests;
         totalFilteredOut += detailResult.stats.filteredOut;
@@ -804,7 +798,6 @@ async function executeSpfSearchRealtimeDeduction(
       totalResults,
       searchPageRequests: totalSearchPages,
       detailPageRequests: totalDetailPages,
-      creditsUsed: creditTracker.getCostBreakdown().totalCost,
       logs,
     });
     emitTaskProgress(userId, taskId, "spf", { progress: 100, totalResults, logs });
@@ -840,7 +833,6 @@ async function executeSpfSearchRealtimeDeduction(
       cacheHits: 0, // 不再使用缓存命中
       creditsUsed: breakdown.totalCost,
       logs,
-      stoppedDueToCredits,
     });
     emitTaskCompleted(userId, taskId, "spf", { totalResults, creditsUsed: breakdown.totalCost, status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
     

@@ -49,6 +49,7 @@ import {
   Activity,
   Zap,
   AlertCircle,
+  AlertTriangle,
   Info,
   DollarSign,
 } from "lucide-react";
@@ -382,6 +383,8 @@ export default function SpfTask() {
                   <Loader2 className="h-8 w-8 text-blue-400 animate-spin" />
                 ) : task?.status === "completed" ? (
                   <CheckCircle className="h-8 w-8 text-green-400" />
+                ) : task?.status === "insufficient_credits" ? (
+                  <AlertTriangle className="h-8 w-8 text-orange-400" />
                 ) : task?.status === "failed" ? (
                   <XCircle className="h-8 w-8 text-red-400" />
                 ) : (
@@ -515,7 +518,7 @@ export default function SpfTask() {
                           <div className="flex items-center gap-2">
                             <MapPin className="h-4 w-4 text-purple-400" />
                             <span className="text-xs max-w-[200px] truncate">
-                              {result.address || "-"}
+                              {[result.city, result.state].filter(Boolean).join(", ") || result.location || "-"}
                             </span>
                           </div>
                         </TableCell>

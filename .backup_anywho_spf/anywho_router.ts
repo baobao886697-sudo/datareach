@@ -18,7 +18,6 @@ import {
   convertSearchResultToDetail,
   determineAgeRanges,
   fetchDetailsFromPages,
-  fetchDetailFromPage,
   AnywhoFilters, 
   AnywhoDetailResult,
   AnywhoSearchResult,
@@ -338,7 +337,7 @@ export const anywhoRouter = router({
         });
       }
       
-      // 精简版 CSV 表头（14个字段）
+      // 精简版 CSV 表头（13个字段）
       const headers = [
         "序号",
         "姓名",
@@ -347,7 +346,6 @@ export const anywhoRouter = router({
         "当前住址",
         "电话",
         "电话类型",
-        "运营商",        // carrier
         "婚姻状况",
         "邮箱",
         "是否已故",
@@ -381,7 +379,6 @@ export const anywhoRouter = router({
           r.currentAddress || "",                       // 当前住址
           formatPhone(r.phone),                         // 电话（加1）
           r.phoneType || "",                            // 电话类型
-          r.carrier || "",                              // 运营商
           r.marriageStatus || "",                       // 婚姻状况
           emails,                                       // 邮箱
           r.isDeceased ? "是" : "否",                   // 是否已故
@@ -607,7 +604,6 @@ async function executeAnywhoSearchRealtime(
           progress,
           completedSubTasks,
           searchPageRequests: creditTracker.getCostBreakdown().searchPages,
-          creditsUsed: creditTracker.getCostBreakdown().totalCost.toFixed(2),
         });
         emitTaskProgress(userId, taskId, "anywho", { progress, completedSubTasks, totalSubTasks: subTasks.length });
         emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "anywho", taskId });
@@ -787,7 +783,6 @@ async function executeAnywhoSearchRealtime(
           await updateAnywhoSearchTaskProgress(taskId, {
             progress,
             detailPageRequests: creditTracker.getCostBreakdown().detailPages,
-            creditsUsed: creditTracker.getCostBreakdown().totalCost.toFixed(2),
           });
           emitTaskProgress(userId, taskId, "anywho", { progress });
           emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "anywho", taskId });
@@ -999,23 +994,8 @@ async function searchOnlyWithCredits(
   };
 }
 
-// ==================== Anywho 详情获取分批配置 ====================
-const ANYWHO_DETAIL_BATCH_CONFIG = {
-  BATCH_SIZE: 5,           // 每批并发数（Anywho详情页需render+customWait，单请求慢，5并发合理）
-  BATCH_DELAY_MS: 800,     // 批间延迟(ms)
-  RETRY_BATCH_SIZE: 3,     // 重试批大小
-  RETRY_BATCH_DELAY_MS: 1500, // 重试批间延迟(ms)
-  RETRY_WAIT_MS: 3000,     // 重试前等待(ms)
-};
-
 /**
- * 带实时扣费的详情页获取函数（v2 分批并行模式）
- * 
- * 改造自串行逐条模式，借鉴 TPS v8.0 的"分批+延迟"架构：
- * - 每批 BATCH_SIZE 个请求并行发出
- * - 批间等待 BATCH_DELAY_MS
- * - 失败的链接延后统一重试
- * - 每条成功的详情实时扣费并推送进度
+ * 带实时扣费的详情页获取函数
  */
 async function fetchDetailsWithCredits(
   searchResults: AnywhoSearchResult[],
@@ -1028,58 +1008,48 @@ async function fetchDetailsWithCredits(
   successCount: number;
   stoppedDueToCredits: boolean;
 }> {
-  const { BATCH_SIZE, BATCH_DELAY_MS, RETRY_BATCH_SIZE, RETRY_BATCH_DELAY_MS, RETRY_WAIT_MS } = ANYWHO_DETAIL_BATCH_CONFIG;
-  
-  // 结果数组，与 searchResults 一一对应
-  const details: (AnywhoDetailResult | null)[] = new Array(searchResults.length).fill(null);
+  const details: (AnywhoDetailResult | null)[] = [];
   let requestCount = 0;
   let successCount = 0;
   let stoppedDueToCredits = false;
-  let completedCount = 0; // 已处理的总数（成功+失败）
   
-  // 记录失败的索引，用于延后重试
-  const failedIndices: number[] = [];
-  
-  // ==================== 第一轮：分批并行获取 ====================
-  const totalBatches = Math.ceil(searchResults.length / BATCH_SIZE);
-  
-  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-    // 积分检查
-    if (stoppedDueToCredits || !creditTracker.canContinue() || !(await creditTracker.canAffordDetailPage())) {
+  for (let i = 0; i < searchResults.length; i++) {
+    // 检查是否可以继续
+    if (!creditTracker.canContinue()) {
       stoppedDueToCredits = true;
+      // 填充剩余位置为 null
+      for (let j = i; j < searchResults.length; j++) {
+        details.push(null);
+      }
       break;
     }
     
-    const startIdx = batchIdx * BATCH_SIZE;
-    const endIdx = Math.min(startIdx + BATCH_SIZE, searchResults.length);
-    const batchItems = searchResults.slice(startIdx, endIdx);
-    
-    // 并行发出本批请求
-    const batchPromises = batchItems.map(async (searchResult, localIdx) => {
-      const globalIdx = startIdx + localIdx;
-      try {
-        const { detail, success } = await fetchDetailFromPage(
-          searchResult.detailLink,
-          token,
-          searchResult,
-          undefined
-        );
-        return { globalIdx, detail, success, error: false };
-      } catch (error: any) {
-        console.error(`[Anywho] 获取详情失败 [${globalIdx}]:`, error.message);
-        return { globalIdx, detail: null, success: false, error: true };
+    // 检查是否有足够积分
+    if (!(await creditTracker.canAffordDetailPage())) {
+      stoppedDueToCredits = true;
+      // 填充剩余位置为 null
+      for (let j = i; j < searchResults.length; j++) {
+        details.push(null);
       }
-    });
+      break;
+    }
     
-    const batchResults = await Promise.all(batchPromises);
+    const searchResult = searchResults[i];
     
-    // 处理本批结果
-    for (const result of batchResults) {
-      requestCount++;
-      completedCount++;
+    try {
+      // 获取详情页
+      const { details: fetchedDetails, requestCount: fetchRequestCount } = await fetchDetailsFromPages(
+        [searchResult],
+        token,
+        1,  // 单个处理
+        undefined,
+        undefined
+      );
       
-      if (result.detail && result.success) {
-        details[result.globalIdx] = result.detail;
+      const detail = fetchedDetails[0];
+      details.push(detail);
+      
+      if (detail) {
         successCount++;
         
         // 实时扣除详情页费用
@@ -1087,89 +1057,27 @@ async function fetchDetailsWithCredits(
         if (!deductResult.success) {
           stoppedDueToCredits = true;
         }
-      } else if (result.error) {
-        // 请求异常，加入重试队列
-        failedIndices.push(result.globalIdx);
-      } else if (result.detail && !result.success) {
-        // fetchDetailFromPage返回了fallback数据（success=false但detail不为null）
-        // 这是搜索结果转换的基本信息，也算有效数据
-        details[result.globalIdx] = result.detail;
-        successCount++;
-        
-        const deductResult = await creditTracker.deductDetailPage();
-        if (!deductResult.success) {
-          stoppedDueToCredits = true;
-        }
       }
+      
+      requestCount++;
       
       // 进度回调
       if (onProgress) {
-        await onProgress(completedCount, searchResults.length, result.detail || undefined);
+        await onProgress(i + 1, searchResults.length, detail || undefined);
       }
+      
+    } catch (error: any) {
+      console.error(`[Anywho] 获取详情失败:`, error.message);
+      details.push(null);
+      requestCount++;
     }
     
-    if (stoppedDueToCredits) break;
-    
-    // 批间延迟
-    if (batchIdx < totalBatches - 1) {
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
-    }
-  }
-  
-  // ==================== 第二轮：延后重试失败的请求 ====================
-  if (failedIndices.length > 0 && !stoppedDueToCredits) {
-    console.log(`[Anywho] 延后重试 ${failedIndices.length} 个失败请求`);
-    await new Promise(resolve => setTimeout(resolve, RETRY_WAIT_MS));
-    
-    const retryBatches = Math.ceil(failedIndices.length / RETRY_BATCH_SIZE);
-    
-    for (let retryBatchIdx = 0; retryBatchIdx < retryBatches; retryBatchIdx++) {
-      if (stoppedDueToCredits || !creditTracker.canContinue() || !(await creditTracker.canAffordDetailPage())) {
-        stoppedDueToCredits = true;
-        break;
+    if (stoppedDueToCredits) {
+      // 填充剩余位置为 null
+      for (let j = i + 1; j < searchResults.length; j++) {
+        details.push(null);
       }
-      
-      const retryStart = retryBatchIdx * RETRY_BATCH_SIZE;
-      const retryEnd = Math.min(retryStart + RETRY_BATCH_SIZE, failedIndices.length);
-      const retryItems = failedIndices.slice(retryStart, retryEnd);
-      
-      const retryPromises = retryItems.map(async (globalIdx) => {
-        try {
-          const { detail, success } = await fetchDetailFromPage(
-            searchResults[globalIdx].detailLink,
-            token,
-            searchResults[globalIdx],
-            undefined
-          );
-          return { globalIdx, detail, success };
-        } catch (error: any) {
-          console.error(`[Anywho] 重试获取详情失败 [${globalIdx}]:`, error.message);
-          return { globalIdx, detail: null, success: false };
-        }
-      });
-      
-      const retryResults = await Promise.all(retryPromises);
-      
-      for (const result of retryResults) {
-        requestCount++;
-        
-        if (result.detail) {
-          details[result.globalIdx] = result.detail;
-          if (result.success) successCount++;
-          
-          const deductResult = await creditTracker.deductDetailPage();
-          if (!deductResult.success) {
-            stoppedDueToCredits = true;
-          }
-        }
-      }
-      
-      if (stoppedDueToCredits) break;
-      
-      // 重试批间延迟
-      if (retryBatchIdx < retryBatches - 1) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_BATCH_DELAY_MS));
-      }
+      break;
     }
   }
   

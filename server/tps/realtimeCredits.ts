@@ -194,10 +194,8 @@ export class TpsRealtimeCreditTracker {
   async deductDetailPages(count: number): Promise<CreditDeductionResult> {
     const totalCost = count * this.detailCost;
     const result = await this.deduct(totalCost, 'detail', count);
-    if (result.success) {
-      // 已经在 deduct 中增加了 1，这里需要额外增加 count - 1
-      this.totalDetailPages += count - 1;
-    }
+    // 注意: deduct 内部已经根据 count 参数正确增加了 totalDetailPages
+    // 无需额外增加
     return result;
   }
   
@@ -275,7 +273,7 @@ export class TpsRealtimeCreditTracker {
       if (type === 'search') {
         this.totalSearchPages += 1;
       } else {
-        this.totalDetailPages += 1;
+        this.totalDetailPages += count;
       }
       
       return {
