@@ -55,6 +55,7 @@ import { users } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import {
   createRealtimeCreditTracker,
+  formatCostBreakdown,
 } from "./realtimeCredits";
 
 // 并发配置 (基于 Scrape.do 官方最佳实践)
@@ -635,7 +636,6 @@ async function executeSpfSearchRealtimeDeduction(
         for (let i = 0; i < pagesUsed; i++) {
           const deductResult = await creditTracker.deductSearchPage();
           if (!deductResult.success) {
-            addLog(`⚠️ 积分不足，停止搜索`);
             stoppedDueToCredits = true;
             break;
           }
@@ -746,7 +746,6 @@ async function executeSpfSearchRealtimeDeduction(
         for (let i = 0; i < detailResult.stats.detailPageRequests; i++) {
           const deductResult = await creditTracker.deductDetailPage();
           if (!deductResult.success) {
-            addLog(`⚠️ 积分不足，停止获取详情`);
             stoppedDueToCredits = true;
             break;
           }
@@ -853,16 +852,14 @@ async function executeSpfSearchRealtimeDeduction(
     emitTaskProgress(userId, taskId, "spf", { progress: 100, totalResults, logs });
     emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
     
-    // ==================== 任务完成日志（简洁专业版） ====================
+    // ==================== 任务完成日志（统一专业版） ====================
     const breakdown = creditTracker.getCostBreakdown();
     const currentBalance = creditTracker.getCurrentBalance();
     
-    if (stoppedDueToCredits) {
-      addLog(`⚠️ 任务因积分不足提前结束`);
-    } else {
-      addLog(`✅ 任务完成`);
+    const costLines = formatCostBreakdown(breakdown, currentBalance, totalResults, stoppedDueToCredits);
+    for (const line of costLines) {
+      addLog(line);
     }
-    addLog(`📊 结果: ${totalResults} 条 | 消耗: ${breakdown.totalCost.toFixed(1)} 积分 | 余额: ${currentBalance.toFixed(1)} 积分`);
     
     // 记录 API 日志
     await logApi({

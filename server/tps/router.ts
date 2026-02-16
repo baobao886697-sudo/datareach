@@ -577,7 +577,6 @@ async function executeTpsSearchRealtimeDeduction(
           const deductResult = await creditTracker.deductSearchPage();
           if (!deductResult.success) {
             stoppedDueToCredits = true;
-            addLog(`⚠️ 积分不足，停止搜索`);
             break;
           }
         }
@@ -646,9 +645,7 @@ async function executeTpsSearchRealtimeDeduction(
     // 搜索阶段完成日志（简洁版）
     addLog(`✅ 搜索完成: ${totalSearchPages} 页, 找到 ${allDetailTasks.length} 条待获取`);
     
-    if (stoppedDueToCredits) {
-      addLog(`⚠️ 积分不足，停止搜索`);
-    }
+    // stoppedDueToCredits 已在搜索阶段首次触发时输出日志，此处不再重复
     
     // ==================== 阶段二：智能并发池获取详情（v7.0 全局弹性并发 + 实时进度推送） ====================
     if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
@@ -808,7 +805,8 @@ async function executeTpsSearchRealtimeDeduction(
       creditTracker.getCurrentBalance(),
       totalResults,
       searchCost,
-      detailCost
+      detailCost,
+      stoppedDueToCredits
     );
     
     for (const line of costLines) {
@@ -819,7 +817,6 @@ async function executeTpsSearchRealtimeDeduction(
     const finalStatus = stoppedDueToCredits ? "insufficient_credits" : "completed";
     
     if (stoppedDueToCredits) {
-      addLog(`⚠️ 任务因积分不足提前结束`);
       
       // 更新任务状态为 insufficient_credits
       const database = await getDb();

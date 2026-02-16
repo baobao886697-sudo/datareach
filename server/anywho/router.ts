@@ -583,7 +583,6 @@ async function executeAnywhoSearchRealtime(
         // 检查是否因积分不足停止
         if (creditTracker.isStopped()) {
           stoppedDueToCredits = true;
-          await addLog(`⚠️ 积分不足，停止搜索`);
         }
         
         // 收集搜索结果
@@ -798,8 +797,10 @@ async function executeAnywhoSearchRealtime(
       );
       
       if (detailStopped) {
+        if (!stoppedDueToCredits) {
+          await addLog(`⚠️ 积分不足，停止获取详情`);
+        }
         stoppedDueToCredits = true;
-        await addLog(`⚠️ 积分不足，停止获取详情`);
       }
       
       // 更新筛选结果中的详情信息
@@ -886,21 +887,7 @@ async function executeAnywhoSearchRealtime(
     }
     emitTaskCompleted(userId, taskId, "anywho", { totalResults, creditsUsed: breakdown.totalCost, status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
     
-    // ==================== 完成日志 ====================
-    await addLog(`═══════════════════════════════════════════════════`);
-    if (stoppedDueToCredits) {
-      await addLog(`⚠️ 任务因积分不足提前停止`);
-    } else {
-      await addLog(`🎉 任务完成!`);
-    }
-    await addLog(`═══════════════════════════════════════════════════`);
-    
-    // 搜索结果摘要
-    await addLog(`📊 搜索结果摘要:`);
-    await addLog(`   • 有效结果: ${totalResults} 条联系人`);
-    await addLog(`   • 已过滤: ${totalFilteredOut} 条`);
-    
-    // 费用明细（实时扣费）
+    // ==================== 完成日志（统一专业版） ====================
     const costLines = formatAnywhoeCostBreakdown(
       breakdown,
       creditTracker.getCurrentBalance(),

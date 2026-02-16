@@ -419,10 +419,47 @@ export function formatTpsCostBreakdown(
   currentBalance: number,
   totalResults: number,
   searchCostPerPage: number,
-  detailCostPerPage: number
+  detailCostPerPage: number,
+  stoppedDueToCredits: boolean = false
 ): string[] {
-  // 简洁专业版（参考 SPF 风格）- 只输出一行汇总
-  return [
-    `📊 结果: ${totalResults} 条 | 消耗: ${breakdown.totalCost.toFixed(1)} 积分 | 余额: ${currentBalance.toFixed(1)} 积分`
-  ];
+  const lines: string[] = [];
+  
+  lines.push(`═══════════════════════════════════════════════════`);
+  if (stoppedDueToCredits) {
+    lines.push(`⚠️ 积分不足，任务提前结束`);
+  } else {
+    lines.push(`✅ 任务完成`);
+  }
+  lines.push(`═══════════════════════════════════════════════════`);
+  lines.push(`📊 任务摘要:`);
+  lines.push(`   • 已获取结果: ${totalResults} 条`);
+  if (breakdown.searchPages > 0) {
+    const perPage = breakdown.searchCost / breakdown.searchPages;
+    lines.push(`   • 搜索页: ${breakdown.searchPages} 页 × ${perPage.toFixed(2)} = ${breakdown.searchCost.toFixed(1)} 积分`);
+  } else {
+    lines.push(`   • 搜索页: 0 页`);
+  }
+  if (breakdown.detailPages > 0) {
+    const perPage = breakdown.detailCost / breakdown.detailPages;
+    lines.push(`   • 详情页: ${breakdown.detailPages} 页 × ${perPage.toFixed(2)} = ${breakdown.detailCost.toFixed(1)} 积分`);
+  } else {
+    lines.push(`   • 详情页: 0 页`);
+  }
+  lines.push(`───────────────────────────────────────────────────`);
+  lines.push(`💰 本次消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
+  lines.push(`💰 剩余余额: ${currentBalance.toFixed(1)} 积分`);
+  if (totalResults > 0 && breakdown.totalCost > 0) {
+    const costPerResult = breakdown.totalCost / totalResults;
+    lines.push(`💰 每条成本: ${costPerResult.toFixed(2)} 积分`);
+  }
+  
+  if (stoppedDueToCredits) {
+    lines.push(`───────────────────────────────────────────────────`);
+    lines.push(`💡 已获取的数据已保存，您可以查看结果和导出CSV`);
+    lines.push(`💡 充值积分后可继续搜索获取更多数据`);
+  }
+  
+  lines.push(`═══════════════════════════════════════════════════`);
+  
+  return lines;
 }
