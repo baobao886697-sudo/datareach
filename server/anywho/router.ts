@@ -1075,31 +1075,34 @@ async function fetchDetailsWithCredits(
     
     // 处理本批结果
     for (const result of batchResults) {
+      // 积分不足时立即停止处理后续结果，避免保存未付费的数据
+      if (stoppedDueToCredits) break;
+      
       requestCount++;
       completedCount++;
       
       if (result.detail && result.success) {
-        details[result.globalIdx] = result.detail;
-        successCount++;
-        
-        // 实时扣除详情页费用
+        // 先扣费，成功后才保存结果
         const deductResult = await creditTracker.deductDetailPage();
         if (!deductResult.success) {
           stoppedDueToCredits = true;
+          break;
         }
+        details[result.globalIdx] = result.detail;
+        successCount++;
       } else if (result.error) {
-        // 请求异常，加入重试队列
+        // 请求异常，加入重试队列（无需扣费）
         failedIndices.push(result.globalIdx);
       } else if (result.detail && !result.success) {
         // fetchDetailFromPage返回了fallback数据（success=false但detail不为null）
-        // 这是搜索结果转换的基本信息，也算有效数据
-        details[result.globalIdx] = result.detail;
-        successCount++;
-        
+        // 先扣费，成功后才保存结果
         const deductResult = await creditTracker.deductDetailPage();
         if (!deductResult.success) {
           stoppedDueToCredits = true;
+          break;
         }
+        details[result.globalIdx] = result.detail;
+        successCount++;
       }
       
       // 进度回调
@@ -1151,16 +1154,20 @@ async function fetchDetailsWithCredits(
       const retryResults = await Promise.all(retryPromises);
       
       for (const result of retryResults) {
+        // 积分不足时立即停止处理后续结果
+        if (stoppedDueToCredits) break;
+        
         requestCount++;
         
         if (result.detail) {
-          details[result.globalIdx] = result.detail;
-          if (result.success) successCount++;
-          
+          // 先扣费，成功后才保存结果
           const deductResult = await creditTracker.deductDetailPage();
           if (!deductResult.success) {
             stoppedDueToCredits = true;
+            break;
           }
+          details[result.globalIdx] = result.detail;
+          if (result.success) successCount++;
         }
       }
       

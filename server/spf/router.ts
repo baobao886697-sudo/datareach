@@ -712,6 +712,7 @@ async function executeSpfSearchRealtimeDeduction(
       if (!affordCheck.canAfford) {
         addLog(`⚠️ 积分不足，无法获取详情`);
         stoppedDueToCredits = true;
+        linksToFetch = []; // 清空待获取列表，避免白调API
       } else if (affordCheck.affordableCount < uniqueLinks.length) {
         addLog(`⚠️ 积分仅够获取 ${affordCheck.affordableCount}/${uniqueLinks.length} 条详情`);
         linksToFetch = uniqueLinks.slice(0, affordCheck.affordableCount);
@@ -796,6 +797,48 @@ async function executeSpfSearchRealtimeDeduction(
       }
       
       // 详情完成，静默处理
+    }
+    
+    // ==================== 搜索阶段积分耗尽时保存搜索结果 ====================
+    // 如果搜索阶段积分耗尽导致详情阶段被跳过，仍需保存已获取的搜索结果
+    if (stoppedDueToCredits && totalResults === 0 && allDetailTasks.length > 0) {
+      addLog(`📋 保存搜索阶段已获取的 ${allDetailTasks.length} 条基础结果...`);
+      
+      // 按子任务分组
+      const searchResultsBySubTask = new Map<number, SpfDetailResult[]>();
+      
+      for (const task of allDetailTasks) {
+        if (!searchResultsBySubTask.has(task.subTaskIndex)) {
+          searchResultsBySubTask.set(task.subTaskIndex, []);
+        }
+        
+        // 跨任务电话号码去重
+        if (task.searchResult.phone && seenPhones.has(task.searchResult.phone)) {
+          continue;
+        }
+        if (task.searchResult.phone) {
+          seenPhones.add(task.searchResult.phone);
+        }
+        
+        // 使用搜索结果作为基础数据保存
+        const resultWithSearchInfo = {
+          ...task.searchResult,
+          searchName: task.searchName,
+          searchLocation: task.searchLocation,
+        };
+        
+        searchResultsBySubTask.get(task.subTaskIndex)!.push(resultWithSearchInfo);
+      }
+      
+      for (const [subTaskIndex, results] of Array.from(searchResultsBySubTask.entries())) {
+        const subTask = subTasks.find(t => t.index === subTaskIndex);
+        if (subTask && results.length > 0) {
+          await saveSpfSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+          totalResults += results.length;
+        }
+      }
+      
+      addLog(`✅ 已保存 ${totalResults} 条搜索结果（无详情数据）`);
     }
     
     // 更新最终进度

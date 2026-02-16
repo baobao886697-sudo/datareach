@@ -737,6 +737,46 @@ async function executeTpsSearchRealtimeDeduction(
       }
     }
     
+    // ==================== 搜索阶段积分耗尽时保存搜索结果 ====================
+    // 如果搜索阶段积分耗尽导致详情阶段被跳过，仍需保存已获取的搜索结果
+    if (stoppedDueToCredits && totalResults === 0 && allDetailTasks.length > 0) {
+      addLog(`📋 保存搜索阶段已获取的 ${allDetailTasks.length} 条基础结果...`);
+      
+      // 按子任务分组，将搜索结果转换为基础详情格式
+      const searchResultsBySubTask = new Map<number, TpsDetailResult[]>();
+      
+      for (const task of allDetailTasks) {
+        if (!searchResultsBySubTask.has(task.subTaskIndex)) {
+          searchResultsBySubTask.set(task.subTaskIndex, []);
+        }
+        
+        // 跨任务电话号码去重（搜索结果无phone，跳过去重）
+        
+        // 将 TpsSearchResult 转换为 TpsDetailResult 基础格式
+        const locationParts = task.searchResult.location?.split(',').map(s => s.trim()) || [];
+        const basicResult: TpsDetailResult = {
+          name: task.searchResult.name,
+          age: task.searchResult.age,
+          city: locationParts[0] || '',
+          state: locationParts[1] || '',
+          location: task.searchResult.location,
+          detailLink: task.searchResult.detailLink,
+        };
+        
+        searchResultsBySubTask.get(task.subTaskIndex)!.push(basicResult);
+      }
+      
+      for (const [subTaskIndex, results] of Array.from(searchResultsBySubTask.entries())) {
+        const subTask = subTasks.find(t => t.index === subTaskIndex);
+        if (subTask && results.length > 0) {
+          await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+          totalResults += results.length;
+        }
+      }
+      
+      addLog(`✅ 已保存 ${totalResults} 条搜索结果（无详情数据）`);
+    }
+    
     // 更新最终进度
     await updateTpsSearchTaskProgress(taskDbId, {
       progress: 100,
