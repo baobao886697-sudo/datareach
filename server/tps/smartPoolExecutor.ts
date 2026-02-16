@@ -6,11 +6,17 @@
  * - 借鉴 EXE 版本的 fetchBatch 模式：分批 + 批间延迟
  * - 简单、可预测、稳定，根治详情阶段 502 错误
  * 
+ * v8.1 增强:
+ * - 识别 Scrape.do API 积分耗尽 (HTTP 401/403)，立即停止所有请求
+ * - 连续失败计数器：连续 N 个请求全部失败时自动停止（兜底机制）
+ * - 优化错误日志：API 积分耗尽只输出一次提示，不刷屏
+ * 
  * 核心逻辑:
  * 1. 将所有待获取的详情链接按 BATCH_SIZE 分成多个批次
  * 2. 每个批次内使用 Promise.all 并行获取
  * 3. 批次间强制等待 BATCH_DELAY_MS，给上游 API 恢复时间
  * 4. 所有批次完成后，对失败的链接进行一轮延后重试
+ * 5. 检测到 API 积分耗尽时立即停止，不再重试
  * 
  * 独立模块: 仅用于 TPS 搜索功能
  */
@@ -24,6 +30,7 @@ import {
   shouldIncludeResult,
   fetchWithScrapedo,
 } from './scraper';
+import { ScrapeApiCreditsError } from './scrapeClient';
 import { TpsRealtimeCreditTracker } from './realtimeCredits';
 
 // ============================================================================
@@ -41,6 +48,8 @@ export const BATCH_CONFIG = {
   RETRY_BATCH_SIZE: 8,
   /** 延后重试的批间延迟（更保守） */
   RETRY_BATCH_DELAY_MS: 800,
+  /** 连续失败阈值：连续 N 批全部失败时自动停止（兜底机制） */
+  CONSECUTIVE_FAIL_THRESHOLD: 3,
 };
 
 // ============================================================================
@@ -53,6 +62,8 @@ export interface SmartPoolFetchResult {
     detailPageRequests: number;
     filteredOut: number;
     stoppedDueToCredits: boolean;
+    /** Scrape.do API 积分耗尽导致停止 */
+    stoppedDueToApiCredits: boolean;
     /** v8.0: 批次统计 */
     totalBatches: number;
     failedRequests: number;
@@ -88,6 +99,8 @@ export interface DetailProgressInfo {
  * - 单个请求失败不影响同批次其他请求
  * - 所有批次完成后统一进行延后重试
  * - onDetailProgress 回调在每个请求完成后触发，保持前端实时更新
+ * - 检测到 Scrape.do API 积分耗尽 (401/403) 时立即停止
+ * - 连续 N 批全部失败时自动停止（兜底机制）
  */
 export async function fetchDetailsWithSmartPool(
   tasks: DetailTaskWithIndex[],
@@ -103,6 +116,7 @@ export async function fetchDetailsWithSmartPool(
   let detailPageRequests = 0;
   let filteredOut = 0;
   let stoppedDueToCredits = false;
+  let stoppedDueToApiCredits = false;
   
   const baseUrl = 'https://www.truepeoplesearch.com';
   
@@ -132,7 +146,7 @@ export async function fetchDetailsWithSmartPool(
     return { 
       results, 
       stats: { 
-        detailPageRequests, filteredOut, stoppedDueToCredits,
+        detailPageRequests, filteredOut, stoppedDueToCredits, stoppedDueToApiCredits,
         totalBatches: 0, failedRequests: 0, retrySuccess: 0, retryTotal: 0,
       } 
     };
@@ -150,6 +164,7 @@ export async function fetchDetailsWithSmartPool(
   let completedDetails = 0;
   const failedLinks: string[] = [];  // 收集失败的链接用于延后重试
   const cacheToSave: Array<{ link: string; data: TpsDetailResult }> = [];
+  let consecutiveFailBatches = 0;  // 连续全部失败的批次计数
   
   const totalBatches = Math.ceil(totalDetails / BATCH_CONFIG.BATCH_SIZE);
   
@@ -157,24 +172,35 @@ export async function fetchDetailsWithSmartPool(
   console.log(`[TPS v8.0] 分批模式: ${totalDetails} 条详情, ${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个`);
   
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-    if (stoppedDueToCredits) break;
+    if (stoppedDueToCredits || stoppedDueToApiCredits) break;
     
     const batchStart = batchIndex * BATCH_CONFIG.BATCH_SIZE;
     const batchLinks = linksToFetch.slice(batchStart, batchStart + BATCH_CONFIG.BATCH_SIZE);
     const batchNum = batchIndex + 1;
     
-    // 批内并行获取
+    // 批内并行获取（携带错误类型信息）
     const batchPromises = batchLinks.map(async (link) => {
       const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
       try {
         const html = await fetchWithScrapedo(detailUrl, token);
-        return { link, html, success: true as const, error: '' };
+        return { link, html, success: true as const, error: '', isApiCreditsError: false };
       } catch (error: any) {
-        return { link, html: '', success: false as const, error: error.message || String(error) };
+        const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+        return { link, html: '', success: false as const, error: error.message || String(error), isApiCreditsError };
       }
     });
     
     const batchResults = await Promise.all(batchPromises);
+    
+    // 检查本批是否有 API 积分耗尽错误
+    const apiCreditsErrors = batchResults.filter(r => r.isApiCreditsError);
+    if (apiCreditsErrors.length > 0) {
+      stoppedDueToApiCredits = true;
+      onProgress(`🚫 Scrape.do API 积分已耗尽，立即停止所有请求`);
+      onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      console.error(`[TPS v8.0] Scrape.do API 积分耗尽，停止详情获取`);
+      // 不再处理本批结果中的失败项，只处理成功的
+    }
     
     // 处理批次结果
     let batchSuccess = 0;
@@ -219,7 +245,10 @@ export async function fetchDetailsWithSmartPool(
         }
       } else {
         batchFail++;
-        failedLinks.push(result.link);
+        // API 积分耗尽的链接不加入重试队列
+        if (!result.isApiCreditsError) {
+          failedLinks.push(result.link);
+        }
       }
       
       // 更新进度（每个请求完成后都触发）
@@ -234,6 +263,19 @@ export async function fetchDetailsWithSmartPool(
       }
     }
     
+    // 连续失败批次检测（兜底机制）
+    if (batchSuccess === 0 && batchFail > 0) {
+      consecutiveFailBatches++;
+      if (consecutiveFailBatches >= BATCH_CONFIG.CONSECUTIVE_FAIL_THRESHOLD && !stoppedDueToApiCredits) {
+        onProgress(`🚫 连续 ${consecutiveFailBatches} 批请求全部失败，自动停止（可能是 API 服务异常）`);
+        onProgress(`💡 请稍后重试，或检查 Scrape.do 服务状态`);
+        console.error(`[TPS v8.0] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
+        stoppedDueToApiCredits = true;  // 复用此标志表示外部API问题
+      }
+    } else {
+      consecutiveFailBatches = 0;  // 有成功的就重置计数
+    }
+    
     // 批次日志（每5批或最后一批输出）
     if (batchNum % 5 === 0 || batchNum === totalBatches) {
       const overallPercent = Math.round((completedDetails / totalDetails) * 100);
@@ -241,7 +283,7 @@ export async function fetchDetailsWithSmartPool(
     }
     
     // 批间延迟（最后一批不需要延迟）
-    if (batchIndex < totalBatches - 1 && !stoppedDueToCredits) {
+    if (batchIndex < totalBatches - 1 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
       await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.BATCH_DELAY_MS));
     }
   }
@@ -251,7 +293,8 @@ export async function fetchDetailsWithSmartPool(
   let retrySuccess = 0;
   const retryTotal = failedLinks.length;
   
-  if (failedLinks.length > 0 && !stoppedDueToCredits) {
+  // API 积分耗尽时跳过重试
+  if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
     onProgress(`🔄 开始延后重试 ${failedLinks.length} 个失败链接 (等待 ${BATCH_CONFIG.RETRY_DELAY_MS}ms)...`);
     console.log(`[TPS v8.0] 延后重试: ${failedLinks.length} 个失败链接`);
     
@@ -262,7 +305,7 @@ export async function fetchDetailsWithSmartPool(
     const retryBatches = Math.ceil(failedLinks.length / BATCH_CONFIG.RETRY_BATCH_SIZE);
     
     for (let ri = 0; ri < retryBatches; ri++) {
-      if (stoppedDueToCredits) break;
+      if (stoppedDueToCredits || stoppedDueToApiCredits) break;
       
       const retryBatchStart = ri * BATCH_CONFIG.RETRY_BATCH_SIZE;
       const retryBatchLinks = failedLinks.slice(retryBatchStart, retryBatchStart + BATCH_CONFIG.RETRY_BATCH_SIZE);
@@ -271,13 +314,21 @@ export async function fetchDetailsWithSmartPool(
         const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
         try {
           const html = await fetchWithScrapedo(detailUrl, token);
-          return { link, html, success: true as const };
+          return { link, html, success: true as const, isApiCreditsError: false };
         } catch (error: any) {
-          return { link, html: '', success: false as const };
+          const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+          return { link, html: '', success: false as const, isApiCreditsError };
         }
       });
       
       const retryResults = await Promise.all(retryPromises);
+      
+      // 检查重试中是否有 API 积分耗尽
+      if (retryResults.some(r => r.isApiCreditsError)) {
+        stoppedDueToApiCredits = true;
+        onProgress(`🚫 重试阶段检测到 Scrape.do API 积分耗尽，停止重试`);
+        break;
+      }
       
       for (const result of retryResults) {
         if (stoppedDueToCredits) break;
@@ -324,12 +375,14 @@ export async function fetchDetailsWithSmartPool(
       }
       
       // 重试批间延迟
-      if (ri < retryBatches - 1 && !stoppedDueToCredits) {
+      if (ri < retryBatches - 1 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
         await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.RETRY_BATCH_DELAY_MS));
       }
     }
     
     onProgress(`🔄 延后重试完成: ${retrySuccess}/${failedLinks.length} 成功`);
+  } else if (failedLinks.length > 0 && stoppedDueToApiCredits) {
+    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（API 积分已耗尽）`);
   }
   
   // ==================== 保存缓存 ====================
@@ -349,6 +402,9 @@ export async function fetchDetailsWithSmartPool(
   if (retryTotal > 0) {
     onProgress(`🔄 延后重试: ${retrySuccess}/${retryTotal} 成功`);
   }
+  if (stoppedDueToApiCredits) {
+    onProgress(`🚫 任务因 Scrape.do API 积分耗尽而提前结束`);
+  }
   
   return {
     results,
@@ -356,6 +412,7 @@ export async function fetchDetailsWithSmartPool(
       detailPageRequests,
       filteredOut,
       stoppedDueToCredits,
+      stoppedDueToApiCredits,
       totalBatches,
       failedRequests: retryTotal - retrySuccess,
       retrySuccess,

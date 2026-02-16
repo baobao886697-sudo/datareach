@@ -12,6 +12,19 @@
 
 import * as cheerio from 'cheerio';
 
+/**
+ * Scrape.do API 积分耗尽错误 - HTTP 401/403
+ * 此错误不可重试，应立即停止所有请求
+ */
+export class ScrapeApiCreditsError extends Error {
+  public readonly statusCode: number;
+  constructor(message: string, statusCode: number = 401) {
+    super(message);
+    this.name = 'ScrapeApiCreditsError';
+    this.statusCode = statusCode;
+  }
+}
+
 // Anywho 配置
 export const ANYWHO_CONFIG = {
   BASE_URL: "https://www.anywho.com",
@@ -173,12 +186,23 @@ async function scrapeUrl(
     clearTimeout(timeoutId);
     
     if (!response.ok) {
+      // 401/403: API 积分耗尽或认证失败，抛出特殊错误
+      if (response.status === 401 || response.status === 403) {
+        throw new ScrapeApiCreditsError(
+          `Scrape.do API 积分已耗尽或认证失败: HTTP ${response.status} ${response.statusText}`,
+          response.status
+        );
+      }
       console.error(`[Anywho] 抓取失败: ${response.status} ${response.statusText}`);
       return null;
     }
     
     return await response.text();
-  } catch (error) {
+  } catch (error: any) {
+    // API 积分耗尽错误向上传播，不吞掉
+    if (error instanceof ScrapeApiCreditsError) {
+      throw error;
+    }
     console.error(`[Anywho] 抓取错误:`, error);
     return null;
   }
@@ -841,6 +865,8 @@ export async function searchOnly(
   results: AnywhoSearchResult[];
   pagesSearched: number;
   ageRangesSearched: number;
+  /** Scrape.do API 积分耗尽标志 */
+  apiCreditsExhausted?: boolean;
 }> {
   console.log(`[Anywho] 开始双年龄搜索: ${name}, 地点: ${location || '全国'}, 最大页数: ${maxPages}, 年龄段: ${ageRanges.join(', ')}`);
   
@@ -857,12 +883,32 @@ export async function searchOnly(
       const searchUrl = buildSearchUrl(name, location, page, ageRange);
       console.log(`[Anywho] 抓取 [${ageRange}] 第 ${page} 页: ${searchUrl}`);
       
-      const html = await scrapeUrl(searchUrl, token, { 
-        render: true,
-        useSuper: true,
-        customWait: 3000,
-        waitSelector: 'a[href*="/people/"]'
-      });
+      let html: string | null = null;
+      try {
+        html = await scrapeUrl(searchUrl, token, { 
+          render: true,
+          useSuper: true,
+          customWait: 3000,
+          waitSelector: 'a[href*="/people/"]'
+        });
+      } catch (error: any) {
+        if (error instanceof ScrapeApiCreditsError) {
+          console.error(`[Anywho] Scrape.do API 积分已耗尽，停止搜索`);
+          totalPagesSearched++;
+          // 返回已获取的结果，并标记 API 积分耗尽
+          const uniqueResults = allResults.filter((result, index, self) =>
+            index === self.findIndex(r => r.detailLink === result.detailLink)
+          );
+          return {
+            results: uniqueResults,
+            pagesSearched: totalPagesSearched,
+            ageRangesSearched,
+            apiCreditsExhausted: true,
+          };
+        }
+        // 其他错误当作普通失败处理
+        html = null;
+      }
       
       // API 已调用，计入请求数
       totalPagesSearched++;
@@ -1049,7 +1095,11 @@ export async function fetchDetailFromPage(
       detail: mergedDetail,
       success: true,
     };
-  } catch (error) {
+  } catch (error: any) {
+    // API 积分耗尽错误向上传播，不吞掉
+    if (error instanceof ScrapeApiCreditsError) {
+      throw error;
+    }
     console.error(`[Anywho] 获取详情页失败:`, error);
     return {
       detail: convertSearchResultToDetail(searchResult),

@@ -603,7 +603,21 @@ async function executeTpsSearchRealtimeDeduction(
         
         const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
         addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页`);
+        
+        // 检查 Scrape.do API 积分耗尽
+        if (result.apiCreditsExhausted) {
+          addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
+          stoppedDueToCredits = true; // 复用此标志停止后续任务
+          return;
+        }
       } else {
+        // 检查是否因 API 积分耗尽导致失败
+        if (result.apiCreditsExhausted) {
+          addLog(`🚫 Scrape.do API 积分已耗尽，停止搜索任务`);
+          addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+          stoppedDueToCredits = true; // 复用此标志停止后续任务
+          return;
+        }
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
       }
       
@@ -702,6 +716,12 @@ async function executeTpsSearchRealtimeDeduction(
       // 检查是否因积分不足停止
       if (detailResult.stats.stoppedDueToCredits || creditTracker.isStopped()) {
         stoppedDueToCredits = true;
+      }
+      
+      // 检查是否因 Scrape.do API 积分耗尽停止
+      if (detailResult.stats.stoppedDueToApiCredits) {
+        addLog(`🚫 Scrape.do API 积分已耗尽，任务提前结束`);
+        addLog(`💡 已获取的结果已保存，请检查 Scrape.do 账户余额`);
       }
       
       // 按子任务分组保存结果

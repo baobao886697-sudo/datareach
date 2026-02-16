@@ -8,7 +8,7 @@ import * as cheerio from 'cheerio';
 // - 并发控制权完全交给新的"分批+延迟"执行器 (smartPoolExecutor.ts)
 // - fetchWithScrapedo 退化为纯HTTP客户端，仅保留重试逻辑
 
-import { fetchWithScrapeClient, ScrapeRateLimitError, ScrapeServerError } from './scrapeClient';
+import { fetchWithScrapeClient, ScrapeRateLimitError, ScrapeServerError, ScrapeApiCreditsError } from './scrapeClient';
 
 // 超时配置
 const SCRAPE_TIMEOUT_MS = 20000;  // 20 秒超时
@@ -675,6 +675,8 @@ export interface SearchOnlyResult {
     skippedDeceased?: number;  // 跳过的已故人员数量
   };
   error?: string;
+  /** Scrape.do API 积分耗尽标志 */
+  apiCreditsExhausted?: boolean;
 }
 
 /**
@@ -733,8 +735,16 @@ export async function searchOnly(
       // 并发获取所有剩余页，收集需要延后重试的页面
       const retryUrls: string[] = [];  // 429/502 延后重试队列
       
+      let searchApiCreditsExhausted = false;
+      
       const pagePromises = remainingUrls.map(url => 
         fetchWithScrapedo(url, token).catch(err => {
+          // 检测 API 积分耗尽错误
+          if (err instanceof ScrapeApiCreditsError) {
+            searchApiCreditsExhausted = true;
+            // 只输出一次提示，不刷屏
+            return null;
+          }
           // 检测 429/502 错误，加入延后重试队列
           if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
             retryUrls.push(url);
@@ -757,6 +767,21 @@ export async function searchOnly(
           totalSkippedDeceased += filterResult.stats.skippedDeceased;
           allResults.push(...filterResult.filtered);
         }
+      }
+      
+      // 检查 API 积分耗尽
+      if (searchApiCreditsExhausted) {
+        onProgress?.(`🚫 Scrape.do API 积分已耗尽，停止搜索`);
+        onProgress?.(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+        
+        // 返回已获取的结果，并标记 API 积分耗尽
+        const uniqueResults = deduplicateByDetailLink(allResults);
+        return {
+          success: true,
+          searchResults: uniqueResults,
+          stats: { searchPageRequests, filteredOut, skippedDeceased: totalSkippedDeceased },
+          apiCreditsExhausted: true,
+        };
       }
       
       // ==================== 搜索阶段延后重试 ====================
@@ -804,6 +829,19 @@ export async function searchOnly(
     };
 
   } catch (error: any) {
+    // 检查是否是 API 积分耗尽错误（第一页就失败的情况）
+    if (error instanceof ScrapeApiCreditsError) {
+      onProgress?.(`🚫 Scrape.do API 积分已耗尽，无法执行搜索`);
+      onProgress?.(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      return {
+        success: false,
+        searchResults: [],
+        stats: { searchPageRequests, filteredOut },
+        error: 'Scrape.do API 积分已耗尽',
+        apiCreditsExhausted: true,
+      };
+    }
+    
     onProgress?.(`搜索任务失败: ${error.message}`);
     return {
       success: false,

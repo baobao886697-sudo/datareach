@@ -668,7 +668,21 @@ async function executeSpfSearchRealtimeDeduction(
         
         const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
         addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条, ${pagesUsed} 页`);
+        
+        // 检查 Scrape.do API 积分耗尽
+        if (result.apiCreditsExhausted) {
+          addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
+          stoppedDueToCredits = true;
+          break;
+        }
       } else {
+        // 检查是否因 API 积分耗尽导致失败
+        if (result.apiCreditsExhausted) {
+          addLog(`🚫 Scrape.do API 积分已耗尽，停止搜索任务`);
+          addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+          stoppedDueToCredits = true;
+          break;
+        }
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
       }
       
@@ -756,6 +770,12 @@ async function executeSpfSearchRealtimeDeduction(
         
         totalDetailPages += detailResult.stats.detailPageRequests;
         totalFilteredOut += detailResult.stats.filteredOut;
+        
+        // 检查是否因 Scrape.do API 积分耗尽停止
+        if (detailResult.stats.apiCreditsExhausted) {
+          addLog(`🚫 Scrape.do API 积分已耗尽，任务提前结束`);
+          addLog(`💡 已获取的结果已保存，请检查 Scrape.do 账户余额`);
+        }
         
         // 按子任务分组保存结果
         const resultsBySubTask = new Map<number, SpfDetailResult[]>();

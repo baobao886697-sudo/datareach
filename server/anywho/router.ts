@@ -19,6 +19,7 @@ import {
   determineAgeRanges,
   fetchDetailsFromPages,
   fetchDetailFromPage,
+  ScrapeApiCreditsError,
   AnywhoFilters, 
   AnywhoDetailResult,
   AnywhoSearchResult,
@@ -570,7 +571,7 @@ async function executeAnywhoSearchRealtime(
       
       try {
         // 执行搜索（内部会多次请求，每次请求后扣费）
-        const { results, pagesSearched, ageRangesSearched } = await searchOnlyWithCredits(
+        const searchOnlyResult = await searchOnlyWithCredits(
           subTask.name,
           subTask.location,
           maxPages,
@@ -580,8 +581,17 @@ async function executeAnywhoSearchRealtime(
           addLog
         );
         
+        const { results, pagesSearched, ageRangesSearched } = searchOnlyResult;
+        
         // 检查是否因积分不足停止
         if (creditTracker.isStopped()) {
+          stoppedDueToCredits = true;
+        }
+        
+        // 检查 Scrape.do API 积分耗尽
+        if (searchOnlyResult.apiCreditsExhausted) {
+          await addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
+          await addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
           stoppedDueToCredits = true;
         }
         
@@ -927,6 +937,7 @@ async function searchOnlyWithCredits(
   results: AnywhoSearchResult[];
   pagesSearched: number;
   ageRangesSearched: AnywhoAgeRange[];
+  apiCreditsExhausted?: boolean;
 }> {
   const allResults: AnywhoSearchResult[] = [];
   let totalPagesSearched = 0;
@@ -948,13 +959,15 @@ async function searchOnlyWithCredits(
       // 执行搜索（这里调用原始的 searchOnly，但我们需要在每页后扣费）
       // 由于 searchOnly 内部会处理分页，我们需要修改逻辑
       // 这里简化处理：假设每次搜索消耗一定的页数
-      const { results, pagesSearched } = await searchOnly(
+      const searchResult = await searchOnly(
         name,
         location,
         maxPages,
         token,
         [ageRange]
       );
+      
+      const { results, pagesSearched } = searchResult;
       
       // 实时扣除搜索页费用
       for (let i = 0; i < pagesSearched; i++) {
@@ -968,6 +981,20 @@ async function searchOnlyWithCredits(
       allResults.push(...results);
       totalPagesSearched += pagesSearched;
       searchedAgeRanges.push(ageRange);
+      
+      // 检查 API 积分耗尽
+      if (searchResult.apiCreditsExhausted) {
+        await addLog(`🚫 Scrape.do API 积分已耗尽，停止搜索`);
+        const uniqueResults = allResults.filter((result, index, self) =>
+          index === self.findIndex(r => r.detailLink === result.detailLink)
+        );
+        return {
+          results: uniqueResults,
+          pagesSearched: totalPagesSearched,
+          ageRangesSearched: searchedAgeRanges,
+          apiCreditsExhausted: true,
+        };
+      }
       
     } catch (error: any) {
       console.error(`[Anywho] 搜索 ${name} (${ageRange}) 失败:`, error.message);
@@ -1022,6 +1049,7 @@ async function fetchDetailsWithCredits(
   let requestCount = 0;
   let successCount = 0;
   let stoppedDueToCredits = false;
+  let apiCreditsExhausted = false;
   let completedCount = 0; // 已处理的总数（成功+失败）
   
   // 记录失败的索引，用于延后重试
@@ -1042,6 +1070,7 @@ async function fetchDetailsWithCredits(
     const batchItems = searchResults.slice(startIdx, endIdx);
     
     // 并行发出本批请求
+    
     const batchPromises = batchItems.map(async (searchResult, localIdx) => {
       const globalIdx = startIdx + localIdx;
       try {
@@ -1051,14 +1080,23 @@ async function fetchDetailsWithCredits(
           searchResult,
           undefined
         );
-        return { globalIdx, detail, success, error: false };
+        return { globalIdx, detail, success, error: false, isApiCreditsError: false };
       } catch (error: any) {
-        console.error(`[Anywho] 获取详情失败 [${globalIdx}]:`, error.message);
-        return { globalIdx, detail: null, success: false, error: true };
+        const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+        if (!isApiCreditsError) {
+          console.error(`[Anywho] 获取详情失败 [${globalIdx}]:`, error.message);
+        }
+        return { globalIdx, detail: null, success: false, error: true, isApiCreditsError };
       }
     });
     
     const batchResults = await Promise.all(batchPromises);
+    
+    // 检查本批是否有 API 积分耗尽错误
+    if (batchResults.some(r => r.isApiCreditsError)) {
+      apiCreditsExhausted = true;
+      console.error(`[Anywho] Scrape.do API 积分耗尽，停止详情获取`);
+    }
     
     // 处理本批结果
     for (const result of batchResults) {
@@ -1078,8 +1116,10 @@ async function fetchDetailsWithCredits(
         details[result.globalIdx] = result.detail;
         successCount++;
       } else if (result.error) {
-        // 请求异常，加入重试队列（无需扣费）
-        failedIndices.push(result.globalIdx);
+        // API 积分耗尽的不加入重试队列
+        if (!result.isApiCreditsError) {
+          failedIndices.push(result.globalIdx);
+        }
       } else if (result.detail && !result.success) {
         // fetchDetailFromPage返回了fallback数据（success=false但detail不为null）
         // 先扣费，成功后才保存结果
@@ -1098,7 +1138,7 @@ async function fetchDetailsWithCredits(
       }
     }
     
-    if (stoppedDueToCredits) break;
+    if (stoppedDueToCredits || apiCreditsExhausted) break;
     
     // 批间延迟
     if (batchIdx < totalBatches - 1) {
@@ -1107,7 +1147,8 @@ async function fetchDetailsWithCredits(
   }
   
   // ==================== 第二轮：延后重试失败的请求 ====================
-  if (failedIndices.length > 0 && !stoppedDueToCredits) {
+  // API 积分耗尽时跳过重试
+  if (failedIndices.length > 0 && !stoppedDueToCredits && !apiCreditsExhausted) {
     console.log(`[Anywho] 延后重试 ${failedIndices.length} 个失败请求`);
     await new Promise(resolve => setTimeout(resolve, RETRY_WAIT_MS));
     

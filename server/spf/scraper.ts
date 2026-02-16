@@ -44,6 +44,19 @@ export function updateGlobalConcurrency(newMax: number): void {
 
 // ==================== Scrape.do API ====================
 
+/**
+ * Scrape.do API 积分耗尽错误 - HTTP 401/403
+ * 此错误不可重试，应立即停止所有请求
+ */
+export class ScrapeApiCreditsError extends Error {
+  public readonly statusCode: number;
+  constructor(message: string, statusCode: number = 401) {
+    super(message);
+    this.name = 'ScrapeApiCreditsError';
+    this.statusCode = statusCode;
+  }
+}
+
 // 默认配置值（可通过数据库配置覆盖）
 const DEFAULT_SCRAPE_TIMEOUT_MS = SCRAPEDO_CONFIG.TIMEOUT_MS;   // 60 秒超时
 const DEFAULT_SCRAPE_MAX_RETRIES = SCRAPEDO_CONFIG.MAX_RETRIES; // 最多重试 3 次
@@ -94,6 +107,14 @@ async function fetchWithScrapedo(
         
         // 检查是否是可重试的服务器错误 (502, 503, 504)
         if (!response.ok) {
+          // 401/403: API 积分耗尽或认证失败，不可重试
+          if (response.status === 401 || response.status === 403) {
+            throw new ScrapeApiCreditsError(
+              `Scrape.do API 积分已耗尽或认证失败: HTTP ${response.status} ${response.statusText}`,
+              response.status
+            );
+          }
+          
           const isRetryableError = [502, 503, 504].includes(response.status);
           if (isRetryableError && attempt < maxRetries) {
             console.log(`[SPF fetchWithScrapedo] 服务器错误 ${response.status}，正在重试 (${attempt + 1}/${maxRetries})...`);
@@ -142,6 +163,11 @@ async function fetchWithScrapedo(
         return text;
       } catch (error: any) {
         lastError = error;
+        
+        // API 积分耗尽错误不重试，直接抛出
+        if (error instanceof ScrapeApiCreditsError) {
+          throw error;
+        }
         
         if (attempt >= maxRetries) {
           break;
@@ -953,6 +979,8 @@ export interface SearchOnlyResult {
   success: boolean;
   searchResults: SpfDetailResult[];
   error?: string;
+  /** Scrape.do API 积分耗尽标志 */
+  apiCreditsExhausted?: boolean;
   stats: {
     searchPageRequests: number;
     filteredOut: number;
@@ -1096,6 +1124,19 @@ export async function searchOnly(
     };
     
   } catch (error: any) {
+    // 检查是否是 API 积分耗尽错误
+    if (error instanceof ScrapeApiCreditsError) {
+      onProgress(`🚫 Scrape.do API 积分已耗尽，无法执行搜索`);
+      onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      return {
+        success: false,
+        searchResults: [],
+        error: 'Scrape.do API 积分已耗尽',
+        apiCreditsExhausted: true,
+        stats: { searchPageRequests, filteredOut, skippedDeceased },
+      };
+    }
+    
     return {
       success: false,
       searchResults: [],
@@ -1116,6 +1157,8 @@ export interface FetchDetailsResult {
     detailPageRequests: number;
     cacheHits: number;
     filteredOut: number;
+    /** Scrape.do API 积分耗尽标志 */
+    apiCreditsExhausted?: boolean;
   };
 }
 
@@ -1160,6 +1203,7 @@ export async function fetchDetailsInBatch(
   let detailPageRequests = 0;
   let cacheHits = 0;
   let filteredOut = 0;
+  let apiCreditsExhausted = false;
   
   const baseUrl = 'https://www.searchpeoplefree.com';
   const uniqueLinks = Array.from(new Set(tasks.map(t => t.detailLink)));
@@ -1215,27 +1259,38 @@ export async function fetchDetailsInBatch(
       const batchItems = tasksToFetch.slice(startIdx, endIdx);
       
       // 并行发出本批请求
+      
       const batchPromises = batchItems.map(async (task) => {
         const link = task.detailLink;
         const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
         
         try {
           const html = await fetchWithScrapedo(detailUrl, token);
-          return { task, html, error: null };
+          return { task, html, error: null, isApiCreditsError: false };
         } catch (error: any) {
-          return { task, html: null, error };
+          const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+          return { task, html: null, error, isApiCreditsError };
         }
       });
       
       const batchResults = await Promise.all(batchPromises);
       
+      // 检查本批是否有 API 积分耗尽错误
+      if (batchResults.some(r => r.isApiCreditsError)) {
+        apiCreditsExhausted = true;
+        onProgress(`🚫 Scrape.do API 积分已耗尽，停止获取详情`);
+        onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      }
+      
       // 处理本批结果
-      for (const { task, html, error } of batchResults) {
+      for (const { task, html, error, isApiCreditsError } of batchResults) {
         const link = task.detailLink;
         
         if (error) {
-          // 请求失败，加入重试队列
-          failedTasks.push(task);
+          // API 积分耗尽的不加入重试队列
+          if (!isApiCreditsError) {
+            failedTasks.push(task);
+          }
           completed++;
           continue;
         }
@@ -1289,13 +1344,19 @@ export async function fetchDetailsInBatch(
       }
       
       // 批间延迟
-      if (batchIdx < totalBatches - 1) {
+      if (batchIdx < totalBatches - 1 && !apiCreditsExhausted) {
         await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+      }
+      
+      // API 积分耗尽，停止后续批次
+      if (apiCreditsExhausted) {
+        break;
       }
     }
     
     // ==================== 第二轮：延后重试失败的请求 ====================
-    if (failedTasks.length > 0) {
+    // API 积分耗尽时跳过重试
+    if (failedTasks.length > 0 && !apiCreditsExhausted) {
       console.log(`[SPF] 延后重试 ${failedTasks.length} 个失败请求`);
       onProgress(`🔄 重试 ${failedTasks.length} 个失败请求...`);
       await new Promise(resolve => setTimeout(resolve, RETRY_WAIT_MS));
@@ -1387,6 +1448,7 @@ export async function fetchDetailsInBatch(
       detailPageRequests,
       cacheHits,
       filteredOut,
+      apiCreditsExhausted,
     },
   };
 }

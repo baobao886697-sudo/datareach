@@ -66,6 +66,19 @@ export class ScrapeServerError extends Error {
   }
 }
 
+/**
+ * Scrape.do API 积分耗尽错误 - HTTP 401
+ * Scrape.do 返回 401 表示 API token 积分耗尽或订阅已暂停
+ * 此错误不可重试，应立即停止所有请求
+ */
+export class ScrapeApiCreditsError extends Error {
+  public readonly statusCode = 401;
+  constructor(message: string = 'Scrape.do API 积分已耗尽或订阅已暂停 (HTTP 401)') {
+    super(message);
+    this.name = 'ScrapeApiCreditsError';
+  }
+}
+
 // ============================================================================
 // 默认配置
 // ============================================================================
@@ -188,6 +201,20 @@ export async function fetchWithScrapeClient(
           );
         }
         
+        // ==================== 401 API 积分耗尽处理 ====================
+        if (statusCode === 401) {
+          throw new ScrapeApiCreditsError(
+            `Scrape.do API 积分已耗尽或订阅已暂停: HTTP 401 ${response.statusText}`
+          );
+        }
+        
+        // ==================== 403 认证错误处理 ====================
+        if (statusCode === 403) {
+          throw new ScrapeApiCreditsError(
+            `Scrape.do API 认证失败或权限不足: HTTP 403 ${response.statusText}`
+          );
+        }
+        
         // ==================== 其他 HTTP 错误 ====================
         throw new Error(`Scrape.do API 请求失败: ${statusCode} ${response.statusText}`);
       }
@@ -197,7 +224,7 @@ export async function fetchWithScrapeClient(
       lastError = error;
       
       // 如果是我们自定义的错误类型，直接向上抛出，不再重试
-      if (error instanceof ScrapeRateLimitError || error instanceof ScrapeServerError) {
+      if (error instanceof ScrapeRateLimitError || error instanceof ScrapeServerError || error instanceof ScrapeApiCreditsError) {
         throw error;
       }
       
