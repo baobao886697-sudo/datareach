@@ -671,16 +671,16 @@ async function executeSpfSearchRealtimeDeduction(
         
         // 检查 Scrape.do API 积分耗尽
         if (result.apiCreditsExhausted) {
-          addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
-          addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+          addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+          addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
           stoppedDueToCredits = true;
           break;
         }
       } else {
         // 检查是否因 API 积分耗尽导致失败
         if (result.apiCreditsExhausted) {
-          addLog(`🚫 Scrape.do API 积分已耗尽，停止搜索任务`);
-          addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+          addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+          addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
           stoppedDueToCredits = true;
           break;
         }
@@ -774,8 +774,8 @@ async function executeSpfSearchRealtimeDeduction(
         
         // 检查是否因 Scrape.do API 积分耗尽停止
         if (detailResult.stats.apiCreditsExhausted) {
-          addLog(`🚫 Scrape.do API 积分已耗尽，任务提前结束`);
-          addLog(`💡 已获取的结果已保存，请检查 Scrape.do 账户余额`);
+          addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
+          addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
         }
         
         // 按子任务分组保存结果
@@ -915,13 +915,14 @@ async function executeSpfSearchRealtimeDeduction(
     });
     
   } catch (error: any) {
-    addLog(`❌ 任务失败: ${error.message}`);
+    const safeMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+    addLog(`❌ 任务失败: ${safeMsg}`);
     
     // 获取已消耗的费用
     const breakdown = creditTracker.getCostBreakdown();
     
-    await failSpfSearchTask(taskDbId, error.message, logs);
-    emitTaskFailed(userId, taskId, "spf", { error: error.message, creditsUsed: breakdown.totalCost });
+    await failSpfSearchTask(taskDbId, safeMsg, logs);
+    emitTaskFailed(userId, taskId, "spf", { error: safeMsg, creditsUsed: breakdown.totalCost });
     
     await logApi({
       userId,

@@ -196,8 +196,8 @@ export async function fetchDetailsWithSmartPool(
     const apiCreditsErrors = batchResults.filter(r => r.isApiCreditsError);
     if (apiCreditsErrors.length > 0) {
       stoppedDueToApiCredits = true;
-      onProgress(`🚫 Scrape.do API 积分已耗尽，立即停止所有请求`);
-      onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+      onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
       console.error(`[TPS v8.0] Scrape.do API 积分耗尽，停止详情获取`);
       // 不再处理本批结果中的失败项，只处理成功的
     }
@@ -268,7 +268,7 @@ export async function fetchDetailsWithSmartPool(
       consecutiveFailBatches++;
       if (consecutiveFailBatches >= BATCH_CONFIG.CONSECUTIVE_FAIL_THRESHOLD && !stoppedDueToApiCredits) {
         onProgress(`🚫 连续 ${consecutiveFailBatches} 批请求全部失败，自动停止（可能是 API 服务异常）`);
-        onProgress(`💡 请稍后重试，或检查 Scrape.do 服务状态`);
+        onProgress(`💡 请稍后重试或联系客服处理`);
         console.error(`[TPS v8.0] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
         stoppedDueToApiCredits = true;  // 复用此标志表示外部API问题
       }
@@ -326,7 +326,7 @@ export async function fetchDetailsWithSmartPool(
       // 检查重试中是否有 API 积分耗尽
       if (retryResults.some(r => r.isApiCreditsError)) {
         stoppedDueToApiCredits = true;
-        onProgress(`🚫 重试阶段检测到 Scrape.do API 积分耗尽，停止重试`);
+        onProgress(`🚫 服务暂时不可用，停止重试`);
         break;
       }
       
@@ -382,7 +382,7 @@ export async function fetchDetailsWithSmartPool(
     
     onProgress(`🔄 延后重试完成: ${retrySuccess}/${failedLinks.length} 成功`);
   } else if (failedLinks.length > 0 && stoppedDueToApiCredits) {
-    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（API 积分已耗尽）`);
+    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（服务暂时不可用）`);
   }
   
   // ==================== 保存缓存 ====================
@@ -403,7 +403,7 @@ export async function fetchDetailsWithSmartPool(
     onProgress(`🔄 延后重试: ${retrySuccess}/${retryTotal} 成功`);
   }
   if (stoppedDueToApiCredits) {
-    onProgress(`🚫 任务因 Scrape.do API 积分耗尽而提前结束`);
+    onProgress(`🚫 服务繁忙，任务提前结束`);
   }
   
   return {

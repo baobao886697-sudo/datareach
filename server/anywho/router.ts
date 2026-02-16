@@ -590,8 +590,8 @@ async function executeAnywhoSearchRealtime(
         
         // 检查 Scrape.do API 积分耗尽
         if (searchOnlyResult.apiCreditsExhausted) {
-          await addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
-          await addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+          await addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+          await addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
           stoppedDueToCredits = true;
         }
         
@@ -628,7 +628,8 @@ async function executeAnywhoSearchRealtime(
         
       } catch (error: any) {
         completedSubTasks++;
-        await addLog(`❌ [${completedSubTasks}/${subTasks.length}] ${taskName} 搜索失败: ${error.message}`);
+        const safeMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+        await addLog(`❌ [${completedSubTasks}/${subTasks.length}] ${taskName} 搜索失败: ${safeMsg}`);
       }
     }
     
@@ -808,8 +809,8 @@ async function executeAnywhoSearchRealtime(
       
       // 检查是否因 Scrape.do API 积分耗尽停止
       if (detailApiExhausted) {
-        await addLog(`🚫 Scrape.do API 积分已耗尽，任务提前结束`);
-        await addLog(`💡 已获取的结果已保存，请检查 Scrape.do 账户余额`);
+        await addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
+        await addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
         stoppedDueToCredits = true;
       } else if (detailStopped) {
         if (!stoppedDueToCredits) {
@@ -918,9 +919,10 @@ async function executeAnywhoSearchRealtime(
     
     const breakdown = creditTracker.getCostBreakdown();
     
-    await failAnywhoSearchTask(taskId, error.message || "未知错误");
-    emitTaskFailed(userId, taskId, "anywho", { error: error.message || "未知错误", creditsUsed: breakdown.totalCost });
-    await addLog(`❌ 搜索任务失败: ${error.message}`);
+    const safeErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : (error.message || '未知错误');
+    await failAnywhoSearchTask(taskId, safeErrMsg);
+    emitTaskFailed(userId, taskId, "anywho", { error: safeErrMsg, creditsUsed: breakdown.totalCost });
+    await addLog(`❌ 搜索任务失败: ${safeErrMsg}`);
     await addLog(`💰 已消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
     await addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
   }
@@ -989,7 +991,7 @@ async function searchOnlyWithCredits(
       
       // 检查 API 积分耗尽
       if (searchResult.apiCreditsExhausted) {
-        await addLog(`🚫 Scrape.do API 积分已耗尽，停止搜索`);
+        await addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
         const uniqueResults = allResults.filter((result, index, self) =>
           index === self.findIndex(r => r.detailLink === result.detailLink)
         );

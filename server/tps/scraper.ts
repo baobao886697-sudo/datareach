@@ -771,8 +771,8 @@ export async function searchOnly(
       
       // 检查 API 积分耗尽
       if (searchApiCreditsExhausted) {
-        onProgress?.(`🚫 Scrape.do API 积分已耗尽，停止搜索`);
-        onProgress?.(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+        onProgress?.(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+        onProgress?.(`💡 已获取的结果已保存，如需继续请联系客服`);
         
         // 返回已获取的结果，并标记 API 积分耗尽
         const uniqueResults = deduplicateByDetailLink(allResults);
@@ -831,13 +831,13 @@ export async function searchOnly(
   } catch (error: any) {
     // 检查是否是 API 积分耗尽错误（第一页就失败的情况）
     if (error instanceof ScrapeApiCreditsError) {
-      onProgress?.(`🚫 Scrape.do API 积分已耗尽，无法执行搜索`);
-      onProgress?.(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      onProgress?.(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+      onProgress?.(`💡 已获取的结果已保存，如需继续请联系客服`);
       return {
         success: false,
         searchResults: [],
         stats: { searchPageRequests, filteredOut },
-        error: 'Scrape.do API 积分已耗尽',
+        error: '服务繁忙，请稍后重试',
         apiCreditsExhausted: true,
       };
     }

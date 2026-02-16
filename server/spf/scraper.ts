@@ -1130,12 +1130,12 @@ export async function searchOnly(
   } catch (error: any) {
     // 检查是否是 API 积分耗尽错误
     if (error instanceof ScrapeApiCreditsError) {
-      onProgress(`🚫 Scrape.do API 积分已耗尽，无法执行搜索`);
-      onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+      onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+      onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
       return {
         success: false,
         searchResults: [],
-        error: 'Scrape.do API 积分已耗尽',
+        error: '服务繁忙，请稍后重试',
         apiCreditsExhausted: true,
         stats: { searchPageRequests, filteredOut, skippedDeceased },
       };
@@ -1282,8 +1282,8 @@ export async function fetchDetailsInBatch(
       // 检查本批是否有 API 积分耗尽错误
       if (batchResults.some(r => r.isApiCreditsError)) {
         apiCreditsExhausted = true;
-        onProgress(`🚫 Scrape.do API 积分已耗尽，停止获取详情`);
-        onProgress(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
+        onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+        onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
       }
       
       // 处理本批结果
