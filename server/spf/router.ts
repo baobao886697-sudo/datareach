@@ -676,6 +676,7 @@ async function executeSpfSearchRealtimeDeduction(
         completedSubTasks: completedSearches,
         progress: searchProgress,
         searchPageRequests: totalSearchPages,
+        creditsUsed: creditTracker.getCostBreakdown().totalCost,
         logs,
       });
       emitTaskProgress(userId, taskId, "spf", { progress: searchProgress, completedSubTasks: completedSearches, totalSubTasks: subTasks.length, logs });
@@ -738,7 +739,7 @@ async function executeSpfSearchRealtimeDeduction(
           setCachedDetails // 保存数据用于 CSV 导出
         );
         
-        // 实时扣除详情页费用
+        // 实时扣除详情页费用（逐条扣除 + 实时推送积分更新）
         for (let i = 0; i < detailResult.stats.detailPageRequests; i++) {
           const deductResult = await creditTracker.deductDetailPage();
           if (!deductResult.success) {
@@ -747,6 +748,9 @@ async function executeSpfSearchRealtimeDeduction(
             break;
           }
         }
+        
+        // 扣除后立即推送积分更新和进度更新
+        emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
         
         totalDetailPages += detailResult.stats.detailPageRequests;
         totalFilteredOut += detailResult.stats.filteredOut;
@@ -798,6 +802,7 @@ async function executeSpfSearchRealtimeDeduction(
       totalResults,
       searchPageRequests: totalSearchPages,
       detailPageRequests: totalDetailPages,
+      creditsUsed: creditTracker.getCostBreakdown().totalCost,
       logs,
     });
     emitTaskProgress(userId, taskId, "spf", { progress: 100, totalResults, logs });

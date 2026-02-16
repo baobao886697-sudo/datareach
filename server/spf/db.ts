@@ -187,6 +187,7 @@ export async function updateSpfSearchTaskProgress(
     searchPageRequests?: number;
     detailPageRequests?: number;
     cacheHits?: number;
+    creditsUsed?: number;
     logs?: Array<{ timestamp: string; message: string }>;
   }
 ) {
@@ -201,6 +202,7 @@ export async function updateSpfSearchTaskProgress(
   if (data.searchPageRequests !== undefined) updateData.searchPageRequests = data.searchPageRequests;
   if (data.detailPageRequests !== undefined) updateData.detailPageRequests = data.detailPageRequests;
   if (data.cacheHits !== undefined) updateData.cacheHits = data.cacheHits;
+  if (data.creditsUsed !== undefined) updateData.creditsUsed = data.creditsUsed.toString();
   if (data.logs !== undefined) updateData.logs = data.logs.slice(-100); // 限制日志数量为 100 条
   
   if (data.status === "running" && !updateData.startedAt) {

@@ -31,88 +31,15 @@ import * as cheerio from 'cheerio';
 import { getSpfRuntimeConfig, SpfRuntimeConfig } from './runtimeConfig';
 import { SCRAPEDO_CONFIG } from './config';
 
-/**
- * 全局信号量类 - 用于限制系统总并发数
- * 不管有多少用户同时使用，系统总并发不超过设定值
- * 
- * v2.0 - 支持动态配置
- */
-class GlobalSemaphore {
-  private maxConcurrency: number;
-  private currentCount: number = 0;
-  private waitQueue: Array<() => void> = [];
-  
-  constructor(maxConcurrency: number) {
-    this.maxConcurrency = maxConcurrency;
-  }
-  
-  /**
-   * 动态更新最大并发数
-   * 注意：只有在当前并发数低于新限制时才会立即生效
-   */
-  updateMaxConcurrency(newMax: number): void {
-    const oldMax = this.maxConcurrency;
-    this.maxConcurrency = newMax;
-    
-    // 如果新限制更高，尝试释放等待队列中的任务
-    if (newMax > oldMax) {
-      while (this.waitQueue.length > 0 && this.currentCount < this.maxConcurrency) {
-        const next = this.waitQueue.shift();
-        if (next) next();
-      }
-    }
-    
-    console.log(`[SPF GlobalSemaphore] 并发限制已更新: ${oldMax} -> ${newMax}`);
-  }
-  
-  async acquire(): Promise<void> {
-    if (this.currentCount < this.maxConcurrency) {
-      this.currentCount++;
-      return;
-    }
-    
-    // 需要等待
-    return new Promise<void>((resolve) => {
-      this.waitQueue.push(() => {
-        this.currentCount++;
-        resolve();
-      });
-    });
-  }
-  
-  release(): void {
-    this.currentCount--;
-    if (this.waitQueue.length > 0 && this.currentCount < this.maxConcurrency) {
-      const next = this.waitQueue.shift();
-      if (next) next();
-    }
-  }
-  
-  getStatus(): { current: number; max: number; waiting: number } {
-    return {
-      current: this.currentCount,
-      max: this.maxConcurrency,
-      waiting: this.waitQueue.length,
-    };
-  }
-}
-
-// 全局信号量实例 - 默认限制系统总并发为 15
-// 可通过数据库配置 SPF_GLOBAL_CONCURRENCY 动态修改
-const DEFAULT_GLOBAL_MAX_CONCURRENCY = SCRAPEDO_CONFIG.GLOBAL_MAX_CONCURRENCY;
-const globalSemaphore = new GlobalSemaphore(DEFAULT_GLOBAL_MAX_CONCURRENCY);
-
-// 导出获取状态的函数（用于监控）
+// ==================== 全局并发控制 ====================
+// v3.0 - 移除全局信号量，改用分批+延迟模式控制并发（与 TPS v8.0 一致）
+// 保留导出函数以避免编译错误（如果有外部引用）
 export function getGlobalConcurrencyStatus() {
-  return globalSemaphore.getStatus();
+  return { current: 0, max: 0, waiting: 0 };
 }
 
-/**
- * 更新全局并发限制
- * 管理员可通过控制台调用此函数动态调整并发数
- */
 export function updateGlobalConcurrency(newMax: number): void {
-  globalSemaphore.updateMaxConcurrency(newMax);
+  // 已废弃，并发现由分批模式控制
 }
 
 // ==================== Scrape.do API ====================
@@ -148,10 +75,8 @@ async function fetchWithScrapedo(
   
   let lastError: Error | null = null;
   
-  // 获取全局信号量 - 限制系统总并发
-  await globalSemaphore.acquire();
-  
-  try {
+  // v3.0 - 移除全局信号量，并发由分批模式控制
+  {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const controller = new AbortController();
@@ -237,9 +162,6 @@ async function fetchWithScrapedo(
     }
     
     throw lastError || new Error('请求失败');
-  } finally {
-    // 释放全局信号量
-    globalSemaphore.release();
   }
 }
 
@@ -1197,12 +1119,27 @@ export interface FetchDetailsResult {
   };
 }
 
+// ==================== SPF 详情获取分批配置 ====================
+const SPF_DETAIL_BATCH_CONFIG = {
+  BATCH_SIZE: 15,          // 每批并发数（SPF不需要render，请求较快，15并发合理）
+  BATCH_DELAY_MS: 500,     // 批间延迟(ms)
+  RETRY_BATCH_SIZE: 8,     // 重试批大小
+  RETRY_BATCH_DELAY_MS: 1000, // 重试批间延迟(ms)
+  RETRY_WAIT_MS: 3000,     // 重试前等待(ms)
+};
+
 /**
- * 批量获取详情页面（统一队列并发）
+ * 批量获取详情页面（v3.0 分批+延迟模式）
+ * 
+ * 借鉴 TPS v8.0 的"分批+延迟"架构：
+ * - 每批 BATCH_SIZE 个请求并行发出
+ * - 批间等待 BATCH_DELAY_MS
+ * - 失败的链接延后统一重试
+ * - 保留缓存、过滤、去重逻辑不变
  * 
  * @param tasks 详情任务列表
  * @param token Scrape.do API token
- * @param concurrency 并发数
+ * @param concurrency 并发数（已废弃，使用 SPF_DETAIL_BATCH_CONFIG.BATCH_SIZE 代替）
  * @param filters 过滤器
  * @param onProgress 进度回调
  * @param getCachedDetails 获取缓存函数
@@ -1217,6 +1154,8 @@ export async function fetchDetailsInBatch(
   getCachedDetails: (links: string[]) => Promise<Map<string, SpfDetailResult>>,
   setCachedDetails: (items: Array<{ link: string; data: SpfDetailResult }>) => Promise<void>
 ): Promise<FetchDetailsResult> {
+  const { BATCH_SIZE, BATCH_DELAY_MS, RETRY_BATCH_SIZE, RETRY_BATCH_DELAY_MS, RETRY_WAIT_MS } = SPF_DETAIL_BATCH_CONFIG;
+  
   const results: Array<{ task: DetailTask; details: SpfDetailResult | null }> = [];
   let detailPageRequests = 0;
   let cacheHits = 0;
@@ -1260,50 +1199,159 @@ export async function fetchDetailsInBatch(
     }
   }
   
-  // 静默处理，不输出缓存命中日志
-  
   const cacheToSave: Array<{ link: string; data: SpfDetailResult }> = [];
   let completed = 0;
   
+  // 记录失败的任务，用于延后重试
+  const failedTasks: DetailTask[] = [];
+  
   if (tasksToFetch.length > 0) {
-    // 并发控制实现
-    const concurrencyPool = new Set<Promise<any>>();
+    const totalBatches = Math.ceil(tasksToFetch.length / BATCH_SIZE);
     
-    for (const task of tasksToFetch) {
-      if (concurrencyPool.size >= concurrency) {
-        await Promise.race(concurrencyPool);
-      }
+    // ==================== 第一轮：分批并行获取 ====================
+    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+      const startIdx = batchIdx * BATCH_SIZE;
+      const endIdx = Math.min(startIdx + BATCH_SIZE, tasksToFetch.length);
+      const batchItems = tasksToFetch.slice(startIdx, endIdx);
       
-      let promiseRef: Promise<any> = null as any;
-      const promise = (async () => {
+      // 并行发出本批请求
+      const batchPromises = batchItems.map(async (task) => {
         const link = task.detailLink;
         const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
         
         try {
           const html = await fetchWithScrapedo(detailUrl, token);
-          detailPageRequests++;
+          return { task, html, error: null };
+        } catch (error: any) {
+          return { task, html: null, error };
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      
+      // 处理本批结果
+      for (const { task, html, error } of batchResults) {
+        const link = task.detailLink;
+        
+        if (error) {
+          // 请求失败，加入重试队列
+          failedTasks.push(task);
+          completed++;
+          continue;
+        }
+        
+        detailPageRequests++;
+        
+        // 检查是否是错误响应
+        if (html!.includes('"ErrorCode"') || html!.includes('"StatusCode":4')) {
+          const linkTasks = tasksByLink.get(link) || [task];
+          for (const t of linkTasks) {
+            results.push({ task: t, details: null });
+          }
+          completed++;
+          continue;
+        }
+        
+        const details = parseDetailPage(html!, link);
+        
+        if (details) {
+          // 保存到缓存
+          if (details.phone && details.phone.length >= 10) {
+            cacheToSave.push({ link, data: details });
+          }
           
-          // 检查是否是错误响应
-          if (html.includes('"ErrorCode"') || html.includes('"StatusCode":4')) {
+          // 标记新获取的数据不是来自缓存
+          const detailsWithFlag = { ...details, fromCache: false };
+          
+          // 应用过滤器
+          if (applyFilters(detailsWithFlag, filters)) {
+            const linkTasks = tasksByLink.get(link) || [task];
+            for (const t of linkTasks) {
+              results.push({ task: t, details: detailsWithFlag });
+            }
+          } else {
+            filteredOut++;
+          }
+        } else {
+          const linkTasks = tasksByLink.get(link) || [task];
+          for (const t of linkTasks) {
+            results.push({ task: t, details: null });
+          }
+        }
+        
+        completed++;
+      }
+      
+      // 进度报告（每5批报告一次，或最后一批）
+      if ((batchIdx + 1) % 5 === 0 || batchIdx === totalBatches - 1) {
+        const percent = Math.round((completed / tasksToFetch.length) * 100);
+        onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
+      }
+      
+      // 批间延迟
+      if (batchIdx < totalBatches - 1) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+      }
+    }
+    
+    // ==================== 第二轮：延后重试失败的请求 ====================
+    if (failedTasks.length > 0) {
+      console.log(`[SPF] 延后重试 ${failedTasks.length} 个失败请求`);
+      onProgress(`🔄 重试 ${failedTasks.length} 个失败请求...`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_WAIT_MS));
+      
+      const retryBatches = Math.ceil(failedTasks.length / RETRY_BATCH_SIZE);
+      
+      for (let retryBatchIdx = 0; retryBatchIdx < retryBatches; retryBatchIdx++) {
+        const retryStart = retryBatchIdx * RETRY_BATCH_SIZE;
+        const retryEnd = Math.min(retryStart + RETRY_BATCH_SIZE, failedTasks.length);
+        const retryItems = failedTasks.slice(retryStart, retryEnd);
+        
+        const retryPromises = retryItems.map(async (task) => {
+          const link = task.detailLink;
+          const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
+          
+          try {
+            const html = await fetchWithScrapedo(detailUrl, token);
+            return { task, html, error: null };
+          } catch (error: any) {
+            return { task, html: null, error };
+          }
+        });
+        
+        const retryResults = await Promise.all(retryPromises);
+        
+        for (const { task, html, error } of retryResults) {
+          const link = task.detailLink;
+          
+          if (error) {
+            onProgress(`获取详情失败: ${link} - ${error.message || error}`);
             const linkTasks = tasksByLink.get(link) || [task];
             for (const t of linkTasks) {
               results.push({ task: t, details: null });
             }
-            return;
+            continue;
           }
           
-          const details = parseDetailPage(html, link);
+          detailPageRequests++;
+          
+          if (html!.includes('"ErrorCode"') || html!.includes('"StatusCode":4')) {
+            const linkTasks = tasksByLink.get(link) || [task];
+            for (const t of linkTasks) {
+              results.push({ task: t, details: null });
+            }
+            continue;
+          }
+          
+          const details = parseDetailPage(html!, link);
           
           if (details) {
-            // 保存到缓存
             if (details.phone && details.phone.length >= 10) {
               cacheToSave.push({ link, data: details });
             }
             
-            // 标记新获取的数据不是来自缓存
             const detailsWithFlag = { ...details, fromCache: false };
             
-            // 应用过滤器
             if (applyFilters(detailsWithFlag, filters)) {
               const linkTasks = tasksByLink.get(link) || [task];
               for (const t of linkTasks) {
@@ -1318,35 +1366,20 @@ export async function fetchDetailsInBatch(
               results.push({ task: t, details: null });
             }
           }
-        } catch (error: any) {
-          onProgress(`获取详情失败: ${link} - ${error.message || error}`);
-          const linkTasks = tasksByLink.get(link) || [task];
-          for (const t of linkTasks) {
-            results.push({ task: t, details: null });
-          }
-        } finally {
-          completed++;
-          if (completed % 10 === 0 || completed === tasksToFetch.length) {
-            const percent = Math.round((completed / tasksToFetch.length) * 100);
-            onProgress(`📥 详情进度: ${completed}/${tasksToFetch.length} (${percent}%)`);
-          }
-          concurrencyPool.delete(promiseRef);
         }
-      })();
-      promiseRef = promise;
-      concurrencyPool.add(promise);
+        
+        // 重试批间延迟
+        if (retryBatchIdx < retryBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_BATCH_DELAY_MS));
+        }
+      }
     }
-    
-    await Promise.all(Array.from(concurrencyPool));
   }
   
   // 保存缓存
   if (cacheToSave.length > 0) {
-    // 静默保存缓存，不输出日志
     await setCachedDetails(cacheToSave);
   }
-  
-  // 静默处理，不输出详情完成日志
   
   return {
     results,
