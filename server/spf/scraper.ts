@@ -1107,7 +1107,11 @@ export async function searchOnly(
         
         // 请求间延迟
         await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (pageError) {
+      } catch (pageError: any) {
+        // API 积分耗尽错误向上传播，由外层 catch 统一处理
+        if (pageError instanceof ScrapeApiCreditsError) {
+          throw pageError;
+        }
         onProgress(`获取第 ${currentPageNum + 1} 页失败，停止分页`);
         break;
       }

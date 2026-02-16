@@ -607,6 +607,7 @@ async function executeTpsSearchRealtimeDeduction(
         // 检查 Scrape.do API 积分耗尽
         if (result.apiCreditsExhausted) {
           addLog(`🚫 Scrape.do API 积分已耗尽，停止后续搜索`);
+          addLog(`💡 请检查 Scrape.do 账户余额或联系管理员充值`);
           stoppedDueToCredits = true; // 复用此标志停止后续任务
           return;
         }

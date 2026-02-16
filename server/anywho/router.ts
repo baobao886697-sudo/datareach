@@ -787,7 +787,7 @@ async function executeAnywhoSearchRealtime(
         .map(r => searchResultMap.get(r.detailLink))
         .filter((r): r is AnywhoSearchResult => r !== undefined);
       
-      const { details, requestCount, successCount, stoppedDueToCredits: detailStopped } = await fetchDetailsWithCredits(
+      const { details, requestCount, successCount, stoppedDueToCredits: detailStopped, apiCreditsExhausted: detailApiExhausted } = await fetchDetailsWithCredits(
         searchResultsForDetail,
         token,
         creditTracker,
@@ -806,7 +806,12 @@ async function executeAnywhoSearchRealtime(
         }
       );
       
-      if (detailStopped) {
+      // 检查是否因 Scrape.do API 积分耗尽停止
+      if (detailApiExhausted) {
+        await addLog(`🚫 Scrape.do API 积分已耗尽，任务提前结束`);
+        await addLog(`💡 已获取的结果已保存，请检查 Scrape.do 账户余额`);
+        stoppedDueToCredits = true;
+      } else if (detailStopped) {
         if (!stoppedDueToCredits) {
           await addLog(`⚠️ 积分不足，停止获取详情`);
         }
@@ -1041,6 +1046,7 @@ async function fetchDetailsWithCredits(
   requestCount: number;
   successCount: number;
   stoppedDueToCredits: boolean;
+  apiCreditsExhausted: boolean;
 }> {
   const { BATCH_SIZE, BATCH_DELAY_MS, RETRY_BATCH_SIZE, RETRY_BATCH_DELAY_MS, RETRY_WAIT_MS } = ANYWHO_DETAIL_BATCH_CONFIG;
   
@@ -1213,5 +1219,6 @@ async function fetchDetailsWithCredits(
     requestCount,
     successCount,
     stoppedDueToCredits,
+    apiCreditsExhausted,
   };
 }
