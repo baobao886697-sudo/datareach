@@ -85,7 +85,7 @@ async function getScrapeDoToken(): Promise<string> {
     token = await getConfig('SCRAPE_DO_TOKEN');
   }
   if (!token) {
-    throw new Error('Scrape.do API token not configured (SCRAPE_DO_API_KEY or SCRAPE_DO_TOKEN)');
+    throw new Error('Verification API token not configured');
   }
   return token;
 }

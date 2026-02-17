@@ -212,7 +212,8 @@ export async function executeSpfSearchWithThreadPool(
         const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
         logMessage(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${results.length} 条, ${pagesUsed} 页`);
       } else {
-        logMessage(`❌ 搜索失败: ${result.error || 'Unknown error'}`);
+        const safeError = (result.error || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : (result.error || 'Unknown error');
+        logMessage(`❌ 搜索失败: ${safeError}`);
       }
     }
     
@@ -429,12 +430,13 @@ export async function executeSpfSearchWithThreadPool(
     });
     
   } catch (error: any) {
-    logMessage(`❌ 任务失败: ${error.message}`);
+    const safeMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+    logMessage(`❌ 任务失败: ${safeMsg}`);
     
     // 获取已消耗的费用
     const breakdown = creditTracker.getCostBreakdown();
     
-    await failTask(error.message, logs);
+    await failTask(safeMsg, logs);
     
     await logApi({
       userId,

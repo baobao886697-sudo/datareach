@@ -750,7 +750,8 @@ export async function searchOnly(
             retryUrls.push(url);
             onProgress?.(`⚓ 页面获取失败 (${err instanceof ScrapeRateLimitError ? '429限流' : '502服务器错误'})，已排入队尾稍后重试...`);
           } else {
-            onProgress?.(`页面获取失败: ${err.message}`);
+            const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
+            onProgress?.(`页面获取失败: ${safeErrMsg}`);
           }
           return null; // 错误时返回 null
         })

@@ -166,7 +166,7 @@ async function fetchWithScrapedo(url: string, token: string, semaphore: WorkerSe
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
-          throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+          throw new Error(`API 请求失败: ${response.status} ${response.statusText}`);
         }
         
         const text = await response.text();
@@ -184,9 +184,9 @@ async function fetchWithScrapedo(url: string, token: string, semaphore: WorkerSe
             }
             
             const errorMsg = Array.isArray(jsonError.Message) ? jsonError.Message.join(', ') : (jsonError.Message || 'Unknown error');
-            throw new Error(`Scrape.do API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
+            throw new Error(`API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
           } catch (parseError: any) {
-            if (parseError.message?.includes('Scrape.do API')) {
+            if (parseError.message?.includes('API 返回错误')) {
               throw parseError;
             }
           }
@@ -199,7 +199,7 @@ async function fetchWithScrapedo(url: string, token: string, semaphore: WorkerSe
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
-          throw new Error('Scrape.do API 返回的不是有效的 HTML');
+          throw new Error('API 返回的不是有效的 HTML');
         }
         
         return text;

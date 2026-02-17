@@ -121,7 +121,7 @@ async function fetchWithScrapedo(
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
-          throw new Error(`Scrape.do API 请求失败: ${response.status} ${response.statusText}`);
+          throw new Error(`API 请求失败: ${response.status} ${response.statusText}`);
         }
         
         const text = await response.text();
@@ -140,10 +140,10 @@ async function fetchWithScrapedo(
             }
             
             const errorMsg = Array.isArray(jsonError.Message) ? jsonError.Message.join(', ') : (jsonError.Message || 'Unknown error');
-            throw new Error(`Scrape.do API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
+            throw new Error(`API 返回错误: StatusCode ${statusCode} - ${errorMsg}`);
           } catch (parseError: any) {
             // 如果不是有效的 JSON 或已经是我们的错误，重新抛出
-            if (parseError.message?.includes('Scrape.do API')) {
+            if (parseError.message?.includes('API 返回错误')) {
               throw parseError;
             }
           }
@@ -157,7 +157,7 @@ async function fetchWithScrapedo(
             await new Promise(resolve => setTimeout(resolve, 3000 * (attempt + 1)));
             continue;
           }
-          throw new Error('Scrape.do API 返回的不是有效的 HTML');
+          throw new Error('API 返回的不是有效的 HTML');
         }
         
         return text;
@@ -1144,7 +1144,7 @@ export async function searchOnly(
     return {
       success: false,
       searchResults: [],
-      error: error.message,
+      error: (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message,
       stats: { searchPageRequests, filteredOut, skippedDeceased },
     };
   }
@@ -1390,7 +1390,8 @@ export async function fetchDetailsInBatch(
           const link = task.detailLink;
           
           if (error) {
-            onProgress(`获取详情失败: ${link} - ${error.message || error}`);
+            const safeErrorMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙' : (error.message || error);
+            onProgress(`获取详情失败: ${link} - ${safeErrorMsg}`);
             const linkTasks = tasksByLink.get(link) || [task];
             for (const t of linkTasks) {
               results.push({ task: t, details: null });

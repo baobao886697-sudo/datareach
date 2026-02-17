@@ -855,7 +855,7 @@ export async function executeSearchV3(
         await updateProgress(`已处理 ${processedCount}/${actualCount}`, 'processing', 'process', progressPercent);
         
         if (apiCreditsExhausted) {
-          addLog(`⚠️ API积分耗尽 | 已消耗: ${creditTracker.getTotalDeducted()} 积分`, 'error', 'process', '');
+          addLog(`⚠️ 当前使用人数过多，服务繁忙，请联系客服处理 | 已消耗: ${creditTracker.getTotalDeducted()} 积分`, 'error', 'process', '');
           stats.creditsUsed = creditTracker.getTotalDeducted();
           stats.unprocessedCount = actualCount - processedCount;
           progress.status = 'stopped';

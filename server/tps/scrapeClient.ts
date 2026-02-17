@@ -216,7 +216,7 @@ export async function fetchWithScrapeClient(
         }
         
         // ==================== 其他 HTTP 错误 ====================
-        throw new Error(`Scrape.do API 请求失败: ${statusCode} ${response.statusText}`);
+        throw new Error(`API 请求失败: ${statusCode} ${response.statusText}`);
       }
       
       return await response.text();
