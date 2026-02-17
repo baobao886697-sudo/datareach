@@ -70,7 +70,7 @@ const anywhoFiltersSchema = z.object({
 }).optional();
 
 const anywhoSearchInputSchema = z.object({
-  names: z.array(z.string().min(1)).min(1).max(100),
+  names: z.array(z.string().min(1, { message: "姓名不能为空" })).min(1, { message: "请至少输入一个姓名" }).max(100, { message: "姓名数量不能超过100个" }),
   locations: z.array(z.string()).optional(),
   // 新增：独立的城市、州参数（Anywho 不支持邮编搜索）
   cities: z.array(z.string()).optional(),

@@ -15,6 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
+import { parseErrorMessage } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
@@ -202,7 +203,9 @@ export default function SpfSearch() {
       setLocation(`/spf/task/${data.taskId}`);
     },
     onError: (error) => {
-      toast.error(error.message);
+      toast.error("搜索失败", {
+        description: parseErrorMessage(error.message),
+      });
     },
   });
   
@@ -210,6 +213,13 @@ export default function SpfSearch() {
   const handleSearch = () => {
     if (names.length === 0) {
       toast.error("请输入至少一个姓名");
+      return;
+    }
+    
+    if (names.length > 100) {
+      toast.error("姓名数量超出限制", {
+        description: `每次最多支持 100 个姓名，当前已输入 ${names.length} 个`,
+      });
       return;
     }
     

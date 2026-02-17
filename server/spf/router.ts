@@ -75,7 +75,7 @@ const spfFiltersSchema = z.object({
 }).optional();
 
 const spfSearchInputSchema = z.object({
-  names: z.array(z.string().min(1)).min(1).max(100),
+  names: z.array(z.string().min(1, { message: "姓名不能为空" })).min(1, { message: "请至少输入一个姓名" }).max(100, { message: "姓名数量不能超过100个" }),
   locations: z.array(z.string()).optional(),
   mode: z.enum(["nameOnly", "nameLocation"]),
   filters: spfFiltersSchema,
