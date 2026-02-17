@@ -69,14 +69,15 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-slate-900">
         <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
+          <div className="flex flex-col items-center gap-4">
+            <Shield className="w-16 h-16 text-cyan-400" />
+            <h1 className="text-2xl font-semibold tracking-tight text-center text-white">
+              请先登录
             </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
+            <p className="text-sm text-slate-400 text-center max-w-sm">
+              访问此页面需要验证您的身份，请点击下方按钮前往登录页面。
             </p>
           </div>
           <Button
@@ -84,9 +85,9 @@ export default function DashboardLayout({
               window.location.href = getLoginUrl();
             }}
             size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
+            className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white shadow-lg hover:shadow-cyan-500/40 transition-all"
           >
-            Sign in
+            前往登录
           </Button>
         </div>
       </div>

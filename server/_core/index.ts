@@ -34,63 +34,33 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
-async function migrateOldData(db: any) {
+async function ensureDefaultConfigs(db: any) {
   try {
-    console.log("[Migration] Checking if data migration is needed...");
+    console.log("[Init] Ensuring default system configs exist...");
     
-    // 检查是否已经有用户数据
-    const existingUsers = await db.execute(sql`SELECT COUNT(*) as count FROM users`);
-    const userCount = existingUsers[0]?.[0]?.count || 0;
-    
-    console.log(`[Migration] Found ${userCount} existing users, will merge old data...`);
-    
-    // 导入用户数据
-    const usersToInsert = [
-      { id: 1, openId: '302d47dc9d672c0a9bbda29688001a6a', email: 'baobao88667@gmail.com', passwordHash: '$2b$12$kUgoE43EAZfrAirMxsj/1ukUg5CN860OtYxoPhPi5iUoS4BTwD0Ae', credits: 0, status: 'active', role: 'user', currentDeviceId: 'device_1768742762459_sgmo9j77yle' },
-      { id: 2, openId: '2353b03db22e8027bdc1cd7a0b2d32a7', email: 'test123@example.com', passwordHash: '$2b$12$WwBAQ6xfrZenM1lpqEqn6OEKGohGPymaiMHZhdfta7C.4VmsHtfLG', credits: 100, status: 'active', role: 'user', currentDeviceId: 'device_1768726018372_x682tj4c7lm' },
-      { id: 3, openId: 'dae6dcd22c5e67825ad953a7a2b11fab', email: 'newtest@example.com', passwordHash: '$2b$12$yzvwBFcD1L/CkIpws8iq7ucGl2nkWYFo9dupJb9Lo7v3BzuZqzFYe', credits: 100, status: 'active', role: 'user', currentDeviceId: 'device_1768726018372_x682tj4c7lm' },
-      { id: 4, openId: 'bb65cfbee361871973fb1ce40548fec8', email: 'testuser123@example.com', passwordHash: '$2b$12$Wd2xPQGYbfroIfKFejYaT.Q26Tn9VxlaAuiq1Rh5Jik0XFGn2gtuu', credits: 100, status: 'active', role: 'user', currentDeviceId: 'test_device_123' },
-      { id: 5, openId: 'b0b4f44854aa1c838adf5da15fe60929', email: 'finaltest2@example.com', passwordHash: '$2b$12$7HMgVQegQ5/H4wCCYwt93O520Ih7UqyaCCKxA9nXrwZbdL6kACUU6', credits: 100, status: 'active', role: 'user', currentDeviceId: 'test_device_123' },
-      { id: 6, openId: '001bce3925f3c0609dc568694b0fd6c7', email: 'browsertest@example.com', passwordHash: '$2b$10$AQ3OgQDQ/l0k6oAF8u3AZ.X9IIjeoEca1W341xt7qkOUjQPLFT7yi', credits: 43, status: 'active', role: 'user', currentDeviceId: 'device_1768792449488_wu50zrzm4y' },
-      { id: 7, openId: '22e421735d5a7450f04ad1a5059ab1d0', email: 'marialee0660@gmail.com', passwordHash: '$2b$12$ek0DKGNp6kprhimWxvmkUOGha2ogLaBy5Psl9Lk03TstPrINBnfP.', credits: 108, status: 'active', role: 'user', currentDeviceId: 'device_1768749633464_7xv9pourh7h' }
-    ];
-    
-    for (const user of usersToInsert) {
-      await db.execute(sql`
-        INSERT IGNORE INTO users (id, openId, email, passwordHash, credits, status, role, currentDeviceId)
-        VALUES (${user.id}, ${user.openId}, ${user.email}, ${user.passwordHash}, ${user.credits}, ${user.status}, ${user.role}, ${user.currentDeviceId})
-      `);
-    }
-    console.log(`[Migration] Imported ${usersToInsert.length} users`);
-    
-    // 更新系统配置 - 只插入不存在的配置，不覆盖已有值
-    // 注意：敏感配置（如 API Key）应该只通过环境变量设置，不在数据库中存储
-    const configsToInsert = [
-      { key: 'USDT_WALLET_TRC20', value: 'TEtRGZvdPqvUDhopMi1MEGCEiD9Ehdh1iZ', description: 'TRC20 USDT收款地址' },
-      { key: 'USDT_WALLET_ERC20', value: '', description: 'ERC20 USDT收款地址' },
-      { key: 'USDT_WALLET_BEP20', value: '', description: 'BEP20 USDT收款地址' },
+    // 只插入不存在的默认配置，不覆盖已有值
+    // 注意：敏感配置（如 API Key、钱包地址）应通过环境变量或管理后台设置
+    const defaultConfigs = [
+      { key: 'USDT_WALLET_TRC20', value: process.env.USDT_WALLET_TRC20 || '', description: 'TRC20 USDT收款地址' },
+      { key: 'USDT_WALLET_ERC20', value: process.env.USDT_WALLET_ERC20 || '', description: 'ERC20 USDT收款地址' },
+      { key: 'USDT_WALLET_BEP20', value: process.env.USDT_WALLET_BEP20 || '', description: 'BEP20 USDT收款地址' },
       { key: 'MIN_RECHARGE_CREDITS', value: '100', description: '最低充值积分数' },
       { key: 'CREDITS_PER_USDT', value: '100', description: '1 USDT兑换积分数' },
       { key: 'ORDER_EXPIRE_MINUTES', value: '30', description: '订单过期时间(分钟)' },
       { key: 'CACHE_TTL_DAYS', value: '180', description: '缓存有效期(天)' },
       { key: 'SEARCH_CREDITS_PER_PERSON', value: '2', description: '每条搜索结果消耗积分' },
-      { key: 'PREVIEW_CREDITS', value: '1', description: '预览搜索消耗积分' }
-      // 注意：APOLLO_API_KEY 不再在这里设置，完全依赖环境变量
-      // 这样可以避免每次启动时覆盖数据库中的值
+      { key: 'PREVIEW_CREDITS', value: '1', description: '预览搜索消耗积分' },
     ];
     
-    for (const config of configsToInsert) {
-      // 使用 INSERT IGNORE 只在配置不存在时插入，不覆盖已有值
+    for (const config of defaultConfigs) {
       await db.execute(sql`
         INSERT IGNORE INTO system_configs (\`key\`, value, description, updatedBy)
-        VALUES (${config.key}, ${config.value}, ${config.description}, '88888888')
+        VALUES (${config.key}, ${config.value}, ${config.description}, 'system')
       `);
     }
-    console.log(`[Migration] Checked ${configsToInsert.length} system configs (only inserted missing ones)`);
-    
-    console.log("[Migration] Data migration completed successfully!");
+    console.log(`[Init] Checked ${defaultConfigs.length} system configs (only inserted missing ones)`);
   } catch (error) {
-    console.error("[Migration] Error during data migration:", error);
+    console.error("[Init] Error ensuring default configs:", error);
   }
 }
 
@@ -1101,8 +1071,8 @@ async function ensureTables() {
     `);
     console.log("[Database] Default agent settings inserted");
     
-    // ========== 数据迁移 ==========
-    await migrateOldData(db);
+    // ========== 默认配置初始化 ==========
+    await ensureDefaultConfigs(db);
     
     console.log("[Database] All tables ensured successfully");
   } catch (error) {

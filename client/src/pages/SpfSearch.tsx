@@ -228,6 +228,15 @@ export default function SpfSearch() {
       return;
     }
     
+    // 积分校验（与 TPS/Anywho 保持一致）
+    const userCredits = profile?.credits || 0;
+    if (userCredits < estimatedCost) {
+      toast.error("积分不足", {
+        description: `预估需要 ${estimatedCost.toFixed(1)} 积分，当前余额 ${userCredits.toFixed(1)} 积分`,
+      });
+      return;
+    }
+    
     // 构建过滤器
     const effectiveFilters = {
       ...filters,
@@ -615,7 +624,7 @@ export default function SpfSearch() {
             {/* 提交按钮 */}
             <Button
               onClick={handleSearch}
-              disabled={searchMutation.isPending || names.length === 0}
+              disabled={searchMutation.isPending || names.length === 0 || (!!profile && estimatedCost > (profile.credits || 0))}
               className="w-full h-14 text-lg font-bold rainbow-btn text-white shadow-lg"
             >
               {searchMutation.isPending ? (
