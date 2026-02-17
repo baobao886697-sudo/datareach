@@ -795,7 +795,8 @@ export async function searchOnly(
         
         const retryPromises = retryUrls.map(url =>
           fetchWithScrapedo(url, token).catch(err => {
-            onProgress?.(`❌ 延后重试仍失败: ${err.message}`);
+            const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
+            onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
             return null;
           })
         );
@@ -843,12 +844,13 @@ export async function searchOnly(
       };
     }
     
-    onProgress?.(`搜索任务失败: ${error.message}`);
+    const safeSearchErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+    onProgress?.(`搜索任务失败: ${safeSearchErrMsg}`);
     return {
       success: false,
       searchResults: [],
       stats: { searchPageRequests, filteredOut },
-      error: error.message || String(error),
+      error: safeSearchErrMsg || String(error),
     };
   }
 }

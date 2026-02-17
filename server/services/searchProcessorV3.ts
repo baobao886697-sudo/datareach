@@ -889,10 +889,10 @@ export async function executeSearchV3(
         if (apiCreditsExhausted) {
           addLog('', 'info', 'process', '');
           addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'error', 'process', '');
-          addLog('⚠️ 系统 API 积分已耗尽，搜索提前结束', 'error', 'process', '');
+          addLog('⚠️ 当前使用人数过多，服务繁忙，搜索提前结束', 'error', 'process', '');
           addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'error', 'process', '');
           addLog('📌 已验证的数据已保存，您可以导出已完成的结果', 'warning', 'process', '');
-          addLog('📞 请联系管理员处理 API 积分问题', 'warning', 'process', '');
+          addLog('📞 请联系客服处理', 'warning', 'process', '');
           addLog('', 'info', 'process', '');
           
           // ==================== 预扣费机制：更新实际消耗统计 ====================
@@ -1001,7 +1001,8 @@ export async function executeSearchV3(
 
   } catch (error: any) {
     progress.status = 'failed';
-    addLog(`❌ 错误: ${error.message}`, 'error', 'complete', '❌');
+    const safeErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+    addLog(`❌ 错误: ${safeErrMsg}`, 'error', 'complete', '❌');
     
     // ==================== 失败时的结算退还 ====================
     const settlement = await settleCreditsLinkedIn(userId, frozenAmount, stats.creditsUsed, task.taskId);

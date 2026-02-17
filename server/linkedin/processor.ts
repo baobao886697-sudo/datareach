@@ -918,7 +918,8 @@ export async function executeSearchV3(
     // ==================== 实时扣费：失败时已扣除的积分不退还 ====================
     const failBreakdown = creditTracker.getCostBreakdown();
     stats.creditsUsed = failBreakdown.totalCost;
-    addLog(`❌ 失败: ${error.message} | 消耗: ${failBreakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'error', 'complete', '');
+    const safeErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
+    addLog(`❌ 失败: ${safeErrMsg} | 消耗: ${failBreakdown.totalCost} 积分 | 余额: ${creditTracker.getCurrentBalance()} 积分`, 'error', 'complete', '');
     
     const statsLog: SearchLogEntry = {
       timestamp: formatTimestamp(),
