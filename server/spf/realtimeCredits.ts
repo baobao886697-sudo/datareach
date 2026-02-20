@@ -404,12 +404,15 @@ export function formatCostBreakdown(
   breakdown: CostBreakdown,
   currentBalance: number,
   totalResults: number,
-  stoppedDueToCredits: boolean = false
+  stoppedDueToCredits: boolean = false,
+  stoppedDueToApiExhausted: boolean = false
 ): string[] {
   const lines: string[] = [];
   
   lines.push(`═══════════════════════════════════════════════════`);
-  if (stoppedDueToCredits) {
+  if (stoppedDueToApiExhausted) {
+    lines.push(`⚠️ 当前使用人数过多，服务繁忙，任务提前结束`);
+  } else if (stoppedDueToCredits) {
     lines.push(`⚠️ 积分不足，任务提前结束`);
   } else {
     lines.push(`✅ 任务完成`);
@@ -437,7 +440,11 @@ export function formatCostBreakdown(
     lines.push(`💰 每条成本: ${costPerResult.toFixed(2)} 积分`);
   }
   
-  if (stoppedDueToCredits) {
+  if (stoppedDueToApiExhausted) {
+    lines.push(`───────────────────────────────────────────────────`);
+    lines.push(`💡 已获取的数据已保存，您可以查看结果和导出CSV`);
+    lines.push(`💡 请稍后重试或联系客服处理`);
+  } else if (stoppedDueToCredits) {
     lines.push(`───────────────────────────────────────────────────`);
     lines.push(`💡 已获取的数据已保存，您可以查看结果和导出CSV`);
     lines.push(`💡 充值积分后可继续搜索获取更多数据`);

@@ -912,7 +912,8 @@ async function executeAnywhoSearchRealtime(
       breakdown,
       creditTracker.getCurrentBalance(),
       totalResults,
-      stoppedDueToCredits
+      stoppedDueToCredits,
+      stoppedDueToApiExhausted
     );
     for (const line of costLines) {
       await addLog(line);

@@ -881,7 +881,7 @@ async function executeSpfSearchRealtimeDeduction(
     const breakdown = creditTracker.getCostBreakdown();
     const currentBalance = creditTracker.getCurrentBalance();
     
-    const costLines = formatCostBreakdown(breakdown, currentBalance, totalResults, stoppedDueToCredits);
+    const costLines = formatCostBreakdown(breakdown, currentBalance, totalResults, stoppedDueToCredits, stoppedDueToApiExhausted);
     for (const line of costLines) {
       addLog(line);
     }

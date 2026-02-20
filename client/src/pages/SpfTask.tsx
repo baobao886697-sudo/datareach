@@ -706,7 +706,11 @@ export default function SpfTask() {
               <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-xl font-bold mb-2">暂无搜索结果</h3>
               <p className="text-muted-foreground">
-                未找到符合条件的数据，请尝试其他搜索条件
+                {task?.status === "insufficient_credits"
+                  ? "任务因积分不足提前停止，未获取到有效数据"
+                  : task?.status === "service_busy"
+                  ? "当前使用人数过多，服务繁忙，请稍后重试或联系客服"
+                  : "未找到符合条件的数据，请尝试其他搜索条件"}
               </p>
             </CardContent>
           </Card>

@@ -831,7 +831,8 @@ async function executeTpsSearchRealtimeDeduction(
       totalResults,
       searchCost,
       detailCost,
-      stoppedDueToCredits
+      stoppedDueToCredits,
+      stoppedDueToApiExhausted
     );
     
     for (const line of costLines) {
