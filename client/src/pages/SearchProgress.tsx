@@ -438,6 +438,13 @@ export default function SearchProgress() {
             积分不足
           </Badge>
         );
+      case "service_busy":
+        return (
+          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 gap-1 px-3 py-1">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            服务繁忙
+          </Badge>
+        );
       case "pending":
       default:
         return (

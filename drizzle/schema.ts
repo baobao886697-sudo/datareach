@@ -85,7 +85,7 @@ export const searchTasks = mysqlTable("search_tasks", {
   requestedCount: int("requestedCount").notNull(),
   actualCount: int("actualCount").default(0),
   creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0"),
-  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "stopped", "insufficient_credits"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "stopped", "insufficient_credits", "service_busy"]).default("pending").notNull(),
   progress: int("progress").default(0),
   logs: json("logs").$type<Array<{ timestamp: string; level: string; message: string }>>(),
   errorMessage: text("errorMessage"),
@@ -375,7 +375,7 @@ export const tpsSearchTasks = mysqlTable("tps_search_tasks", {
   detailPageRequests: int("detailPageRequests").default(0).notNull(), // 详情页请求数
   cacheHits: int("cacheHits").default(0).notNull(), // 缓存命中数
   creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0").notNull(),
-  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits", "service_busy"]).default("pending").notNull(),
   progress: int("progress").default(0).notNull(), // 进度百分比
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),
@@ -496,7 +496,7 @@ export const anywhoSearchTasks = mysqlTable("anywho_search_tasks", {
   detailPageRequests: int("detailPageRequests").default(0).notNull(),
   cacheHits: int("cacheHits").default(0).notNull(),
   creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0").notNull(),
-  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits", "service_busy"]).default("pending").notNull(),
   progress: int("progress").default(0).notNull(),
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),
@@ -726,7 +726,7 @@ export const spfSearchTasks = mysqlTable("spf_search_tasks", {
   detailPageRequests: int("detailPageRequests").default(0).notNull(),
   cacheHits: int("cacheHits").default(0).notNull(),
   creditsUsed: decimal("creditsUsed", { precision: 10, scale: 2 }).default("0").notNull(),
-  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "failed", "cancelled", "insufficient_credits", "service_busy"]).default("pending").notNull(),
   progress: int("progress").default(0).notNull(),
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),

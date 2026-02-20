@@ -186,7 +186,7 @@ export default function AnywhoTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.anywho.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits") }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") }
   );
   
   // WebSocket 实时订阅：收到推送时立即刷新数据
@@ -287,6 +287,8 @@ export default function AnywhoTask() {
         return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">已完成</Badge>;
       case "insufficient_credits":
         return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">积分不足</Badge>;
+      case "service_busy":
+        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">服务繁忙</Badge>;
       case "failed":
         return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">失败</Badge>;
       case "cancelled":
@@ -353,7 +355,7 @@ export default function AnywhoTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(task?.status === "completed" || task?.status === "insufficient_credits") && (
+            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}
@@ -396,6 +398,8 @@ export default function AnywhoTask() {
                   <CheckCircle className="h-8 w-8 text-green-500" />
                 ) : task?.status === "insufficient_credits" ? (
                   <AlertTriangle className="h-8 w-8 text-orange-500" />
+                ) : task?.status === "service_busy" ? (
+                  <AlertTriangle className="h-8 w-8 text-amber-500" />
                 ) : task?.status === "failed" ? (
                   <XCircle className="h-8 w-8 text-red-500" />
                 ) : (
@@ -561,7 +565,7 @@ export default function AnywhoTask() {
         )}
         
         {/* 搜索结果表格 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits") && results && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && results && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -660,14 +664,16 @@ export default function AnywhoTask() {
         )}
         
         {/* 无结果提示 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits") && (!results || !results.results || results.results.length === 0) && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (!results || !results.results || results.results.length === 0) && (
           <Card className="rainbow-border">
             <CardContent className="py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-xl font-bold mb-2">暂无搜索结果</h3>
               <p className="text-muted-foreground">
                 {task?.status === "insufficient_credits" 
-                  ? "任务因积分不足提前停止，未获取到有效数据" 
+                  ? "任务因积分不足提前停止，未获取到有效数据"
+                  : task?.status === "service_busy"
+                  ? "当前使用人数过多，服务繁忙，请稍后重试或联系客服"
                   : "未找到符合条件的数据，请尝试其他搜索条件"}
               </p>
             </CardContent>

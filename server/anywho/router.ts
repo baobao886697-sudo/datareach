@@ -310,7 +310,7 @@ export const anywhoRouter = router({
         });
       }
       
-      if (task.status !== "completed" && task.status !== "insufficient_credits") {
+      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成",
@@ -489,6 +489,7 @@ async function executeAnywhoSearchRealtime(
   let completedSubTasks = 0;
   let totalFilteredOut = 0;
   let stoppedDueToCredits = false;
+  let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
   
   const logs: Array<{ timestamp: string; message: string }> = [];
   
@@ -592,7 +593,8 @@ async function executeAnywhoSearchRealtime(
         if (searchOnlyResult.apiCreditsExhausted) {
           await addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           await addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToCredits = true;
+          stoppedDueToApiExhausted = true;
+          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
         }
         
         // 收集搜索结果
@@ -811,6 +813,7 @@ async function executeAnywhoSearchRealtime(
       if (detailApiExhausted) {
         await addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
         await addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
+        stoppedDueToApiExhausted = true;
         stoppedDueToCredits = true;
       } else if (detailStopped) {
         if (!stoppedDueToCredits) {
@@ -880,11 +883,12 @@ async function executeAnywhoSearchRealtime(
     // ==================== 完成任务 ====================
     const breakdown = creditTracker.getCostBreakdown();
     
-    // 根据是否因积分不足停止，设置不同的任务状态
-    if (stoppedDueToCredits) {
-      // 积分不足停止，但保存已获取的数据
+    // 根据停止原因设置不同的任务状态
+    const finalStatus = stoppedDueToApiExhausted ? "service_busy" : (stoppedDueToCredits ? "insufficient_credits" : "completed");
+    if (stoppedDueToApiExhausted || stoppedDueToCredits) {
+      // API 耗尽或积分不足停止，但保存已获取的数据
       await updateAnywhoSearchTaskProgress(taskId, {
-        status: "insufficient_credits",
+        status: finalStatus,
         progress: 100,
         totalResults,
         creditsUsed: breakdown.totalCost.toFixed(2),
@@ -901,7 +905,7 @@ async function executeAnywhoSearchRealtime(
         cacheHits: 0,
       });
     }
-    emitTaskCompleted(userId, taskId, "anywho", { totalResults, creditsUsed: breakdown.totalCost, status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
+    emitTaskCompleted(userId, taskId, "anywho", { totalResults, creditsUsed: breakdown.totalCost, status: finalStatus });
     
     // ==================== 完成日志（统一专业版） ====================
     const costLines = formatAnywhoeCostBreakdown(

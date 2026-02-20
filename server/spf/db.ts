@@ -225,13 +225,15 @@ export async function completeSpfSearchTask(
     creditsUsed: number;
     logs: Array<{ timestamp: string; message: string }>;
     stoppedDueToCredits?: boolean;
+    stoppedDueToApiExhausted?: boolean;
   }
 ) {
   const database = await db();
   // 限制日志数量为最近 100 条，避免超过数据库字段大小限制
   const truncatedLogs = data.logs.slice(-100);
+  const finalStatus = data.stoppedDueToApiExhausted ? "service_busy" : (data.stoppedDueToCredits ? "insufficient_credits" : "completed");
   await database.update(spfSearchTasks).set({
-    status: data.stoppedDueToCredits ? "insufficient_credits" : "completed",
+    status: finalStatus,
     progress: 100,
     totalResults: data.totalResults,
     searchPageRequests: data.searchPageRequests,

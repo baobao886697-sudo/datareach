@@ -135,6 +135,20 @@ export default function TpsHistory() {
             已完成
           </Badge>
         );
+      case "insufficient_credits":
+        return (
+          <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            积分不足
+          </Badge>
+        );
+      case "service_busy":
+        return (
+          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            服务繁忙
+          </Badge>
+        );
       case "failed":
         return (
           <Badge className="bg-red-500/20 text-red-400 border-red-500/30">

@@ -166,6 +166,13 @@ export default function AnywhoHistory() {
             积分不足
           </Badge>
         );
+      case "service_busy":
+        return (
+          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            服务繁忙
+          </Badge>
+        );
       case "failed":
         return (
           <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
@@ -285,7 +292,7 @@ export default function AnywhoHistory() {
                               <Eye className="h-4 w-4 mr-1" />
                               查看
                             </Button>
-                            {(task.status === "completed" || task.status === "insufficient_credits") && (
+                            {(task.status === "completed" || task.status === "insufficient_credits" || task.status === "service_busy") && (
                               <Button
                                 variant="ghost"
                                 size="sm"

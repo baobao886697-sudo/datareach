@@ -316,8 +316,8 @@ export const tpsRouter = router({
         });
       }
       
-      // 允许 completed 和 insufficient_credits 状态导出
-      if (task.status !== "completed" && task.status !== "insufficient_credits") {
+      // 允许 completed、insufficient_credits 和 service_busy 状态导出
+      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成，无法导出",
@@ -523,6 +523,7 @@ async function executeTpsSearchRealtimeDeduction(
   let totalFilteredOut = 0;
   let totalSkippedDeceased = 0;
   let stoppedDueToCredits = false;
+  let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
   
   // 缓存保存函数（只保存，不读取）
   const setCachedDetails = async (items: Array<{ link: string; data: TpsDetailResult }>) => {
@@ -608,7 +609,8 @@ async function executeTpsSearchRealtimeDeduction(
         if (result.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToCredits = true; // 复用此标志停止后续任务
+          stoppedDueToApiExhausted = true;
+          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
           return;
         }
       } else {
@@ -616,7 +618,8 @@ async function executeTpsSearchRealtimeDeduction(
         if (result.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToCredits = true; // 复用此标志停止后续任务
+          stoppedDueToApiExhausted = true;
+          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
           return;
         }
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
@@ -723,6 +726,7 @@ async function executeTpsSearchRealtimeDeduction(
       if (detailResult.stats.stoppedDueToApiCredits) {
         addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
         addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
+        stoppedDueToApiExhausted = true;
       }
       
       // 按子任务分组保存结果
@@ -835,15 +839,15 @@ async function executeTpsSearchRealtimeDeduction(
     }
     
     // 完成任务
-    const finalStatus = stoppedDueToCredits ? "insufficient_credits" : "completed";
+    const finalStatus = stoppedDueToApiExhausted ? "service_busy" : (stoppedDueToCredits ? "insufficient_credits" : "completed");
     
-    if (stoppedDueToCredits) {
+    if (stoppedDueToApiExhausted || stoppedDueToCredits) {
       
-      // 更新任务状态为 insufficient_credits
+      // 更新任务状态：API 耗尽为 service_busy，用户积分不足为 insufficient_credits
       const database = await getDb();
       if (database) {
         await database.update(tpsSearchTasks).set({
-          status: "insufficient_credits",
+          status: finalStatus,
           totalResults,
           searchPageRequests: totalSearchPages,
           detailPageRequests: totalDetailPages,
@@ -863,7 +867,7 @@ async function executeTpsSearchRealtimeDeduction(
         logs,
       });
     }
-    emitTaskCompleted(userId, taskId, "tps", { totalResults, creditsUsed: creditTracker.getTotalDeducted(), status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
+    emitTaskCompleted(userId, taskId, "tps", { totalResults, creditsUsed: creditTracker.getTotalDeducted(), status: finalStatus });
 
     console.log(`[TPS v8.0] 用户 ${userId} 任务完成`);
 
@@ -871,7 +875,7 @@ async function executeTpsSearchRealtimeDeduction(
     await logUserActivity({
       userId,
       action: 'TPS搜索',
-      details: `搜索${stoppedDueToCredits ? '(积分不足停止)' : '完成'}: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${creditTracker.getTotalDeducted().toFixed(1)}积分`,
+      details: `搜索${stoppedDueToApiExhausted ? '(服务繁忙停止)' : (stoppedDueToCredits ? '(积分不足停止)' : '完成')}: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${creditTracker.getTotalDeducted().toFixed(1)}积分`,
       ipAddress: undefined,
       userAgent: undefined
     });

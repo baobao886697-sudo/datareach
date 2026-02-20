@@ -181,7 +181,7 @@ export default function TpsTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.tps.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits") }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") }
   );
   
   // v7.0: 任务阶段状态（通过WS实时更新）
@@ -299,6 +299,8 @@ export default function TpsTask() {
         return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">已取消</Badge>;
       case "insufficient_credits":
         return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">积分不足</Badge>;
+      case "service_busy":
+        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">服务繁忙</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -345,7 +347,7 @@ export default function TpsTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(task?.status === "completed" || task?.status === "insufficient_credits") && (
+            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}

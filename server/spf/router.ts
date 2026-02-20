@@ -353,7 +353,7 @@ export const spfRouter = router({
         });
       }
       
-      if (task.status !== "completed" && task.status !== "insufficient_credits") {
+      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成",
@@ -591,6 +591,7 @@ async function executeSpfSearchRealtimeDeduction(
   let totalFilteredOut = 0;
   let totalSkippedDeceased = 0;
   let stoppedDueToCredits = false;
+  let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
   
   // 用于跨任务电话号码去重
   const seenPhones = new Set<string>();
@@ -673,7 +674,8 @@ async function executeSpfSearchRealtimeDeduction(
         if (result.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToCredits = true;
+          stoppedDueToApiExhausted = true;
+          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
           break;
         }
       } else {
@@ -681,7 +683,8 @@ async function executeSpfSearchRealtimeDeduction(
         if (result.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToCredits = true;
+          stoppedDueToApiExhausted = true;
+          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
           break;
         }
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
@@ -776,6 +779,7 @@ async function executeSpfSearchRealtimeDeduction(
         if (detailResult.stats.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
+          stoppedDueToApiExhausted = true;
         }
         
         // 按子任务分组保存结果
@@ -894,6 +898,7 @@ async function executeSpfSearchRealtimeDeduction(
       creditsUsed: breakdown.totalCost,
     });
     
+    const finalStatus = stoppedDueToApiExhausted ? "service_busy" : (stoppedDueToCredits ? "insufficient_credits" : "completed");
     await completeSpfSearchTask(taskDbId, {
       totalResults,
       searchPageRequests: totalSearchPages,
@@ -902,14 +907,15 @@ async function executeSpfSearchRealtimeDeduction(
       creditsUsed: breakdown.totalCost,
       logs,
       stoppedDueToCredits,
+      stoppedDueToApiExhausted,
     });
-    emitTaskCompleted(userId, taskId, "spf", { totalResults, creditsUsed: breakdown.totalCost, status: stoppedDueToCredits ? "insufficient_credits" : "completed" });
+    emitTaskCompleted(userId, taskId, "spf", { totalResults, creditsUsed: breakdown.totalCost, status: finalStatus });
     
     // 记录用户活动日志
     await logUserActivity({
       userId,
       action: 'SPF搜索',
-      details: `搜索完成: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${breakdown.totalCost.toFixed(1)}积分${stoppedDueToCredits ? ' (积分不足提前结束)' : ''}`,
+      details: `搜索${stoppedDueToApiExhausted ? '(服务繁忙停止)' : (stoppedDueToCredits ? '(积分不足停止)' : '完成')}: ${input.names.length}个姓名, ${totalResults}条结果, 消耗${breakdown.totalCost.toFixed(1)}积分`,
       ipAddress: undefined,
       userAgent: undefined
     });
