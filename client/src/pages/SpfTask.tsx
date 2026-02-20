@@ -200,9 +200,20 @@ export default function SpfTask() {
       if (msg.taskId === taskId && msg.source === "spf") {
         refetchTask();
         refetchResults();
-        toast.success(`✅ SPF 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
-          duration: 8000,
-        });
+        const status = msg.data?.status;
+        if (status === "insufficient_credits") {
+          toast.warning(`⚠️ 积分不足，SPF 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else if (status === "service_busy") {
+          toast.warning(`⚠️ 服务繁忙，SPF 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else {
+          toast.success(`✅ SPF 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        }
       }
     });
     const unsub3 = subscribe("task_failed", (msg: WsMessage) => {

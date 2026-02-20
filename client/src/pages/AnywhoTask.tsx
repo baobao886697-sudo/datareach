@@ -202,9 +202,20 @@ export default function AnywhoTask() {
       if (msg.taskId === taskId && msg.source === "anywho") {
         refetchTask();
         refetchResults();
-        toast.success(`✅ Anywho 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
-          duration: 8000,
-        });
+        const status = msg.data?.status;
+        if (status === "insufficient_credits") {
+          toast.warning(`⚠️ 积分不足，Anywho 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else if (status === "service_busy") {
+          toast.warning(`⚠️ 服务繁忙，Anywho 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else {
+          toast.success(`✅ Anywho 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        }
       }
     });
     const unsub3 = subscribe("task_failed", (msg: WsMessage) => {

@@ -47,6 +47,7 @@ import {
   Activity,
   Zap,
   AlertCircle,
+  AlertTriangle,
   Info,
   DollarSign,
 } from "lucide-react";
@@ -210,9 +211,20 @@ export default function TpsTask() {
       if (msg.taskId === taskId && msg.source === "tps") {
         refetchTask();
         refetchResults();
-        toast.success(`✅ TPS 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
-          duration: 8000,
-        });
+        const status = msg.data?.status;
+        if (status === "insufficient_credits") {
+          toast.warning(`⚠️ 积分不足，TPS 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else if (status === "service_busy") {
+          toast.warning(`⚠️ 服务繁忙，TPS 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        } else {
+          toast.success(`✅ TPS 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
+            duration: 8000,
+          });
+        }
       }
     });
     const unsub3 = subscribe("task_failed", (msg: WsMessage) => {
@@ -388,6 +400,10 @@ export default function TpsTask() {
                   <Loader2 className="h-8 w-8 text-blue-400 animate-spin" />
                 ) : task?.status === "completed" ? (
                   <CheckCircle className="h-8 w-8 text-green-400" />
+                ) : task?.status === "insufficient_credits" ? (
+                  <AlertTriangle className="h-8 w-8 text-orange-400" />
+                ) : task?.status === "service_busy" ? (
+                  <AlertTriangle className="h-8 w-8 text-amber-400" />
                 ) : task?.status === "failed" ? (
                   <XCircle className="h-8 w-8 text-red-400" />
                 ) : (
@@ -584,7 +600,7 @@ export default function TpsTask() {
         )}
         
         {/* 已完成时显示简洁日志 */}
-        {task?.status === "completed" && task?.logs && task.logs.length > 0 && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && task?.logs && task.logs.length > 0 && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -625,7 +641,7 @@ export default function TpsTask() {
         )}
         
         {/* 搜索结果表格 */}
-        {task?.status === "completed" && results && results.results.length > 0 && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && results && results.results.length > 0 && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
