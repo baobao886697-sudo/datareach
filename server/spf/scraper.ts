@@ -24,6 +24,7 @@
  */
 
 import * as cheerio from 'cheerio';
+import { globalHttpSemaphore } from '../tps/httpSemaphore';
 
 // ==================== 全局并发限制 ====================
 
@@ -95,13 +96,20 @@ async function fetchWithScrapedo(
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs + 15000); // 客户端超时比 API 超时多 15 秒
         
-        const response = await fetch(apiUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          signal: controller.signal,
-        });
+        // ⭐ 全局HTTP并发信号量保护
+        await globalHttpSemaphore.acquire();
+        let response: Response;
+        try {
+          response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            signal: controller.signal,
+          });
+        } finally {
+          globalHttpSemaphore.release();
+        }
         
         clearTimeout(timeoutId);
         
@@ -1287,7 +1295,11 @@ export async function fetchDetailsInBatch(
       }
       
       // 处理本批结果
-      for (const { task, html, error, isApiCreditsError } of batchResults) {
+      for (const result of batchResults) {
+        const { task, error, isApiCreditsError } = result;
+        let html = result.html;
+        // ⭐ 处理完后立即释放HTML内存
+        result.html = null as any;
         const link = task.detailLink;
         
         if (error) {

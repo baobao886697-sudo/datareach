@@ -847,16 +847,35 @@ async function executeTpsSearchRealtimeDeduction(
       // 更新任务状态：API 耗尽为 service_busy，用户积分不足为 insufficient_credits
       const database = await getDb();
       if (database) {
-        await database.update(tpsSearchTasks).set({
-          status: finalStatus,
-          totalResults,
-          searchPageRequests: totalSearchPages,
-          detailPageRequests: totalDetailPages,
-          cacheHits: 0,
-          creditsUsed: creditTracker.getTotalDeducted().toFixed(2),
-          logs,
-          completedAt: new Date(),
-        }).where(eq(tpsSearchTasks.id, taskDbId));
+        try {
+          await database.update(tpsSearchTasks).set({
+            status: finalStatus,
+            totalResults,
+            searchPageRequests: totalSearchPages,
+            detailPageRequests: totalDetailPages,
+            cacheHits: 0,
+            creditsUsed: creditTracker.getTotalDeducted().toFixed(2),
+            logs,
+            completedAt: new Date(),
+          }).where(eq(tpsSearchTasks.id, taskDbId));
+        } catch (dbError: any) {
+          // ⭐ ENUM兼容性保护：如果数据库不支持该状态值，fallback到"failed"
+          console.error(`[TPS v8.0] 状态更新失败 (${finalStatus})，尝试fallback到failed:`, dbError.message);
+          try {
+            await database.update(tpsSearchTasks).set({
+              status: 'failed',
+              totalResults,
+              searchPageRequests: totalSearchPages,
+              detailPageRequests: totalDetailPages,
+              cacheHits: 0,
+              creditsUsed: creditTracker.getTotalDeducted().toFixed(2),
+              logs,
+              completedAt: new Date(),
+            }).where(eq(tpsSearchTasks.id, taskDbId));
+          } catch (fallbackError: any) {
+            console.error(`[TPS v8.0] fallback状态更新也失败:`, fallbackError.message);
+          }
+        }
       }
     } else {
       await completeTpsSearchTask(taskDbId, {

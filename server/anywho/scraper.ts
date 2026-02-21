@@ -11,6 +11,7 @@
  */
 
 import * as cheerio from 'cheerio';
+import { globalHttpSemaphore } from '../tps/httpSemaphore';
 
 /**
  * Scrape.do API 积分耗尽错误 - HTTP 401/403
@@ -179,9 +180,16 @@ async function scrapeUrl(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ANYWHO_CONFIG.REQUEST_TIMEOUT);
     
-    const response = await fetch(apiUrl, {
-      signal: controller.signal,
-    });
+    // ⭐ 全局HTTP并发信号量保护
+    await globalHttpSemaphore.acquire();
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        signal: controller.signal,
+      });
+    } finally {
+      globalHttpSemaphore.release();
+    }
     
     clearTimeout(timeoutId);
     

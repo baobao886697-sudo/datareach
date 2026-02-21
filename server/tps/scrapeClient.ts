@@ -12,7 +12,13 @@
  * - 502 错误: 指数退避重试 (2s → 4s → 6s)，最多重试 3 次
  * - 429 错误: 即时重试后抛出特殊错误，由上层延后重试队列处理
  * - 超时/网络错误: 保持原有重试逻辑
+ * 
+ * v2.1 内存优化:
+ * - 接入全局 HTTP 并发信号量，限制整个系统的最大并发 HTTP 请求数
+ * - 防止多用户同时运行大任务时内存溢出 (OOM)
  */
+
+import { globalHttpSemaphore } from './httpSemaphore';
 
 // ============================================================================
 // 类型定义
@@ -153,13 +159,21 @@ export async function fetchWithScrapeClient(
       const clientTimeoutMs = timeoutMs + 5000;
       const timeoutId = setTimeout(() => controller.abort(), clientTimeoutMs);
       
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        signal: controller.signal,
-      });
+      // ⭐ 全局HTTP并发信号量保护：等待获取许可后才发起请求
+      await globalHttpSemaphore.acquire();
+      let response: Response;
+      try {
+        response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: controller.signal,
+        });
+      } finally {
+        // 无论请求成功还是失败，都必须释放信号量
+        globalHttpSemaphore.release();
+      }
       
       clearTimeout(timeoutId);
       

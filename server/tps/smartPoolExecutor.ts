@@ -206,7 +206,8 @@ export async function fetchDetailsWithSmartPool(
     let batchSuccess = 0;
     let batchFail = 0;
     
-    for (const result of batchResults) {
+    for (let ri = 0; ri < batchResults.length; ri++) {
+      const result = batchResults[ri];
       if (stoppedDueToCredits) break;
       
       if (result.success) {
@@ -226,6 +227,9 @@ export async function fetchDetailsWithSmartPool(
         if (linkTasks.length > 0) {
           const details = parseDetailPage(result.html, linkTasks[0].searchResult);
           
+          // ⭐ 内存优化：解析完成后立即释放HTML内存
+          (batchResults[ri] as any).html = '';
+          
           // 保存缓存
           for (const detail of details) {
             if (detail.phone && detail.phone.length >= 10) {
@@ -242,6 +246,9 @@ export async function fetchDetailsWithSmartPool(
           for (const task of linkTasks) {
             results.push({ task, details: filtered });
           }
+        } else {
+          // ⭐ 内存优化：即使没有匹配的任务，也释放HTML
+          (batchResults[ri] as any).html = '';
         }
       } else {
         batchFail++;

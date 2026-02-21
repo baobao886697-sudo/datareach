@@ -1141,3 +1141,56 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
+// ============================================================================
+// 优雅关闭 (Graceful Shutdown)
+// 当服务器重启/部署时，将所有 running 状态的任务标记为 failed
+// 防止任务永远卡在 running 状态
+// ============================================================================
+
+async function gracefulShutdown(signal: string) {
+  console.log(`\n[GracefulShutdown] 收到 ${signal} 信号，开始优雅关闭...`);
+  
+  try {
+    const db = getDbSync();
+    if (!db) {
+      console.log('[GracefulShutdown] 数据库未连接，跳过任务清理');
+      process.exit(0);
+      return;
+    }
+    
+    // 将所有 running 状态的任务标记为 failed
+    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+    let totalCleaned = 0;
+    
+    for (const table of tables) {
+      try {
+        const result = await db.execute(
+          sql`UPDATE ${sql.raw(table)} SET status = 'failed', completedAt = NOW() WHERE status = 'running'`
+        );
+        const affected = (result as any)?.[0]?.affectedRows || 0;
+        if (affected > 0) {
+          totalCleaned += affected;
+          console.log(`[GracefulShutdown] ${table}: ${affected} 个 running 任务已标记为 failed`);
+        }
+      } catch (err: any) {
+        console.error(`[GracefulShutdown] 清理 ${table} 失败:`, err.message);
+      }
+    }
+    
+    if (totalCleaned > 0) {
+      console.log(`[GracefulShutdown] 共清理 ${totalCleaned} 个卡死任务`);
+    } else {
+      console.log('[GracefulShutdown] 没有需要清理的 running 任务');
+    }
+  } catch (error: any) {
+    console.error('[GracefulShutdown] 清理失败:', error.message);
+  }
+  
+  console.log('[GracefulShutdown] 关闭完成');
+  process.exit(0);
+}
+
+// 监听进程终止信号
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

@@ -148,7 +148,7 @@ export async function createAnywhoSearchTask(data: {
  * 更新任务进度
  */
 export async function updateAnywhoSearchTaskProgress(taskId: string, data: {
-  status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "insufficient_credits";
+  status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "insufficient_credits" | "service_busy";
   progress?: number;
   totalSubTasks?: number;
   completedSubTasks?: number;
@@ -166,9 +166,23 @@ export async function updateAnywhoSearchTaskProgress(taskId: string, data: {
     updateData.startedAt = new Date();
   }
   
-  await database.update(anywhoSearchTasks)
-    .set(updateData)
-    .where(eq(anywhoSearchTasks.taskId, taskId));
+  try {
+    await database.update(anywhoSearchTasks)
+      .set(updateData)
+      .where(eq(anywhoSearchTasks.taskId, taskId));
+  } catch (dbError: any) {
+    // ⭐ ENUM兼容性保护：如果状态值不被数据库支持，fallback到"failed"
+    if (updateData.status && updateData.status !== 'failed') {
+      console.error(`[Anywho] 状态更新失败 (${updateData.status})，fallback到failed:`, dbError.message);
+      updateData.status = 'failed';
+      updateData.completedAt = new Date();
+      await database.update(anywhoSearchTasks)
+        .set(updateData)
+        .where(eq(anywhoSearchTasks.taskId, taskId));
+    } else {
+      throw dbError;
+    }
+  }
 }
 
 /**

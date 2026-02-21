@@ -730,44 +730,53 @@ export async function searchOnly(
         remainingUrls.push(buildSearchUrl(name, location, page));
       }
       
-      onProgress?.(`并发获取剩余 ${remainingUrls.length} 页...`);
+      onProgress?.(`分块获取剩余 ${remainingUrls.length} 页 (每批5页)...`);
       
-      // 并发获取所有剩余页，收集需要延后重试的页面
+      // 分块并发获取剩余页（每批5个，降低内存峰值80%）
+      const SEARCH_PAGE_CHUNK_SIZE = 5;
       const retryUrls: string[] = [];  // 429/502 延后重试队列
       
       let searchApiCreditsExhausted = false;
       
-      const pagePromises = remainingUrls.map(url => 
-        fetchWithScrapedo(url, token).catch(err => {
-          // 检测 API 积分耗尽错误
-          if (err instanceof ScrapeApiCreditsError) {
-            searchApiCreditsExhausted = true;
-            // 只输出一次提示，不刷屏
+      for (let chunkStart = 0; chunkStart < remainingUrls.length; chunkStart += SEARCH_PAGE_CHUNK_SIZE) {
+        // 如果API积分已耗尽，停止获取更多页面
+        if (searchApiCreditsExhausted) break;
+        
+        const chunk = remainingUrls.slice(chunkStart, chunkStart + SEARCH_PAGE_CHUNK_SIZE);
+        
+        const chunkPromises = chunk.map(url => 
+          fetchWithScrapedo(url, token).catch(err => {
+            // 检测 API 积分耗尽错误
+            if (err instanceof ScrapeApiCreditsError) {
+              searchApiCreditsExhausted = true;
+              return null;
+            }
+            // 检测 429/502 错误，加入延后重试队列
+            if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
+              retryUrls.push(url);
+              onProgress?.(`⚓ 页面获取失败 (${err instanceof ScrapeRateLimitError ? '429限流' : '502服务器错误'})，已排入队尾稍后重试...`);
+            } else {
+              const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
+              onProgress?.(`页面获取失败: ${safeErrMsg}`);
+            }
             return null;
+          })
+        );
+        
+        const chunkHtmls = await Promise.all(chunkPromises);
+        searchPageRequests += chunk.length;
+        
+        // 立即处理并释放HTML内存
+        for (const html of chunkHtmls) {
+          if (html) {
+            const pageResults = parseSearchPage(html);
+            const filterResult = preFilterByAge(pageResults, filters);
+            filteredOut += pageResults.length - filterResult.filtered.length;
+            totalSkippedDeceased += filterResult.stats.skippedDeceased;
+            allResults.push(...filterResult.filtered);
           }
-          // 检测 429/502 错误，加入延后重试队列
-          if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
-            retryUrls.push(url);
-            onProgress?.(`⚓ 页面获取失败 (${err instanceof ScrapeRateLimitError ? '429限流' : '502服务器错误'})，已排入队尾稍后重试...`);
-          } else {
-            const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-            onProgress?.(`页面获取失败: ${safeErrMsg}`);
-          }
-          return null; // 错误时返回 null
-        })
-      );
-      
-      const pageHtmls = await Promise.all(pagePromises);
-      searchPageRequests += remainingUrls.length;
-      
-      for (const html of pageHtmls) {
-        if (html) {
-          const pageResults = parseSearchPage(html);
-          const filterResult = preFilterByAge(pageResults, filters);
-          filteredOut += pageResults.length - filterResult.filtered.length;
-          totalSkippedDeceased += filterResult.stats.skippedDeceased;
-          allResults.push(...filterResult.filtered);
         }
+        // chunkHtmls 在此作用域结束后自动释放
       }
       
       // 检查 API 积分耗尽
