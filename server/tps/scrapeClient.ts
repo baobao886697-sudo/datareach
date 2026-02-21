@@ -157,10 +157,11 @@ export async function fetchWithScrapeClient(
       const controller = new AbortController();
       // 客户端超时比 API 超时多 5 秒，确保能收到 API 的超时响应
       const clientTimeoutMs = timeoutMs + 5000;
-      const timeoutId = setTimeout(() => controller.abort(), clientTimeoutMs);
       
       // ⭐ 全局HTTP并发信号量保护：等待获取许可后才发起请求
+      // 注意：setTimeout必须在acquire()之后启动，避免在排队等待期间就超时
       await globalHttpSemaphore.acquire();
+      const timeoutId = setTimeout(() => controller.abort(), clientTimeoutMs);
       let response: Response;
       try {
         response = await fetch(apiUrl, {
@@ -171,11 +172,10 @@ export async function fetchWithScrapeClient(
           signal: controller.signal,
         });
       } finally {
-        // 无论请求成功还是失败，都必须释放信号量
+        // 无论请求成功还是失败，都必须释放信号量并清除超时
+        clearTimeout(timeoutId);
         globalHttpSemaphore.release();
       }
-      
-      clearTimeout(timeoutId);
       
       if (!response.ok) {
         const statusCode = response.status;

@@ -219,7 +219,9 @@ export const anywhoRouter = router({
       });
       
       // 异步执行搜索（实时扣费模式）
-      executeAnywhoSearchRealtime(task.taskId, task.id, userId, subTasks, input.filters || {}, config);
+      executeAnywhoSearchRealtime(task.taskId, task.id, userId, subTasks, input.filters || {}, config).catch(err => {
+        console.error(`[Anywho] 任务执行失败: ${task.taskId}`, err);
+      });
       
       return {
         taskId: task.taskId,
@@ -922,14 +924,17 @@ async function executeAnywhoSearchRealtime(
   } catch (error: any) {
     console.error(`[Anywho] 任务 ${taskId} 执行失败:`, error);
     
-    const breakdown = creditTracker.getCostBreakdown();
-    
-    const safeErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : (error.message || '未知错误');
-    await failAnywhoSearchTask(taskId, safeErrMsg);
-    emitTaskFailed(userId, taskId, "anywho", { error: safeErrMsg, creditsUsed: breakdown.totalCost });
-    await addLog(`❌ 搜索任务失败: ${safeErrMsg}`);
-    await addLog(`💰 已消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
-    await addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+    try {
+      const breakdown = creditTracker.getCostBreakdown();
+      const safeErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : (error.message || '未知错误');
+      await failAnywhoSearchTask(taskId, safeErrMsg);
+      emitTaskFailed(userId, taskId, "anywho", { error: safeErrMsg, creditsUsed: breakdown.totalCost });
+      await addLog(`❌ 搜索任务失败: ${safeErrMsg}`);
+      await addLog(`💰 已消耗: ${breakdown.totalCost.toFixed(1)} 积分`);
+      await addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+    } catch (cleanupError: any) {
+      console.error(`[Anywho] 任务 ${taskId} 失败清理时也出错:`, cleanupError.message);
+    }
   }
 }
 

@@ -178,20 +178,21 @@ async function scrapeUrl(
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), ANYWHO_CONFIG.REQUEST_TIMEOUT);
     
     // ⭐ 全局HTTP并发信号量保护
+    // 注意：setTimeout必须在acquire()之后启动，避免在排队等待期间就超时
     await globalHttpSemaphore.acquire();
+    const timeoutId = setTimeout(() => controller.abort(), ANYWHO_CONFIG.REQUEST_TIMEOUT);
     let response: Response;
     try {
       response = await fetch(apiUrl, {
         signal: controller.signal,
       });
     } finally {
+      // 无论请求成功还是失败，都必须释放信号量并清除超时
+      clearTimeout(timeoutId);
       globalHttpSemaphore.release();
     }
-    
-    clearTimeout(timeoutId);
     
     if (!response.ok) {
       // 401/403: API 积分耗尽或认证失败，抛出特殊错误

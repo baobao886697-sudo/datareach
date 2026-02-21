@@ -802,15 +802,21 @@ export async function searchOnly(
         // 等待 2 秒后开始重试，给服务器恢复时间
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        const retryPromises = retryUrls.map(url =>
-          fetchWithScrapedo(url, token).catch(err => {
-            const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-            onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
-            return null;
-          })
-        );
-        
-        const retryHtmls = await Promise.all(retryPromises);
+        // 分块并发重试，每批最多5个，与主搜索保持一致
+        const RETRY_CHUNK_SIZE = 5;
+        const retryHtmls: (string | null)[] = [];
+        for (let i = 0; i < retryUrls.length; i += RETRY_CHUNK_SIZE) {
+          const chunk = retryUrls.slice(i, i + RETRY_CHUNK_SIZE);
+          const chunkPromises = chunk.map(url =>
+            fetchWithScrapedo(url, token).catch(err => {
+              const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
+              onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
+              return null;
+            })
+          );
+          const chunkResults = await Promise.all(chunkPromises);
+          retryHtmls.push(...chunkResults);
+        }
         searchPageRequests += retryUrls.length;
         
         let retrySuccess = 0;

@@ -94,10 +94,11 @@ async function fetchWithScrapedo(
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs + 15000); // 客户端超时比 API 超时多 15 秒
         
         // ⭐ 全局HTTP并发信号量保护
+        // 注意：setTimeout必须在acquire()之后启动，避免在排队等待期间就超时
         await globalHttpSemaphore.acquire();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs + 15000); // 客户端超时比 API 超时多 15 秒
         let response: Response;
         try {
           response = await fetch(apiUrl, {
@@ -108,10 +109,10 @@ async function fetchWithScrapedo(
             signal: controller.signal,
           });
         } finally {
+          // 无论请求成功还是失败，都必须释放信号量并清除超时
+          clearTimeout(timeoutId);
           globalHttpSemaphore.release();
         }
-        
-        clearTimeout(timeoutId);
         
         // 检查是否是可重试的服务器错误 (502, 503, 504)
         if (!response.ok) {
