@@ -247,17 +247,21 @@ export async function completeSpfSearchTask(
   } catch (dbError: any) {
     // ⭐ ENUM兼容性保护：fallback到"failed"
     console.error(`[SPF] 状态更新失败 (${finalStatus})，fallback到failed:`, dbError.message);
-    await database.update(spfSearchTasks).set({
-      status: 'failed',
-      progress: 100,
-      totalResults: data.totalResults,
-      searchPageRequests: data.searchPageRequests,
-      detailPageRequests: data.detailPageRequests,
-      cacheHits: data.cacheHits,
-      creditsUsed: data.creditsUsed.toString(),
-      logs: truncatedLogs,
-      completedAt: new Date(),
-    }).where(eq(spfSearchTasks.id, taskDbId));
+    try {
+      await database.update(spfSearchTasks).set({
+        status: 'failed',
+        progress: 100,
+        totalResults: data.totalResults,
+        searchPageRequests: data.searchPageRequests,
+        detailPageRequests: data.detailPageRequests,
+        cacheHits: data.cacheHits,
+        creditsUsed: data.creditsUsed.toString(),
+        logs: truncatedLogs,
+        completedAt: new Date(),
+      }).where(eq(spfSearchTasks.id, taskDbId));
+    } catch (fallbackError: any) {
+      console.error(`[SPF] fallback到failed也失败:`, fallbackError.message);
+    }
   }
 }
 

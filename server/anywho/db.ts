@@ -176,9 +176,13 @@ export async function updateAnywhoSearchTaskProgress(taskId: string, data: {
       console.error(`[Anywho] 状态更新失败 (${updateData.status})，fallback到failed:`, dbError.message);
       updateData.status = 'failed';
       updateData.completedAt = new Date();
-      await database.update(anywhoSearchTasks)
-        .set(updateData)
-        .where(eq(anywhoSearchTasks.taskId, taskId));
+      try {
+        await database.update(anywhoSearchTasks)
+          .set(updateData)
+          .where(eq(anywhoSearchTasks.taskId, taskId));
+      } catch (fallbackError: any) {
+        console.error(`[Anywho] fallback到failed也失败:`, fallbackError.message);
+      }
     } else {
       throw dbError;
     }
