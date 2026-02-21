@@ -495,18 +495,31 @@ async function executeTpsSearchRealtimeDeduction(
     }
   }
   
-  // 启动日志（简洁专业版，参考 SPF 风格）
-  addLog(`🚀 TPS 搜索任务启动`);
-  addLog(`📋 搜索组合: ${subTasks.length} 个任务`);
+  // v8.2: 启动日志（统一为Anywho标杆风格）
+  addLog(`═══════════════════════════════════════════════════`);
+  addLog(`🚀 开始 TPS 搜索（实时扣费模式）`);
+  addLog(`═══════════════════════════════════════════════════`);
+  
+  // 显示搜索配置
+  addLog(`📋 搜索配置:`);
   if (input.mode === 'nameLocation' && input.locations) {
-    addLog(`📋 搜索: ${input.names.join(', ')} @ ${input.locations.join(', ')}`);
+    addLog(`   • 搜索姓名: ${input.names.join(', ')}`);
+    addLog(`   • 搜索地点: ${input.locations.join(', ')}`);
   } else {
-    addLog(`📋 搜索: ${input.names.join(', ')}`);
+    addLog(`   • 搜索姓名: ${input.names.join(', ')}`);
   }
+  addLog(`   • 搜索组合: ${subTasks.length} 个任务`);
   
   // 显示过滤条件
   const filters = input.filters || {};
-  addLog(`📋 过滤条件: 年龄 ${filters.minAge || 50}-${filters.maxAge || 79} 岁`);
+  addLog(`📋 过滤条件:`);
+  addLog(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
+  if (filters.minYear) addLog(`   • 号码年份: ≥ ${filters.minYear} 年`);
+  addLog(`   • 排除已故: 是`);  // TPS默认排除已故
+  
+  addLog(`💰 扣费模式: 实时扣费，用多少扣多少`);
+  addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+  addLog(`═══════════════════════════════════════════════════`);
   
   // 更新任务状态
   await updateTpsSearchTaskProgress(taskDbId, {
@@ -667,7 +680,9 @@ async function executeTpsSearchRealtimeDeduction(
     
     // ==================== 阶段二：智能并发池获取详情（v7.0 全局弹性并发 + 实时进度推送） ====================
     if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
-      addLog(`\ud83d\udccb 开始获取详情...`);
+      addLog(`════════ 进入详情获取阶段 ════════`);
+      addLog(`📋 待获取详情: ${allDetailTasks.length} 条`);
+      addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
       
       // v7.0: 详情进度回调 — 每完成一批就更新数据库和推送WS
       let lastDetailProgressPush = 0; // 防止推送过于频繁
@@ -682,10 +697,12 @@ async function executeTpsSearchRealtimeDeduction(
         const phase = info.phase === 'retrying' ? '重试中' : '获取详情';
         
         // v7.2: 使用 fire-and-forget 模式，避免阻塞并发池的 onStats 回调
-        // 数据库更新和WS推送异步执行，失败不影响主流程
+        // v8.2: 增加 detailPageRequests 和 totalResults 实时推送
         updateTpsSearchTaskProgress(taskDbId, {
           progress: detailProgress,
           searchPageRequests: totalSearchPages,
+          detailPageRequests: info.detailPageRequests,
+          totalResults: info.totalResults,
           creditsUsed: creditTracker.getTotalDeducted(),
           logs,
         }).catch(err => console.error('[TPS] 详情进度更新DB失败:', err));
@@ -696,6 +713,8 @@ async function executeTpsSearchRealtimeDeduction(
           phase,
           completedDetails: info.completedDetails,
           totalDetails: info.totalDetails,
+          detailPageRequests: info.detailPageRequests,
+          totalResults: info.totalResults,
           creditsUsed: creditTracker.getTotalDeducted(),
           logs,
         });

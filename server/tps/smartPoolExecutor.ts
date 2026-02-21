@@ -82,6 +82,10 @@ export interface DetailProgressInfo {
   totalDetails: number;
   percent: number;
   phase: 'fetching' | 'retrying';
+  /** v8.2: 实时详情页请求数 */
+  detailPageRequests: number;
+  /** v8.2: 实时有效结果数 */
+  totalResults: number;
 }
 
 // ============================================================================
@@ -266,6 +270,8 @@ export async function fetchDetailsWithSmartPool(
           totalDetails,
           percent: Math.round((completedDetails / totalDetails) * 100),
           phase: 'fetching',
+          detailPageRequests,
+          totalResults: results.length,
         });
       }
     }
@@ -377,6 +383,8 @@ export async function fetchDetailsWithSmartPool(
             totalDetails,
             percent: Math.round((completedDetails / totalDetails) * 100),
             phase: 'retrying',
+            detailPageRequests,
+            totalResults: results.length,
           });
         }
       }

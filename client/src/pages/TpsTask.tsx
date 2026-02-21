@@ -592,7 +592,7 @@ export default function TpsTask() {
 
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  每 2 秒自动刷新
+                  实时更新
                 </span>
               </div>
             </CardContent>

@@ -568,13 +568,31 @@ async function executeSpfSearchRealtimeDeduction(
   const creditTracker = await createRealtimeCreditTracker(userId, taskId, searchCost, detailCost);
   const initialBalance = creditTracker.getCurrentBalance();
   
-  // 启动日志（简洁专业版）
-  addLog(`🚀 SPF 搜索任务启动`);
-  addLog(`📋 搜索组合: ${subTasks.length} 个任务`);
+  // v8.2: 启动日志（统一为Anywho标杆风格）
+  addLog(`═══════════════════════════════════════════════════`);
+  addLog(`🚀 开始 SPF 搜索（实时扣费模式）`);
+  addLog(`═══════════════════════════════════════════════════`);
+  
+  // 显示搜索配置
+  addLog(`📋 搜索配置:`);
+  const searchNames = subTasks.map(t => t.name).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+  addLog(`   • 搜索姓名: ${searchNames.join(', ')}`);
+  const searchLocations = subTasks.map(t => t.location).filter(Boolean).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+  if (searchLocations.length > 0) {
+    addLog(`   • 搜索地点: ${searchLocations.join(', ')}`);
+  }
+  addLog(`   • 搜索组合: ${subTasks.length} 个任务`);
   
   // 显示过滤条件
   const filters = input.filters || {};
-  addLog(`📋 过滤条件: 年龄 ${filters.minAge || 50}-${filters.maxAge || 79} 岁`);
+  addLog(`📋 过滤条件:`);
+  addLog(`   • 年龄范围: ${filters.minAge || 50} - ${filters.maxAge || 79} 岁`);
+  if (filters.minYear) addLog(`   • 号码年份: ≥ ${filters.minYear} 年`);
+  addLog(`   • 排除已故: 是`);  // SPF默认排除已故
+  
+  addLog(`💰 扣费模式: 实时扣费，用多少扣多少`);
+  addLog(`💰 当前余额: ${initialBalance.toFixed(1)} 积分`);
+  addLog(`═══════════════════════════════════════════════════`);
   
   // 更新任务状态
   await updateSpfSearchTaskProgress(taskDbId, {
@@ -703,11 +721,13 @@ async function executeSpfSearchRealtimeDeduction(
       emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
     }
     
-    // 搜索完成，静默处理
+    // v8.2: 搜索完成过渡日志
+    addLog(`════════ 进入详情获取阶段 ════════`);
     
     // ==================== 阶段二：获取详情（实时扣费，无缓存读取） ====================
     if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
-      // 阶段二：详情获取
+      addLog(`📋 待获取详情: ${allDetailTasks.length} 条`);
+      addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
       
       // 去重详情链接
       const uniqueLinks = Array.from(new Set(allDetailTasks.map(t => t.detailLink)));
@@ -748,7 +768,39 @@ async function executeSpfSearchRealtimeDeduction(
       
       // 获取详情（不使用缓存读取）
       if (detailTasksToFetch.length > 0) {
-        // 获取详情，静默处理
+        // v8.2: 详情进度回调 — 实时更新DB和推送WS
+        let lastSpfDetailPush = 0;
+        const onDetailProgress = (info: { completedDetails: number; totalDetails: number; percent: number; detailPageRequests: number; totalResults: number }) => {
+          const now = Date.now();
+          // 每2秒最多推送一次，或者是最后一条
+          if (now - lastSpfDetailPush < 2000 && info.completedDetails < info.totalDetails) return;
+          lastSpfDetailPush = now;
+          
+          // 详情阶段进度占 30%-95%
+          const detailProgress = 30 + Math.round(info.percent * 0.65);
+          
+          // fire-and-forget DB更新
+          updateSpfSearchTaskProgress(taskDbId, {
+            progress: detailProgress,
+            searchPageRequests: totalSearchPages,
+            detailPageRequests: totalDetailPages + info.detailPageRequests,
+            totalResults: info.totalResults,
+            creditsUsed: creditTracker.getCostBreakdown().totalCost,
+            logs,
+          }).catch(err => console.error('[SPF] 详情进度更新DB失败:', err));
+          
+          // WS推送
+          emitTaskProgress(userId, taskId, "spf", {
+            progress: detailProgress,
+            completedDetails: info.completedDetails,
+            totalDetails: info.totalDetails,
+            detailPageRequests: totalDetailPages + info.detailPageRequests,
+            totalResults: info.totalResults,
+            creditsUsed: creditTracker.getCostBreakdown().totalCost,
+            logs,
+          });
+          emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
+        };
         
         const detailResult = await fetchDetailsInBatch(
           detailTasksToFetch,
@@ -757,7 +809,8 @@ async function executeSpfSearchRealtimeDeduction(
           input.filters || {},
           addLog,
           async () => new Map(), // 不读取缓存
-          setCachedDetails // 保存数据用于 CSV 导出
+          setCachedDetails, // 保存数据用于 CSV 导出
+          onDetailProgress // v8.2: 详情进度回调
         );
         
         // 实时扣除详情页费用（逐条扣除 + 实时推送积分更新）

@@ -850,12 +850,14 @@ async function executeAnywhoSearchRealtime(
       await addLog(`📊 详细信息获取完成`);
       
       // 详情页获取后再次过滤已故人员
+      let detailFilteredCount = 0;
       if (filters.excludeDeceased !== false) {
         const beforeDeceasedFilter = filteredResults.length;
         filteredResults = filteredResults.filter(r => !r.isDeceased);
         const deceasedFiltered = beforeDeceasedFilter - filteredResults.length;
         if (deceasedFiltered > 0) {
           totalFilteredOut += deceasedFiltered;
+          detailFilteredCount += deceasedFiltered;
         }
       }
       
@@ -869,7 +871,13 @@ async function executeAnywhoSearchRealtime(
         const noPhoneFiltered = beforeNoPhoneFilter - filteredResults.length;
         if (noPhoneFiltered > 0) {
           totalFilteredOut += noPhoneFiltered;
+          detailFilteredCount += noPhoneFiltered;
         }
+      }
+      
+      // v8.2: 详情阶段二次过滤说明日志
+      if (detailFilteredCount > 0) {
+        await addLog(`📊 详情阶段二次过滤: ${detailFilteredCount} 条被移除（已故/无电话），剩余 ${filteredResults.length} 条`);
       }
     }
     
