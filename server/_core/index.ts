@@ -1194,3 +1194,14 @@ async function gracefulShutdown(signal: string) {
 // 监听进程终止信号
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ⭐ 全局未处理异常保护：防止未捕获的Promise rejection或异常导致进程崩溃
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UnhandledRejection] 未处理的Promise rejection:', reason);
+  // 不退出进程，仅记录日志，让其他任务继续运行
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[UncaughtException] 未捕获的异常:', error);
+  // 对于非致命错误，仅记录日志；致命错误（如OOM）会由操作系统处理
+});
