@@ -101,6 +101,28 @@ export function emitCreditsUpdate(
 }
 
 /**
+ * 广播公告给所有在线用户
+ */
+export function emitAnnouncement(
+  data: {
+    id: number;
+    title: string;
+    content: string;
+    type?: string;
+  }
+): void {
+  try {
+    wsManager.broadcast({
+      type: "announcement",
+      data,
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    // 静默处理
+  }
+}
+
+/**
  * 推送通知消息
  */
 export function emitNotification(

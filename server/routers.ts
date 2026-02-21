@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { emitNotification, emitAnnouncement } from "./_core/wsEmitter";
 
 // 格式化电话号码 - 确保美国号码为11位（以1开头）
 function formatPhoneNumber(phone: string | undefined | null): string {
@@ -1200,11 +1201,19 @@ export const appRouter = router({
               type: 'system',
               createdBy: 'admin'
             });
-          }
+           }
+          // WS实时推送通知（让铃铛立即闪烁）
+          const notifyTitle = input.amount > 0 ? '积分到账通知' : '积分变动通知';
+          emitNotification(input.userId, {
+            title: notifyTitle,
+            content: input.amount > 0 
+              ? `您的账户已成功充入 ${absAmount} 积分，当前余额 ${newBalanceFormatted} 积分`
+              : `您的账户积分已变动 -${absAmount} 积分，当前余额 ${newBalanceFormatted} 积分`,
+            type: 'system',
+          });
         } catch (error) {
           console.error("[通知] 积分变动通知发送失败:", error);
         }
-
         return { success: true, newBalance: result.newBalance };
       }),
 
@@ -1790,10 +1799,20 @@ export const appRouter = router({
           announcement.id.toString(),
           { title: input.title }
         );
+        // WS广播公告给所有在线用户（让铃铛立即闪烁）
+        try {
+          emitAnnouncement({
+            id: announcement.id,
+            title: announcement.title,
+            content: announcement.content,
+            type: announcement.type || 'info',
+          });
+        } catch (e) {
+          console.error('[WS] 公告广播失败:', e);
+        }
         return announcement;
       }),
-
-    // 更新公告
+    // 更新公告告
     updateAnnouncement: adminProcedure
       .input(z.object({
         id: z.number(),
@@ -1862,16 +1881,25 @@ export const appRouter = router({
         if (!message) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "发送消息失败" });
         }
-        await logAdmin(
+         await logAdmin(
           (ctx as any).adminUser?.username || 'admin',
           'send_message',
           'user',
           input.userId.toString(),
           { title: input.title }
         );
+        // WS实时推送通知（让铃铛立即闪烁）
+        try {
+          emitNotification(input.userId, {
+            title: input.title,
+            content: input.content,
+            type: input.type || 'system',
+          });
+        } catch (e) {
+          console.error('[WS] 消息推送失败:', e);
+        }
         return message;
       }),
-
     // 批量发送消息
     sendBulkMessage: adminProcedure
       .input(z.object({
@@ -1894,6 +1922,18 @@ export const appRouter = router({
           undefined,
           { count, title: input.title }
         );
+        // WS实时推送通知给每个用户（让铃铛立即闪烁）
+        try {
+          for (const userId of input.userIds) {
+            emitNotification(userId, {
+              title: input.title,
+              content: input.content,
+              type: input.type || 'system',
+            });
+          }
+        } catch (e) {
+          console.error('[WS] 批量消息推送失败:', e);
+        }
         return { success: true, count };
       }),
 

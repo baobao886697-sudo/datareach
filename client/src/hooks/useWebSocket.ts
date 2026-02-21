@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ==================== 类型定义 ====================
 
 export interface WsMessage {
-  type: "task_progress" | "task_completed" | "task_failed" | "credits_update" | "notification" | "pong" | "connected";
+  type: "task_progress" | "task_completed" | "task_failed" | "credits_update" | "notification" | "announcement" | "pong" | "connected";
   taskId?: string;
   source?: "tps" | "spf" | "anywho" | "linkedin";
   data?: Record<string, any>;

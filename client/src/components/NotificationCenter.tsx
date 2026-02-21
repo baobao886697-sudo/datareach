@@ -24,7 +24,7 @@ export function NotificationCenter() {
   // 获取未读消息数量
   const { data: unreadData, refetch: refetchUnread } = trpc.notification.getUnreadCount.useQuery(
     undefined,
-    { refetchInterval: 30000 } // 保留轮询作为兆底
+    { refetchInterval: 15000 } // 保留轮询作为兆底（15秒）
   );
 
   // 获取消息列表
@@ -32,6 +32,9 @@ export function NotificationCenter() {
     { limit: 20 },
     { enabled: open }
   );
+
+  // 获取公告（移到useEffect之前，确保refetchAnnouncements可用）
+  const { data: announcements, refetch: refetchAnnouncements } = trpc.notification.getAnnouncements.useQuery();
   
   // WebSocket 实时推送：收到新通知时立即刷新
   useEffect(() => {
@@ -60,11 +63,21 @@ export function NotificationCenter() {
       }
       toast.success(`${sourceLabel} 搜索任务已完成`, { duration: 5000 });
     });
-    return () => { unsub1(); unsub2(); };
-  }, [subscribe, refetchUnread, refetchMessages]);
-
-  // 获取公告
-  const { data: announcements } = trpc.notification.getAnnouncements.useQuery();
+    // 监听公告广播：收到新公告时立即刷新并提示
+    const unsub3 = subscribe("announcement", (msg: WsMessage) => {
+      refetchAnnouncements();
+      refetchUnread();
+      // 显示浏览器通知
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("📢 DataReach 系统公告", {
+          body: msg.data?.title || "有新的系统公告",
+          icon: "/favicon.ico",
+        });
+      }
+      toast.info(`📢 新公告：${msg.data?.title || '有新的系统公告'}`, { duration: 6000 });
+    });
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, [subscribe, refetchUnread, refetchMessages, refetchAnnouncements]);
 
   // 标记已读
   const markAsReadMutation = trpc.notification.markAsRead.useMutation({
