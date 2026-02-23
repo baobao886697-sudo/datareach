@@ -418,7 +418,8 @@ export const tpsRouter = router({
           maritalStatus,
           r.detailLink ? `https://www.truepeoplesearch.com${r.detailLink}` : "",
           "TruePeopleSearch",
-          new Date().toISOString().split("T")[0],
+          // BUG-15修复：使用任务完成时间而非当前时间
+          (task.completedAt ? new Date(task.completedAt).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]),
         ];
       });
       
@@ -470,6 +471,9 @@ async function executeTpsSearchRealtimeDeduction(
 ) {
   // v8.0: 全局信号量已移除，并发由分批模式控制
   console.log(`[TPS v8.0] 用户 ${userId} 开始任务`);
+  
+  // BUG-10修复：记录任务开始到监控器
+  recordTaskStart(taskId, userId, 0);
   
   const searchCost = parseFloat(config.searchCost);
   const detailCost = parseFloat(config.detailCost);
@@ -574,12 +578,12 @@ async function executeTpsSearchRealtimeDeduction(
     const searchQueue = [...subTasks];
     
     const processSearch = async (subTask: { name: string; location: string; index: number }) => {
-      // 检查是否因积分不足而停止
-      if (stoppedDueToCredits) {
+      // BUG-04修复：先检查同步标志，再检查异步余额，减少竞态窗口
+      if (stoppedDueToCredits || creditTracker.isStopped()) {
         return;
       }
       
-      // 检查是否有足够积分执行搜索
+      // BUG-05修复：搜索前预检查是否足够支付至少1页搜索费用
       const canAfford = await creditTracker.canAffordSearchPage();
       if (!canAfford) {
         stoppedDueToCredits = true;
@@ -599,7 +603,7 @@ async function executeTpsSearchRealtimeDeduction(
       completedSearches++;
       
       if (result.success) {
-        // 实时扣除搜索页费用
+        // 实时扣除搜索页费用（只按成功请求数扣费，BUG-01修复）
         for (let i = 0; i < result.stats.searchPageRequests; i++) {
           const deductResult = await creditTracker.deductSearchPage();
           if (!deductResult.success) {
@@ -629,7 +633,7 @@ async function executeTpsSearchRealtimeDeduction(
         }
         
         const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
-        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页`);
+        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页成功`);
         
         // 检查 Scrape.do API 积分耗尽
         if (result.apiCreditsExhausted) {
@@ -929,6 +933,8 @@ async function executeTpsSearchRealtimeDeduction(
     }
     emitTaskCompleted(userId, taskId, "tps", { totalResults, creditsUsed: creditTracker.getTotalDeducted(), status: finalStatus });
 
+    // BUG-10修复：记录任务完成到监控器
+    recordTaskComplete(taskId, true);
     console.log(`[TPS v8.0] 用户 ${userId} 任务完成`);
 
     // 记录用户活动日志
@@ -950,6 +956,8 @@ async function executeTpsSearchRealtimeDeduction(
     await failTpsSearchTask(taskDbId, safeMsg, logs);
     emitTaskFailed(userId, taskId, "tps", { error: safeMsg, creditsUsed: creditTracker.getTotalDeducted() });
     
+    // BUG-10修复：记录任务失败到监控器
+    recordTaskComplete(taskId, false);
     console.log(`[TPS v8.0] 用户 ${userId} 任务失败`);
     
     await logApi({

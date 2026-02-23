@@ -232,10 +232,31 @@ export class TpsRealtimeCreditTracker {
           sql`${users.id} = ${this.userId} AND ${users.credits} >= ${roundedAmount}`
         );
       
-      // 检查是否成功更新
-      if ((updateResult as any).rowsAffected === 0 || (updateResult as any).affectedRows === 0) {
+      // BUG-03修复：兼容不同数据库驱动的返回值格式
+      // MySQL/TiDB 可能返回 rowsAffected, affectedRows, 或嵌套在数组中
+      const affected = 
+        (updateResult as any).rowsAffected ??
+        (updateResult as any).affectedRows ??
+        (updateResult as any)[0]?.affectedRows ??
+        (updateResult as any).changes ??
+        undefined;
+      
+      // 如果无法确定受影响行数，通过查询余额来验证是否扣除成功
+      const newBalanceResult = await database
+        .select({ credits: users.credits })
+        .from(users)
+        .where(eq(users.id, this.userId));
+      
+      const newBalance = parseFloat(String(newBalanceResult[0]?.credits)) || 0;
+      
+      // 双重验证：优先用 affected rows，如果无法获取则用余额差异判断
+      const deductionFailed = affected !== undefined 
+        ? affected === 0 
+        : newBalance >= this.currentBalance;  // 余额未减少说明扣除失败
+      
+      if (deductionFailed) {
         // 扣除失败，余额不足
-        await this.refreshBalance();
+        this.currentBalance = newBalance;
         this.stop(`积分不足，需要 ${roundedAmount} 积分，当前余额 ${this.currentBalance} 积分`);
         return {
           success: false,
@@ -244,14 +265,6 @@ export class TpsRealtimeCreditTracker {
           message: `积分不足`,
         };
       }
-      
-      // 获取新余额
-      const newBalanceResult = await database
-        .select({ credits: users.credits })
-        .from(users)
-        .where(eq(users.id, this.userId));
-      
-      const newBalance = parseFloat(String(newBalanceResult[0]?.credits)) || 0;
       
       // 记录扣费日志
       const description = type === 'search' 

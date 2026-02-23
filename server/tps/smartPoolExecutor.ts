@@ -77,6 +77,8 @@ export interface SmartPoolFetchResult {
     stoppedDueToCredits: boolean;
     /** Scrape.do API 积分耗尽导致停止 */
     stoppedDueToApiCredits: boolean;
+    /** BUG-08: 连续失败导致停止（独立标志） */
+    stoppedDueToConsecutiveFails: boolean;
     /** v8.0: 批次统计 */
     totalBatches: number;
     failedRequests: number;
@@ -131,6 +133,7 @@ export async function fetchDetailsWithSmartPool(
   let filteredOut = 0;
   let stoppedDueToCredits = false;
   let stoppedDueToApiCredits = false;
+  let stoppedDueToConsecutiveFails = false;  // BUG-08: 独立的连续失败标志
   
   const baseUrl = 'https://www.truepeoplesearch.com';
   
@@ -160,6 +163,7 @@ export async function fetchDetailsWithSmartPool(
     return { 
       stats: { 
         totalSaved, detailPageRequests, filteredOut, stoppedDueToCredits, stoppedDueToApiCredits,
+        stoppedDueToConsecutiveFails,
         totalBatches: 0, failedRequests: 0, retrySuccess: 0, retryTotal: 0,
       } 
     };
@@ -229,13 +233,8 @@ export async function fetchDetailsWithSmartPool(
         batchSuccess++;
         detailPageRequests++;
         
-        // 实时扣除积分
-        const deductResult = await creditTracker.deductDetailPage();
-        if (!deductResult.success) {
-          stoppedDueToCredits = true;
-          onProgress(`⚠️ 积分不足，停止获取详情`);
-          break;
-        }
+        // BUG-18修复：先解析结果，再扣积分。即使扣积分失败也保存当前结果
+        // （因为HTTP请求已消耗Scrape.do API积分，不应浪费）
         
         // 解析详情页
         const linkTasks = tasksByLink.get(result.link) || [];
@@ -264,6 +263,14 @@ export async function fetchDetailsWithSmartPool(
         } else {
           // ⭐ 内存优化：即使没有匹配的任务，也释放HTML
           (batchResults[ri] as any).html = '';
+        }
+        
+        // 实时扣除积分（移到解析之后，确保当前结果已被收集）
+        const deductResult = await creditTracker.deductDetailPage();
+        if (!deductResult.success) {
+          stoppedDueToCredits = true;
+          onProgress(`⚠️ 积分不足，停止获取详情（当前批次结果已保存）`);
+          break;
         }
       } else {
         batchFail++;
@@ -319,7 +326,9 @@ export async function fetchDetailsWithSmartPool(
         onProgress(`🚫 连续 ${consecutiveFailBatches} 批请求全部失败，自动停止（可能是 API 服务异常）`);
         onProgress(`💡 请稍后重试或联系客服处理`);
         console.error(`[TPS v9.0] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
-        stoppedDueToApiCredits = true;  // 复用此标志表示外部API问题
+        // BUG-08修复：使用独立标志，不再复用 stoppedDueToApiCredits
+        stoppedDueToConsecutiveFails = true;
+        stoppedDueToApiCredits = true;  // 保持向后兼容，仍用于停止控制流
       }
     } else {
       consecutiveFailBatches = 0;  // 有成功的就重置计数
@@ -383,7 +392,8 @@ export async function fetchDetailsWithSmartPool(
       const retrySaveItems: BatchSaveItem[] = [];
       const retryCacheItems: Array<{ link: string; data: TpsDetailResult }> = [];
       
-      for (const result of retryResults) {
+      for (let rri = 0; rri < retryResults.length; rri++) {
+        const result = retryResults[rri];
         if (stoppedDueToCredits) break;
         
         if (result.success) {
@@ -400,6 +410,9 @@ export async function fetchDetailsWithSmartPool(
           if (linkTasks.length > 0) {
             const details = parseDetailPage(result.html, linkTasks[0].searchResult);
             
+            // BUG-06修复：重试阶段也释放HTML内存
+            (retryResults[rri] as any).html = '';
+            
             for (const detail of details) {
               if (detail.phone && detail.phone.length >= 10) {
                 retryCacheItems.push({ link: result.link, data: detail });
@@ -413,6 +426,9 @@ export async function fetchDetailsWithSmartPool(
             for (const task of linkTasks) {
               retrySaveItems.push({ task, details: filtered });
             }
+          } else {
+            // BUG-06修复：即使没有匹配任务也释放HTML
+            (retryResults[rri] as any).html = '';
           }
         }
         
@@ -479,6 +495,7 @@ export async function fetchDetailsWithSmartPool(
       filteredOut,
       stoppedDueToCredits,
       stoppedDueToApiCredits,
+      stoppedDueToConsecutiveFails,
       totalBatches,
       failedRequests: retryTotal - retrySuccess,
       retrySuccess,

@@ -41,12 +41,17 @@ export async function fetchWithScrapedo(url: string, token: string): Promise<str
 // ==================== 配置常量 ====================
 
 export const TPS_CONFIG = {
-  TASK_CONCURRENCY: 4,      // 同时执行的搜索任务数
-  SCRAPEDO_CONCURRENCY: 10, // 每个任务的 Scrape.do 并发数（保留用于搜索阶段参考）
-  TOTAL_CONCURRENCY: 20,    // 总并发数（保留用于参考）
-  MAX_SAFE_PAGES: 25,       // 最大搜索页数
-  SEARCH_COST: 0.3,         // 搜索页成本
-  DETAIL_COST: 0.3,         // 详情页成本
+  /** @deprecated 并发现由 taskQueue(5) + BATCH_CONFIG 控制 */
+  TASK_CONCURRENCY: 4,
+  /** @deprecated 并发现由 BATCH_CONFIG.BATCH_SIZE(30) 控制 */
+  SCRAPEDO_CONCURRENCY: 10,
+  /** @deprecated 并发现由 httpSemaphore(180) 控制 */
+  TOTAL_CONCURRENCY: 20,
+  MAX_SAFE_PAGES: 25,       // 最大搜索页数（仍在使用）
+  /** @deprecated 费用现从数据库 tps_config 读取 */
+  SEARCH_COST: 0.3,
+  /** @deprecated 费用现从数据库 tps_config 读取 */
+  DETAIL_COST: 0.3,
 };
 
 // ==================== 类型定义 ====================
@@ -439,12 +444,29 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
   let primaryEmail: string | undefined;
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   const allEmails = html.match(emailRegex) || [];
-  // 过滤掉网站相关邮箱
-  const personalEmails = allEmails.filter(e => 
-    !e.toLowerCase().includes('truepeoplesearch') && 
-    !e.toLowerCase().includes('example') &&
-    !e.toLowerCase().includes('scrape')
-  );
+  // BUG-14修复：增强邮箱过滤，排除更多非用户邮箱
+  const personalEmails = allEmails.filter(e => {
+    const lower = e.toLowerCase();
+    // 排除网站相关邮箱
+    if (lower.includes('truepeoplesearch')) return false;
+    if (lower.includes('example')) return false;
+    if (lower.includes('scrape')) return false;
+    // 排除常见的非用户邮箱域名
+    if (lower.includes('noreply')) return false;
+    if (lower.includes('no-reply')) return false;
+    if (lower.includes('donotreply')) return false;
+    if (lower.includes('mailer-daemon')) return false;
+    if (lower.includes('postmaster@')) return false;
+    if (lower.includes('webmaster@')) return false;
+    if (lower.includes('support@truepeoplesearch')) return false;
+    if (lower.includes('privacy@')) return false;
+    if (lower.includes('info@truepeoplesearch')) return false;
+    // 排除广告/跟踪相关域名
+    if (lower.includes('googleadservices')) return false;
+    if (lower.includes('doubleclick')) return false;
+    if (lower.includes('analytics')) return false;
+    return true;
+  });
   if (personalEmails.length > 0) {
     // 去重并保持原始顺序（第一个是最相关的）
     const uniqueEmails = Array.from(new Set(personalEmails));
@@ -567,10 +589,15 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
     const match = phonePattern.exec(html); // 只取第一个匹配
     if (match) {
       const phone = match[1] + match[2] + match[3];
+      // BUG-13修复：在电话号码附近上下文中检测类型，而非全页面搜索
       let phoneType = '';
-      if (html.includes('Wireless')) phoneType = 'Wireless';
-      else if (html.includes('Landline')) phoneType = 'Landline';
-      else if (html.toLowerCase().includes('voip')) phoneType = 'VoIP';
+      const phoneContext = html.substring(
+        Math.max(0, (match.index || 0) - 200),
+        Math.min(html.length, (match.index || 0) + match[0].length + 200)
+      );
+      if (phoneContext.includes('Wireless')) phoneType = 'Wireless';
+      else if (phoneContext.includes('Landline')) phoneType = 'Landline';
+      else if (phoneContext.toLowerCase().includes('voip')) phoneType = 'VoIP';
       results.push({
         name,
         age,
@@ -612,8 +639,8 @@ export function parseDetailPage(html: string, searchResult: TpsSearchResult): Tp
 /**
  * 详情页结果精确过滤
  * 
- * 优化说明：
- * - 用户未设置年龄范围时，使用默认值 30-70 岁
+ * BUG-12修复：修正注释中的默认年龄范围
+ * - 用户未设置年龄范围时，使用默认值 50-79 岁（DEFAULT_MIN_AGE / DEFAULT_MAX_AGE）
  * - 与搜索页过滤逻辑保持一致
  */
 export function shouldIncludeResult(result: TpsDetailResult, filters: TpsFilters): boolean {
@@ -670,7 +697,8 @@ export interface SearchOnlyResult {
   success: boolean;
   searchResults: TpsSearchResult[];
   stats: {
-    searchPageRequests: number;
+    searchPageRequests: number;       // 成功的搜索页请求数（用于扣费）
+    totalSearchAttempts: number;      // 总请求尝试数（含失败和重试，用于统计）
     filteredOut: number;
     skippedDeceased?: number;  // 跳过的已故人员数量
   };
@@ -693,7 +721,8 @@ export async function searchOnly(
   filters: TpsFilters,
   onProgress?: (message: string) => void
 ): Promise<SearchOnlyResult> {
-  let searchPageRequests = 0;
+  let searchPageRequests = 0;   // 成功的请求数（用于扣费）
+  let totalSearchAttempts = 0;  // 总尝试数（含失败和重试）
   let filteredOut = 0;
 
   try {
@@ -703,12 +732,13 @@ export async function searchOnly(
     
     const firstPageHtml = await fetchWithScrapedo(firstPageUrl, token);
     searchPageRequests++;
+    totalSearchAttempts++;
     
     const { results: firstResults, totalRecords, hasNextPage } = parseSearchPageWithTotal(firstPageHtml);
     
     if (firstResults.length === 0) {
       onProgress?.(`第一页无结果，搜索结束`);
-      return { success: true, searchResults: [], stats: { searchPageRequests, filteredOut } };
+      return { success: true, searchResults: [], stats: { searchPageRequests, totalSearchAttempts, filteredOut } };
     }
 
     // 计算总页数
@@ -764,7 +794,9 @@ export async function searchOnly(
         );
         
         const chunkHtmls = await Promise.all(chunkPromises);
-        searchPageRequests += chunk.length;
+        totalSearchAttempts += chunk.length;
+        // 只统计成功的请求数用于扣费
+        searchPageRequests += chunkHtmls.filter(h => h !== null).length;
         
         // 立即处理并释放HTML内存
         for (const html of chunkHtmls) {
@@ -789,7 +821,7 @@ export async function searchOnly(
         return {
           success: true,
           searchResults: uniqueResults,
-          stats: { searchPageRequests, filteredOut, skippedDeceased: totalSkippedDeceased },
+          stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased },
           apiCreditsExhausted: true,
         };
       }
@@ -817,12 +849,14 @@ export async function searchOnly(
           const chunkResults = await Promise.all(chunkPromises);
           retryHtmls.push(...chunkResults);
         }
-        searchPageRequests += retryUrls.length;
+        totalSearchAttempts += retryUrls.length;
+        // 重试成功的也计入成功请求数
         
         let retrySuccess = 0;
         for (const html of retryHtmls) {
           if (html) {
             retrySuccess++;
+            searchPageRequests++;
             const pageResults = parseSearchPage(html);
             const filterResult = preFilterByAge(pageResults, filters);
             filteredOut += pageResults.length - filterResult.filtered.length;
@@ -842,7 +876,7 @@ export async function searchOnly(
     return {
       success: true,
       searchResults: uniqueResults,
-      stats: { searchPageRequests, filteredOut, skippedDeceased: totalSkippedDeceased },
+      stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased },
     };
 
   } catch (error: any) {
@@ -853,7 +887,7 @@ export async function searchOnly(
       return {
         success: false,
         searchResults: [],
-        stats: { searchPageRequests, filteredOut },
+        stats: { searchPageRequests, totalSearchAttempts, filteredOut },
         error: '服务繁忙，请稍后重试',
         apiCreditsExhausted: true,
       };
@@ -864,8 +898,8 @@ export async function searchOnly(
     return {
       success: false,
       searchResults: [],
-      stats: { searchPageRequests, filteredOut },
-      error: safeSearchErrMsg || String(error),
+        stats: { searchPageRequests, totalSearchAttempts, filteredOut },
+        error: safeSearchErrMsg || String(error),
     };
   }
 }

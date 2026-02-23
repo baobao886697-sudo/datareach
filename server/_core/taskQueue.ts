@@ -1,5 +1,5 @@
 /**
- * 全局搜索任务队列 v1.0
+ * 全局搜索任务队列 v1.1
  * 
  * 🛡️ 防止多个搜索任务同时运行导致内存溢出（OOM）
  * 
@@ -9,6 +9,7 @@
  * - 排队中的任务状态为 "queued"，用户可以在前端看到排队位置
  * - 任务完成或失败后自动释放槽位，触发下一个排队任务
  * - 支持任务超时保护：超过 MAX_TASK_DURATION_MS 自动标记为失败
+ * - v1.1: 超时时通过 AbortController 通知任务停止执行（BUG-02修复）
  * 
  * 使用方式:
  * ```ts
@@ -20,7 +21,7 @@
  *   taskId: task.taskId,
  *   userId,
  *   module: 'tps',
- *   execute: async () => { ... 原来的异步执行函数 ... }
+ *   execute: async (signal) => { ... 原来的异步执行函数，可检查 signal.aborted ... }
  * });
  * ```
  */
@@ -38,6 +39,9 @@ const MAX_CONCURRENT_TASKS = 5;
 /** 单个任务最大执行时间（毫秒）：2小时 */
 const MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000;
 
+/** BUG-17: 排队最大等待时间（毫秒）：30分钟 */
+const MAX_QUEUE_WAIT_MS = 30 * 60 * 1000;
+
 // ============================================================================
 // 类型定义
 // ============================================================================
@@ -51,8 +55,8 @@ export interface QueuedTask {
   userId: number;
   /** 搜索模块类型 */
   module: 'tps' | 'spf' | 'anywho';
-  /** 实际执行函数 */
-  execute: () => Promise<void>;
+  /** 实际执行函数（可选接收 AbortSignal 用于超时终止） */
+  execute: (signal?: AbortSignal) => Promise<void>;
   /** 入队时间 */
   enqueuedAt: number;
 }
@@ -64,6 +68,8 @@ interface RunningTask {
   module: string;
   startedAt: number;
   timeoutTimer: ReturnType<typeof setTimeout>;
+  /** v1.1: 用于超时时通知任务停止 */
+  abortController: AbortController;
 }
 
 // ============================================================================
@@ -122,6 +128,9 @@ class GlobalTaskQueue {
    * 启动一个任务
    */
   private startTask(task: QueuedTask) {
+    // v1.1: 创建 AbortController 用于超时终止
+    const abortController = new AbortController();
+    
     // 设置超时保护
     const timeoutTimer = setTimeout(() => {
       this.handleTaskTimeout(task.taskId);
@@ -135,12 +144,13 @@ class GlobalTaskQueue {
       module: task.module,
       startedAt: Date.now(),
       timeoutTimer,
+      abortController,
     });
     
     console.log(`[TaskQueue] 任务 ${task.taskId} (${task.module}) 开始执行，当前运行 ${this.running.size}/${MAX_CONCURRENT_TASKS}`);
     
-    // 执行任务（异步，不阻塞队列）
-    task.execute()
+    // 执行任务（异步，不阻塞队列），传入 AbortSignal
+    task.execute(abortController.signal)
       .catch(err => {
         console.error(`[TaskQueue] 任务 ${task.taskId} 执行异常:`, err.message);
       })
@@ -168,24 +178,64 @@ class GlobalTaskQueue {
   
   /**
    * 处理下一个排队任务
+   * BUG-17修复：添加排队超时检查
    */
   private processNext() {
     while (this.running.size < MAX_CONCURRENT_TASKS && this.queue.length > 0) {
       const nextTask = this.queue.shift()!;
-      const waitTime = Math.round((Date.now() - nextTask.enqueuedAt) / 1000);
-      console.log(`[TaskQueue] 排队任务 ${nextTask.taskId} (${nextTask.module}) 开始执行，等待了 ${waitTime}s`);
+      const waitTime = Date.now() - nextTask.enqueuedAt;
+      const waitTimeSec = Math.round(waitTime / 1000);
+      
+      // BUG-17: 检查排队是否超时
+      if (waitTime > MAX_QUEUE_WAIT_MS) {
+        console.error(`[TaskQueue] ⚠️ 排队任务 ${nextTask.taskId} (${nextTask.module}) 等待超时（${waitTimeSec}s），标记为失败`);
+        this.handleQueueTimeout(nextTask);
+        continue;  // 跳过这个任务，处理下一个
+      }
+      
+      console.log(`[TaskQueue] 排队任务 ${nextTask.taskId} (${nextTask.module}) 开始执行，等待了 ${waitTimeSec}s`);
       this.startTask(nextTask);
     }
   }
   
   /**
+   * BUG-17: 处理排队超时的任务
+   */
+  private async handleQueueTimeout(task: QueuedTask) {
+    try {
+      const db = getDbSync();
+      if (db) {
+        const tableMap: Record<string, string> = {
+          tps: 'tps_search_tasks',
+          spf: 'spf_search_tasks',
+          anywho: 'anywho_search_tasks',
+        };
+        const table = tableMap[task.module];
+        if (table) {
+          await db.execute(
+            sql`UPDATE ${sql.raw(table)} SET status = 'failed', completedAt = NOW() WHERE id = ${task.taskDbId} AND status IN ('queued', 'pending')`
+          );
+        }
+      }
+    } catch (err: any) {
+      console.error(`[TaskQueue] 排队超时任务状态更新失败:`, err.message);
+    }
+  }
+  
+  /**
    * 处理任务超时
+   * 
+   * v1.1: 超时时通过 AbortController.abort() 通知任务停止
+   * 任务内部可以检查 signal.aborted 来决定是否继续执行
    */
   private async handleTaskTimeout(taskId: string) {
     const runningTask = this.running.get(taskId);
     if (!runningTask) return;
     
-    console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 超时（超过 ${MAX_TASK_DURATION_MS / 60000} 分钟），强制标记为失败`);
+    console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 超时（超过 ${MAX_TASK_DURATION_MS / 60000} 分钟），发送终止信号并标记为失败`);
+    
+    // v1.1: 发送终止信号，通知任务停止执行
+    runningTask.abortController.abort();
     
     // 更新数据库状态
     try {
@@ -207,9 +257,16 @@ class GlobalTaskQueue {
       console.error(`[TaskQueue] 超时任务状态更新失败:`, err.message);
     }
     
-    // 从运行列表中移除并触发下一个
-    this.running.delete(taskId);
-    this.processNext();
+    // 注意：不在这里从 running 中移除，让 task.execute() 的 finally 回调来处理
+    // 这样避免 completeTask 被调用两次的竞态问题
+    // 但如果任务长时间不结束（忽略了 abort 信号），需要兜底清理
+    setTimeout(() => {
+      if (this.running.has(taskId)) {
+        console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 超时后 30s 仍未结束，强制清理`);
+        this.running.delete(taskId);
+        this.processNext();
+      }
+    }, 30000);
   }
 }
 

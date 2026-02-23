@@ -417,22 +417,45 @@ export async function saveTpsDetailCache(
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + cacheDays);
   
-  // 使用 upsert 逻辑
-  for (const item of items) {
+  // BUG-09修复：改为批量插入，减少数据库操作次数
+  // 分批处理，每批最多50条，避免单次SQL过大
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
     try {
-      await database.insert(tpsDetailCache).values({
+      const values = batch.map(item => ({
         detailLink: item.link,
         data: item.data,
         expiresAt,
-      }).onDuplicateKeyUpdate({
-        set: {
-          data: item.data,
-          expiresAt,
-        },
-      });
+      }));
+      
+      await database.insert(tpsDetailCache)
+        .values(values)
+        .onDuplicateKeyUpdate({
+          set: {
+            data: sql`VALUES(data)`,
+            expiresAt: sql`VALUES(expires_at)`,
+          },
+        });
     } catch (error) {
-      // 忽略重复键错误
-      console.error("缓存保存失败:", error);
+      // 批量插入失败时，回退到逐条插入
+      console.error(`缓存批量保存失败，回退到逐条模式:`, error);
+      for (const item of batch) {
+        try {
+          await database.insert(tpsDetailCache).values({
+            detailLink: item.link,
+            data: item.data,
+            expiresAt,
+          }).onDuplicateKeyUpdate({
+            set: {
+              data: item.data,
+              expiresAt,
+            },
+          });
+        } catch (innerError) {
+          // 忽略单条失败
+        }
+      }
     }
   }
 }
@@ -522,9 +545,11 @@ export async function logApi(data: {
 }
 
 
-// ==================== 预扣费机制 ====================
+// ==================== 预扣费机制（已废弃，TPS已改用实时扣费） ====================
+// BUG-16: 以下函数不再被TPS使用，保留是因为其他模块（LinkedIn等）仍在引用
 
 /**
+ * @deprecated TPS已改用realtimeCredits.ts实时扣费模式
  * 预扣积分（冻结）
  * 
  * 任务开始前预扣最大预估费用，确保任务能够完整执行
@@ -585,6 +610,7 @@ export async function freezeCredits(
 }
 
 /**
+ * @deprecated TPS已改用realtimeCredits.ts实时扣费模式
  * 结算积分（退还多扣的部分）
  * 
  * 任务完成后，计算实际消耗，退还多扣的积分
