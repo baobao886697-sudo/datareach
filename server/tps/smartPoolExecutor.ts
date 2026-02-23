@@ -44,12 +44,7 @@ export const BATCH_CONFIG = {
   BATCH_SIZE: 30,
   /** 批次间延迟（毫秒），给上游 API 恢复时间 */
   BATCH_DELAY_MS: 500,
-  /** 延后重试前等待时间（毫秒） */
-  RETRY_DELAY_MS: 4000,
-  /** 延后重试的批次大小（更保守） */
-  RETRY_BATCH_SIZE: 8,
-  /** 延后重试的批间延迟（更保守） */
-  RETRY_BATCH_DELAY_MS: 800,
+  // v3.0: 已移除延后重试机制
   /** 连续失败阈值：连续 N 批全部失败时自动停止（兜底机制） */
   CONSECUTIVE_FAIL_THRESHOLD: 3,
 };
@@ -180,7 +175,7 @@ export async function fetchDetailsWithSmartPool(
   
   const totalDetails = linksToFetch.length;
   let completedDetails = 0;
-  const failedLinks: string[] = [];  // 收集失败的链接用于延后重试
+  // v3.0: 不再收集失败链接，失败直接跳过
   let consecutiveFailBatches = 0;  // 连续全部失败的批次计数
   
   const totalBatches = Math.ceil(totalDetails / BATCH_CONFIG.BATCH_SIZE);
@@ -235,12 +230,17 @@ export async function fetchDetailsWithSmartPool(
       const result = batchResults[ri];
       if (stoppedDueToCredits) break;
       
+      // v3.0: 每次API调用都扣费，无论成功失败
+      detailPageRequests++;
+      const deductResult = await creditTracker.deductDetailPage();
+      if (!deductResult.success) {
+        stoppedDueToCredits = true;
+        onProgress(`⚠️ 积分不足，停止获取详情（当前批次结果已保存）`);
+        break;
+      }
+      
       if (result.success) {
         batchSuccess++;
-        detailPageRequests++;
-        
-        // BUG-18修复：先解析结果，再扣积分。即使扣积分失败也保存当前结果
-        // （因为HTTP请求已消耗Scrape.do API积分，不应浪费）
         
         // 解析详情页
         const linkTasks = tasksByLink.get(result.link) || [];
@@ -262,7 +262,7 @@ export async function fetchDetailsWithSmartPool(
           const filtered = detailsWithFlag.filter(r => shouldIncludeResult(r, filters));
           filteredOut += details.length - filtered.length;
           
-          // 🛡️ v9.0: 收集到本批临时数组，而非全局 results 数组
+          // 🛡️ v9.0: 收集到本批临时数组
           for (const task of linkTasks) {
             batchSaveItems.push({ task, details: filtered });
           }
@@ -270,20 +270,9 @@ export async function fetchDetailsWithSmartPool(
           // ⭐ 内存优化：即使没有匹配的任务，也释放HTML
           (batchResults[ri] as any).html = '';
         }
-        
-        // 实时扣除积分（移到解析之后，确保当前结果已被收集）
-        const deductResult = await creditTracker.deductDetailPage();
-        if (!deductResult.success) {
-          stoppedDueToCredits = true;
-          onProgress(`⚠️ 积分不足，停止获取详情（当前批次结果已保存）`);
-          break;
-        }
       } else {
         batchFail++;
-        // API 积分耗尽的链接不加入重试队列
-        if (!result.isApiCreditsError) {
-          failedLinks.push(result.link);
-        }
+        // v3.0: 失败也已扣费，直接跳过
       }
       
       // 更新进度（每个请求完成后都触发）
@@ -352,133 +341,9 @@ export async function fetchDetailsWithSmartPool(
     }
   }
   
-  // ==================== 延后重试阶段 ====================
-  
-  let retrySuccess = 0;
-  const retryTotal = failedLinks.length;
-  
-  // API 积分耗尽或任务超时时跳过重试
-  if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits && !signal?.aborted) {
-    onProgress(`🔄 开始延后重试 ${failedLinks.length} 个失败链接 (等待 ${BATCH_CONFIG.RETRY_DELAY_MS}ms)...`);
-    console.log(`[TPS v9.0] 延后重试: ${failedLinks.length} 个失败链接`);
-    
-    // 等待一段时间，给上游服务恢复
-    await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.RETRY_DELAY_MS));
-    
-    // 分批重试（使用更保守的参数）
-    const retryBatches = Math.ceil(failedLinks.length / BATCH_CONFIG.RETRY_BATCH_SIZE);
-    
-    for (let ri = 0; ri < retryBatches; ri++) {
-      if (stoppedDueToCredits || stoppedDueToApiCredits || signal?.aborted) break;
-      
-      const retryBatchStart = ri * BATCH_CONFIG.RETRY_BATCH_SIZE;
-      const retryBatchLinks = failedLinks.slice(retryBatchStart, retryBatchStart + BATCH_CONFIG.RETRY_BATCH_SIZE);
-      
-      const retryPromises = retryBatchLinks.map(async (link) => {
-        const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
-        try {
-          const html = await fetchWithScrapedo(detailUrl, token);
-          return { link, html, success: true as const, isApiCreditsError: false };
-        } catch (error: any) {
-          const isApiCreditsError = error instanceof ScrapeApiCreditsError;
-          return { link, html: '', success: false as const, isApiCreditsError };
-        }
-      });
-      
-      const retryResults = await Promise.all(retryPromises);
-      
-      // 检查重试中是否有 API 积分耗尽
-      if (retryResults.some(r => r.isApiCreditsError)) {
-        stoppedDueToApiCredits = true;
-        onProgress(`🚫 服务暂时不可用，停止重试`);
-        break;
-      }
-      
-      // 🛡️ v9.0: 重试结果也立即保存
-      const retrySaveItems: BatchSaveItem[] = [];
-      const retryCacheItems: Array<{ link: string; data: TpsDetailResult }> = [];
-      
-      for (let rri = 0; rri < retryResults.length; rri++) {
-        const result = retryResults[rri];
-        if (stoppedDueToCredits) break;
-        
-        if (result.success) {
-          retrySuccess++;
-          detailPageRequests++;
-          
-          const deductResult = await creditTracker.deductDetailPage();
-          if (!deductResult.success) {
-            stoppedDueToCredits = true;
-            break;
-          }
-          
-          const linkTasks = tasksByLink.get(result.link) || [];
-          if (linkTasks.length > 0) {
-            const details = parseDetailPage(result.html, linkTasks[0].searchResult);
-            
-            // BUG-06修复：重试阶段也释放HTML内存
-            (retryResults[rri] as any).html = '';
-            
-            for (const detail of details) {
-              if (detail.phone && detail.phone.length >= 10) {
-                retryCacheItems.push({ link: result.link, data: detail });
-              }
-            }
-            
-            const detailsWithFlag = details.map(d => ({ ...d, fromCache: false }));
-            const filtered = detailsWithFlag.filter(r => shouldIncludeResult(r, filters));
-            filteredOut += details.length - filtered.length;
-            
-            for (const task of linkTasks) {
-              retrySaveItems.push({ task, details: filtered });
-            }
-          } else {
-            // BUG-06修复：即使没有匹配任务也释放HTML
-            (retryResults[rri] as any).html = '';
-          }
-        }
-        
-        // 重试阶段也推送进度
-        if (onDetailProgress) {
-          onDetailProgress({
-            completedDetails: completedDetails,  // 保持总数不变，重试不增加总数
-            totalDetails,
-            percent: Math.round((completedDetails / totalDetails) * 100),
-            phase: 'retrying',
-            detailPageRequests,
-            totalResults: totalSaved + retrySaveItems.reduce((sum, item) => sum + item.details.length, 0),
-          });
-        }
-      }
-      
-      // 🛡️ v9.0: 重试批次也立即保存
-      if (retrySaveItems.length > 0 && onBatchSave) {
-        try {
-          const savedCount = await onBatchSave(retrySaveItems);
-          totalSaved += savedCount;
-        } catch (saveError: any) {
-          console.error(`[TPS v9.0] 重试批次保存失败:`, saveError.message);
-        }
-      }
-      
-      if (retryCacheItems.length > 0) {
-        try {
-          await setCachedDetails(retryCacheItems);
-        } catch (cacheError: any) {
-          console.error(`[TPS v9.0] 重试缓存保存失败:`, cacheError.message);
-        }
-      }
-      
-      // 重试批间延迟
-      if (ri < retryBatches - 1 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
-        await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.RETRY_BATCH_DELAY_MS));
-      }
-    }
-    
-    onProgress(`🔄 延后重试完成: ${retrySuccess}/${failedLinks.length} 成功`);
-  } else if (failedLinks.length > 0 && stoppedDueToApiCredits) {
-    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（服务暂时不可用）`);
-  }
+  // v3.0: 已移除延后重试阶段，失败的链接直接跳过
+  const retrySuccess = 0;
+  const retryTotal = 0;
   
   // ==================== 统计信息 ====================
   
@@ -487,9 +352,7 @@ export async function fetchDetailsWithSmartPool(
   onProgress(`📊 有效结果: ${totalSaved} 条（已实时保存到数据库）`);
   onProgress(`📊 过滤排除: ${filteredOut} 条`);
   onProgress(`📊 批次模式: ${totalBatches} 批 × ${BATCH_CONFIG.BATCH_SIZE} 并发, 间隔 ${BATCH_CONFIG.BATCH_DELAY_MS}ms`);
-  if (retryTotal > 0) {
-    onProgress(`🔄 延后重试: ${retrySuccess}/${retryTotal} 成功`);
-  }
+  // v3.0: 不再有延后重试
   if (stoppedDueToApiCredits) {
     onProgress(`🚫 服务繁忙，任务提前结束`);
   }

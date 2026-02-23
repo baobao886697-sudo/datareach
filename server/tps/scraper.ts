@@ -8,33 +8,20 @@ import * as cheerio from 'cheerio';
 // - 并发控制权完全交给新的"分批+延迟"执行器 (smartPoolExecutor.ts)
 // - fetchWithScrapedo 退化为纯HTTP客户端，仅保留重试逻辑
 
-import { fetchWithScrapeClient, ScrapeRateLimitError, ScrapeServerError, ScrapeApiCreditsError } from './scrapeClient';
+import { fetchWithScrapeClient, ScrapeApiCreditsError } from './scrapeClient';
 
 // 超时配置
 const SCRAPE_TIMEOUT_MS = 20000;  // 20 秒超时
-const SCRAPE_MAX_RETRIES = 1;    // 超时/网络错误最多重试 1 次
 
 /**
- * 使用 Scrape.do API 获取页面 (v8.0 简化版)
+ * 使用 Scrape.do API 获取页面 (v3.0 零重试版)
  * 
- * 不再包含任何并发控制逻辑，并发由外部调用方管理。
- * 仅保留 HTTP 层面的错误重试:
- * - 502 错误: 指数退避重试 (2s → 4s → 6s)，最多 3 次
- * - 429 错误: 即时重试 2 次（间隔 1s），仍失败则抛出 ScrapeRateLimitError
- * - 超时/网络错误: 保持原有重试逻辑
+ * 不包含任何重试逻辑，1次调用 = 1次API请求 = 1次扣费
  */
 export async function fetchWithScrapedo(url: string, token: string): Promise<string> {
   return await fetchWithScrapeClient(url, token, {
     timeoutMs: SCRAPE_TIMEOUT_MS,
-    maxRetries: SCRAPE_MAX_RETRIES,
-    retryDelayMs: 0,
     enableLogging: true,
-    // 502 容错: 指数退避 2s → 4s → 6s
-    maxRetries502: 3,
-    retryBaseDelay502Ms: 2000,
-    // 429 即时重试: 2 次，间隔 1s
-    maxRetries429: 2,
-    retryDelay429Ms: 1000,
   });
 }
 
@@ -722,8 +709,9 @@ export async function searchOnly(
   onProgress?: (message: string) => void,
   signal?: AbortSignal
 ): Promise<SearchOnlyResult> {
-  let searchPageRequests = 0;   // 成功的请求数（用于扣费）
-  let totalSearchAttempts = 0;  // 总尝试数（含失败和重试）
+  // v3.0: searchPageRequests = 所有API调用次数（含失败），每次调用都要扣费
+  let searchPageRequests = 0;
+  let totalSearchAttempts = 0;
   let filteredOut = 0;
 
   try {
@@ -765,7 +753,7 @@ export async function searchOnly(
       
       // 分块并发获取剩余页（每批5个，降低内存峰值80%）
       const SEARCH_PAGE_CHUNK_SIZE = 5;
-      const retryUrls: string[] = [];  // 429/502 延后重试队列
+      // v3.0: 不再有延后重试队列
       
       let searchApiCreditsExhausted = false;
       
@@ -787,22 +775,17 @@ export async function searchOnly(
               searchApiCreditsExhausted = true;
               return null;
             }
-            // 检测 429/502 错误，加入延后重试队列
-            if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
-              retryUrls.push(url);
-              onProgress?.(`⚓ 页面获取失败 (${err instanceof ScrapeRateLimitError ? '429限流' : '502服务器错误'})，已排入队尾稍后重试...`);
-            } else {
-              const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-              onProgress?.(`页面获取失败: ${safeErrMsg}`);
-            }
+            // v3.0: 不再加入重试队列，失败直接跳过
+            const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
+            onProgress?.(`页面获取失败: ${safeErrMsg}`);
             return null;
           })
         );
         
         const chunkHtmls = await Promise.all(chunkPromises);
+        // v3.0: 每次API调用都要扣费，无论成功失败
         totalSearchAttempts += chunk.length;
-        // 只统计成功的请求数用于扣费
-        searchPageRequests += chunkHtmls.filter(h => h !== null).length;
+        searchPageRequests += chunk.length;  // 所有调用都计入扣费
         
         // 立即处理并释放HTML内存
         for (const html of chunkHtmls) {
@@ -832,47 +815,7 @@ export async function searchOnly(
         };
       }
       
-      // ==================== 搜索阶段延后重试 ====================
-      // 借鉴 EXE 版 2+2 延后重试机制：主批次完成后统一重试失败的页面
-      if (retryUrls.length > 0 && !signal?.aborted) {
-        onProgress?.(`🔄 开始延后重试 ${retryUrls.length} 个失败页面...`);
-        
-        // 等待 4 秒后开始重试，给服务器恢复时间
-        await new Promise(resolve => setTimeout(resolve, 4000));
-        
-        // 分块并发重试，每批最多5个，与主搜索保持一致
-        const RETRY_CHUNK_SIZE = 5;
-        const retryHtmls: (string | null)[] = [];
-        for (let i = 0; i < retryUrls.length; i += RETRY_CHUNK_SIZE) {
-          const chunk = retryUrls.slice(i, i + RETRY_CHUNK_SIZE);
-          const chunkPromises = chunk.map(url =>
-            fetchWithScrapedo(url, token).catch(err => {
-              const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-              onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
-              return null;
-            })
-          );
-          const chunkResults = await Promise.all(chunkPromises);
-          retryHtmls.push(...chunkResults);
-        }
-        totalSearchAttempts += retryUrls.length;
-        // 重试成功的也计入成功请求数
-        
-        let retrySuccess = 0;
-        for (const html of retryHtmls) {
-          if (html) {
-            retrySuccess++;
-            searchPageRequests++;
-            const pageResults = parseSearchPage(html);
-            const filterResult = preFilterByAge(pageResults, filters);
-            filteredOut += pageResults.length - filterResult.filtered.length;
-            totalSkippedDeceased += filterResult.stats.skippedDeceased;
-            allResults.push(...filterResult.filtered);
-          }
-        }
-        
-        onProgress?.(`🔄 延后重试完成: ${retrySuccess}/${retryUrls.length} 成功`);
-      }
+      // v3.0: 不再有延后重试，失败的页面直接跳过
     }
 
     // 阶段三: 去重

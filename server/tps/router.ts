@@ -611,7 +611,7 @@ async function executeTpsSearchRealtimeDeduction(
       completedSearches++;
       
       if (result.success) {
-        // 实时扣除搜索页费用（只按成功请求数扣费，BUG-01修复）
+        // v3.0: 按所有API调用次数扣费（含失败），调用1次API扣除1次
         for (let i = 0; i < result.stats.searchPageRequests; i++) {
           const deductResult = await creditTracker.deductSearchPage();
           if (!deductResult.success) {
@@ -652,12 +652,25 @@ async function executeTpsSearchRealtimeDeduction(
           return;
         }
       } else {
+        // v3.0: 搜索失败也要扣费（API已被调用）
+        // searchPageRequests 在 scraper.ts 中已统计所有调用（含失败）
+        if (result.stats.searchPageRequests > 0) {
+          for (let i = 0; i < result.stats.searchPageRequests; i++) {
+            const deductResult = await creditTracker.deductSearchPage();
+            if (!deductResult.success) {
+              stoppedDueToCredits = true;
+              break;
+            }
+          }
+          totalSearchPages += result.stats.searchPageRequests;
+        }
+        
         // 检查是否因 API 积分耗尽导致失败
         if (result.apiCreditsExhausted) {
           addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
           stoppedDueToApiExhausted = true;
-          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
+          stoppedDueToCredits = true;
           return;
         }
         addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
