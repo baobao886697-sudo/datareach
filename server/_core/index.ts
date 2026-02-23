@@ -1092,7 +1092,7 @@ async function cleanupStaleTasksOnStartup() {
       return;
     }
     
-    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks'];
     let totalCleaned = 0;
     
     for (const table of tables) {
@@ -1135,7 +1135,7 @@ function startTaskWatchdog() {
       const db = getDbSync();
       if (!db) return;
       
-      const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+      const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks'];
       let totalCleaned = 0;
       
       for (const table of tables) {
@@ -1253,7 +1253,7 @@ async function gracefulShutdown(signal: string) {
     }
     
     // 将所有 running 状态的任务标记为 failed
-    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks'];
     let totalCleaned = 0;
     
     for (const table of tables) {
