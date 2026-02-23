@@ -18,7 +18,8 @@ import {
   Database, AlertTriangle, CheckCircle, XCircle, Clock,
   Eye, Edit, Ban, UserCheck, Wallet, Copy, ExternalLink,
   Save, Trash2, Activity, Server, Zap, Megaphone, Mail,
-  BarChart3, MessageSquare, UserSearch, Crown
+  BarChart3, MessageSquare, UserSearch, Crown,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserDetailDialog } from "@/components/admin/UserDetailDialog";
@@ -59,6 +60,13 @@ export default function Admin() {
   const [bulkMessageDialogOpen, setBulkMessageDialogOpen] = useState(false);
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
   
+  // 用户列表分页、搜索、排序
+  const [userPage, setUserPage] = useState(1);
+  const [userSearch, setUserSearch] = useState("");
+  const [userSearchInput, setUserSearchInput] = useState("");
+  const [userSortBy, setUserSortBy] = useState<'lastActiveAt' | 'createdAt' | 'credits'>('lastActiveAt');
+  const USER_PAGE_SIZE = 20;
+  
   // 检查管理员登录状态
   const adminToken = localStorage.getItem("adminToken");
   
@@ -83,7 +91,7 @@ export default function Admin() {
   }, [statsError, setLocation]);
 
   const { data: usersData, isLoading: usersLoading, refetch: refetchUsers } = trpc.admin.users.useQuery(
-    undefined,
+    { page: userPage, limit: USER_PAGE_SIZE, search: userSearch || undefined, sortBy: userSortBy },
     { enabled: !!adminToken }
   );
 
@@ -108,6 +116,8 @@ export default function Admin() {
   );
 
   const users = usersData?.users || [];
+  const userTotal = usersData?.total || 0;
+  const userTotalPages = usersData?.totalPages || 0;
   const orders = ordersData?.orders || [];
   const configs = configsData || [];
 
@@ -518,6 +528,57 @@ export default function Admin() {
               </div>
             </div>
 
+            {/* 搜索框 + 排序 + 统计 */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                <Input
+                  placeholder="搜索ID、邮箱或姓名..."
+                  value={userSearchInput}
+                  onChange={(e) => setUserSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setUserSearch(userSearchInput);
+                      setUserPage(1);
+                    }
+                  }}
+                  className="pl-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={() => { setUserSearch(userSearchInput); setUserPage(1); }}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white"
+              >
+                <Search className="h-4 w-4 mr-1" />
+                搜索
+              </Button>
+              {userSearch && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setUserSearch(''); setUserSearchInput(''); setUserPage(1); }}
+                  className="border-slate-700 text-slate-400 hover:bg-slate-800"
+                >
+                  清除
+                </Button>
+              )}
+              <Select value={userSortBy} onValueChange={(v: any) => { setUserSortBy(v); setUserPage(1); }}>
+                <SelectTrigger className="w-40 bg-slate-800/50 border-slate-700 text-white">
+                  <SelectValue placeholder="排序方式" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  <SelectItem value="lastActiveAt">最后活跃时间</SelectItem>
+                  <SelectItem value="createdAt">注册时间</SelectItem>
+                  <SelectItem value="credits">积分数量</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-slate-500">
+                共 <span className="text-cyan-400 font-mono">{userTotal}</span> 个用户
+                {userSearch && <span>，匹配搜索“<span className="text-yellow-400">{userSearch}</span>”</span>}
+              </span>
+            </div>
+
             <div className="rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-800/50 border border-slate-700/50 overflow-hidden">
               {usersLoading ? (
                 <div className="p-6 space-y-3">
@@ -589,13 +650,22 @@ export default function Admin() {
                             }
                             if (lastActive) {
                               const diffMs = now.getTime() - lastActive.getTime();
-                              const diffMin = Math.floor(diffMs / 60000);
-                              const diffHour = Math.floor(diffMs / 3600000);
-                              const diffDay = Math.floor(diffMs / 86400000);
+                              const totalMin = Math.floor(diffMs / 60000);
+                              const totalHour = Math.floor(diffMs / 3600000);
+                              const totalDay = Math.floor(diffMs / 86400000);
                               let timeAgo = '';
-                              if (diffMin < 60) timeAgo = `${diffMin}分钟前`;
-                              else if (diffHour < 24) timeAgo = `${diffHour}小时前`;
-                              else timeAgo = `${diffDay}天前`;
+                              if (totalMin < 1) timeAgo = '刚刚';
+                              else if (totalMin < 60) timeAgo = `${totalMin}分钟前`;
+                              else if (totalHour < 24) {
+                                const remainMin = totalMin % 60;
+                                timeAgo = remainMin > 0 ? `${totalHour}小时${remainMin}分前` : `${totalHour}小时前`;
+                              } else if (totalDay < 30) {
+                                const remainHour = totalHour % 24;
+                                timeAgo = remainHour > 0 ? `${totalDay}天${remainHour}小时前` : `${totalDay}天前`;
+                              } else {
+                                // 超过30天显示具体日期（北京时间）
+                                timeAgo = lastActive.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                              }
                               return (
                                 <div className="flex items-center gap-1.5">
                                   <span className="inline-flex rounded-full h-2.5 w-2.5 bg-slate-500" />
@@ -715,6 +785,82 @@ export default function Admin() {
                 </div>
               )}
             </div>
+
+            {/* 分页控件 */}
+            {userTotalPages > 1 && (
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-sm text-slate-500">
+                  第 {userPage}/{userTotalPages} 页，共 {userTotal} 条
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={userPage <= 1}
+                    onClick={() => setUserPage(1)}
+                    className="border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    首页
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={userPage <= 1}
+                    onClick={() => setUserPage(p => Math.max(1, p - 1))}
+                    className="border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    上一页
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, userTotalPages) }, (_, i) => {
+                      let pageNum: number;
+                      if (userTotalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (userPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (userPage >= userTotalPages - 2) {
+                        pageNum = userTotalPages - 4 + i;
+                      } else {
+                        pageNum = userPage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={pageNum === userPage ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setUserPage(pageNum)}
+                          className={pageNum === userPage 
+                            ? "bg-cyan-600 text-white border-cyan-600 min-w-[36px]" 
+                            : "border-slate-700 text-slate-400 hover:bg-slate-800 min-w-[36px]"}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={userPage >= userTotalPages}
+                    onClick={() => setUserPage(p => Math.min(userTotalPages, p + 1))}
+                    className="border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    下一页
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={userPage >= userTotalPages}
+                    onClick={() => setUserPage(userTotalPages)}
+                    className="border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-30"
+                  >
+                    末页
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1080,7 +1226,6 @@ export default function Admin() {
             </div>
           </div>
         )}
-
         {/* ============ TPS 配置 ============ */}
         {activeTab === "tps" && (
           <div className="relative space-y-6">

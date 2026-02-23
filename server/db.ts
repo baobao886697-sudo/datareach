@@ -121,37 +121,66 @@ export async function clearUserDevice(userId: number): Promise<void> {
   await db.update(users).set({ currentDeviceId: null, currentDeviceLoginAt: null }).where(eq(users.id, userId));
 }
 
-export async function getAllUsers(page: number = 1, limit: number = 20, search?: string): Promise<{ users: (User & { agentEmail?: string | null })[]; total: number }> {
+export async function getAllUsers(
+  page: number = 1, 
+  limit: number = 20, 
+  search?: string,
+  sortBy: 'lastActiveAt' | 'createdAt' | 'credits' = 'lastActiveAt'
+): Promise<{ users: (User & { agentEmail?: string | null })[]; total: number; page: number; limit: number; totalPages: number }> {
   const db = await getDb();
-  if (!db) return { users: [], total: 0 };
+  if (!db) return { users: [], total: 0, page, limit, totalPages: 0 };
   const offset = (page - 1) * limit;
+  
+  // 排序字段映射（防SQL注入，只允许白名单字段）
+  const sortColumn = sortBy === 'lastActiveAt' ? 'lastActiveAt' 
+    : sortBy === 'credits' ? 'credits' 
+    : 'createdAt';
   
   // 使用参数化查询防止 SQL 注入
   let result;
   let countResult;
   
   if (search) {
-    // 使用参数化查询处理搜索条件
+    // 搜索支持：ID、邮箱、姓名
     const searchPattern = `%${search}%`;
-    result = await db.execute(sql`
-      SELECT u.*, 
-             (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
-      FROM users u
-      WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
-      ORDER BY u.createdAt DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `);
+    const searchId = parseInt(search);
     
-    countResult = await db.execute(sql`
-      SELECT COUNT(*) as count FROM users u 
-      WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
-    `);
+    if (!isNaN(searchId)) {
+      // 如果搜索词是数字，同时匹配ID和邮箱/姓名
+      result = await db.execute(sql`
+        SELECT u.*, 
+               (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
+        FROM users u
+        WHERE u.id = ${searchId} OR u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+        ORDER BY ${sql.raw(`u.${sortColumn}`)} DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+      
+      countResult = await db.execute(sql`
+        SELECT COUNT(*) as count FROM users u 
+        WHERE u.id = ${searchId} OR u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+      `);
+    } else {
+      result = await db.execute(sql`
+        SELECT u.*, 
+               (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
+        FROM users u
+        WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+        ORDER BY ${sql.raw(`u.${sortColumn}`)} DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+      
+      countResult = await db.execute(sql`
+        SELECT COUNT(*) as count FROM users u 
+        WHERE u.email LIKE ${searchPattern} OR u.name LIKE ${searchPattern}
+      `);
+    }
   } else {
     result = await db.execute(sql`
       SELECT u.*, 
              (SELECT a.email FROM users a WHERE a.id = u.inviterId) as agentEmail
       FROM users u
-      ORDER BY u.createdAt DESC
+      ORDER BY ${sql.raw(`u.${sortColumn}`)} DESC
       LIMIT ${limit} OFFSET ${offset}
     `);
     
@@ -160,13 +189,17 @@ export async function getAllUsers(page: number = 1, limit: number = 20, search?:
     `);
   }
   
+  const total = (countResult[0] as any[])[0]?.count || 0;
   return { 
     users: (result[0] as any[]).map(u => ({
       ...u,
       credits: parseFloat(String(u.credits)) || 0,
       agentEmail: u.agentEmail || null,
     })), 
-    total: (countResult[0] as any[])[0]?.count || 0 
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
   };
 }
 

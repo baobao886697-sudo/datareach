@@ -1083,9 +1083,10 @@ export const appRouter = router({
         page: z.number().optional(),
         limit: z.number().optional(),
         search: z.string().optional(),
+        sortBy: z.enum(['lastActiveAt', 'createdAt', 'credits']).optional(),
       }).optional())
       .query(async ({ input }) => {
-        return getAllUsers(input?.page || 1, input?.limit || 20, input?.search);
+        return getAllUsers(input?.page || 1, input?.limit || 20, input?.search, input?.sortBy || 'lastActiveAt');
       }),
 
     // 更新用户状态
