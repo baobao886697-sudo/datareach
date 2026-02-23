@@ -1,5 +1,5 @@
 /**
- * 全局搜索任务队列 v1.1
+ * 全局搜索任务队列 v1.2
  * 
  * 🛡️ 防止多个搜索任务同时运行导致内存溢出（OOM）
  * 
@@ -8,21 +8,29 @@
  * - 超出限制的任务进入排队等待，按提交顺序依次执行
  * - 排队中的任务状态为 "queued"，用户可以在前端看到排队位置
  * - 任务完成或失败后自动释放槽位，触发下一个排队任务
- * - 支持任务超时保护：超过 MAX_TASK_DURATION_MS 自动标记为失败
- * - v1.1: 超时时通过 AbortController 通知任务停止执行（BUG-02修复）
+ * - 排队超时保护：排队超过 MAX_QUEUE_WAIT_MS 自动标记为失败
+ * 
+ * v1.2 变更:
+ * - 移除 2小时硬超时（避免误杀大任务，如100×100=10000个搜索组合）
+ * - 任务卡死检测完全交给看门狗（每5分钟检测，30分钟无进度 → 标记失败）
+ * - 保留 AbortController，暴露 abortTask() 方法供看门狗调用终止任务
+ * - 看门狗发现卡死任务后，调用 abortTask() 通知任务停止执行
  * 
  * 使用方式:
  * ```ts
  * import { globalTaskQueue } from '../_core/taskQueue';
  * 
- * // 在搜索 mutation 中，替换直接调用为队列提交
+ * // 提交任务
  * globalTaskQueue.enqueue({
  *   taskDbId: task.id,
  *   taskId: task.taskId,
  *   userId,
  *   module: 'tps',
- *   execute: async (signal) => { ... 原来的异步执行函数，可检查 signal.aborted ... }
+ *   execute: async (signal) => { ... 可检查 signal.aborted ... }
  * });
+ * 
+ * // 看门狗发现卡死时调用
+ * globalTaskQueue.abortTask(taskId);
  * ```
  */
 
@@ -38,9 +46,6 @@ import { sql } from 'drizzle-orm';
  * HTTP评估: 15个任务共享180个HTTP并发信号量，每任务详情阶段30并发 = 峰值450，受信号量限制为180
  */
 const MAX_CONCURRENT_TASKS = 15;
-
-/** 单个任务最大执行时间（毫秒）：2小时 */
-const MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000;
 
 /** BUG-17: 排队最大等待时间（毫秒）：30分钟 */
 const MAX_QUEUE_WAIT_MS = 30 * 60 * 1000;
@@ -58,7 +63,7 @@ export interface QueuedTask {
   userId: number;
   /** 搜索模块类型 */
   module: 'tps' | 'spf' | 'anywho';
-  /** 实际执行函数（可选接收 AbortSignal 用于超时终止） */
+  /** 实际执行函数（可选接收 AbortSignal 用于终止） */
   execute: (signal?: AbortSignal) => Promise<void>;
   /** 入队时间 */
   enqueuedAt: number;
@@ -70,8 +75,7 @@ interface RunningTask {
   userId: number;
   module: string;
   startedAt: number;
-  timeoutTimer: ReturnType<typeof setTimeout>;
-  /** v1.1: 用于超时时通知任务停止 */
+  /** AbortController 用于看门狗发现卡死时通知任务停止 */
   abortController: AbortController;
 }
 
@@ -128,25 +132,53 @@ class GlobalTaskQueue {
   }
   
   /**
+   * 外部终止任务（供看门狗调用）
+   * 
+   * 看门狗发现任务30分钟无进度后，调用此方法：
+   * 1. 发送 AbortSignal 通知任务内部停止
+   * 2. 30秒兜底：如果任务仍未结束，强制从 running 中移除释放槽位
+   * 
+   * 注意：数据库状态由看门狗自己更新，这里只负责终止执行和释放槽位
+   */
+  abortTask(taskId: string): boolean {
+    const runningTask = this.running.get(taskId);
+    if (!runningTask) {
+      return false;
+    }
+    
+    console.log(`[TaskQueue] 收到终止指令，任务 ${taskId} (${runningTask.module})，发送 AbortSignal`);
+    
+    // 发送终止信号，通知任务内部停止执行
+    runningTask.abortController.abort();
+    
+    // 兜底：30秒后如果任务仍未结束，强制清理释放槽位
+    setTimeout(() => {
+      if (this.running.has(taskId)) {
+        console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 终止信号发送后 30s 仍未结束，强制清理`);
+        this.running.delete(taskId);
+        this.processNext();
+      }
+    }, 30000);
+    
+    return true;
+  }
+  
+  /**
    * 启动一个任务
+   * 
+   * v1.2: 不再设置硬超时定时器，任务卡死检测完全交给看门狗
    */
   private startTask(task: QueuedTask) {
-    // v1.1: 创建 AbortController 用于超时终止
+    // 创建 AbortController，供看门狗发现卡死时调用 abortTask() 终止
     const abortController = new AbortController();
     
-    // 设置超时保护
-    const timeoutTimer = setTimeout(() => {
-      this.handleTaskTimeout(task.taskId);
-    }, MAX_TASK_DURATION_MS);
-    
-    // 记录为运行中
+    // 记录为运行中（不再设置超时定时器）
     this.running.set(task.taskId, {
       taskDbId: task.taskDbId,
       taskId: task.taskId,
       userId: task.userId,
       module: task.module,
       startedAt: Date.now(),
-      timeoutTimer,
       abortController,
     });
     
@@ -168,7 +200,6 @@ class GlobalTaskQueue {
   private completeTask(taskId: string) {
     const runningTask = this.running.get(taskId);
     if (runningTask) {
-      clearTimeout(runningTask.timeoutTimer);
       this.running.delete(taskId);
       
       const duration = Math.round((Date.now() - runningTask.startedAt) / 1000);
@@ -223,53 +254,6 @@ class GlobalTaskQueue {
     } catch (err: any) {
       console.error(`[TaskQueue] 排队超时任务状态更新失败:`, err.message);
     }
-  }
-  
-  /**
-   * 处理任务超时
-   * 
-   * v1.1: 超时时通过 AbortController.abort() 通知任务停止
-   * 任务内部可以检查 signal.aborted 来决定是否继续执行
-   */
-  private async handleTaskTimeout(taskId: string) {
-    const runningTask = this.running.get(taskId);
-    if (!runningTask) return;
-    
-    console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 超时（超过 ${MAX_TASK_DURATION_MS / 60000} 分钟），发送终止信号并标记为失败`);
-    
-    // v1.1: 发送终止信号，通知任务停止执行
-    runningTask.abortController.abort();
-    
-    // 更新数据库状态
-    try {
-      const db = getDbSync();
-      if (db) {
-        const tableMap: Record<string, string> = {
-          tps: 'tps_search_tasks',
-          spf: 'spf_search_tasks',
-          anywho: 'anywho_search_tasks',
-        };
-        const table = tableMap[runningTask.module];
-        if (table) {
-          await db.execute(
-            sql`UPDATE ${sql.raw(table)} SET status = 'failed', completedAt = NOW() WHERE id = ${runningTask.taskDbId} AND status = 'running'`
-          );
-        }
-      }
-    } catch (err: any) {
-      console.error(`[TaskQueue] 超时任务状态更新失败:`, err.message);
-    }
-    
-    // 注意：不在这里从 running 中移除，让 task.execute() 的 finally 回调来处理
-    // 这样避免 completeTask 被调用两次的竞态问题
-    // 但如果任务长时间不结束（忽略了 abort 信号），需要兜底清理
-    setTimeout(() => {
-      if (this.running.has(taskId)) {
-        console.error(`[TaskQueue] ⚠️ 任务 ${taskId} 超时后 30s 仍未结束，强制清理`);
-        this.running.delete(taskId);
-        this.processNext();
-      }
-    }, 30000);
   }
 }
 

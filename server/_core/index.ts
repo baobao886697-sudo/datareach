@@ -14,6 +14,7 @@ import { startCommissionSettlement } from "../services/commissionSettlement";
 import { wsManager } from "./wsManager";
 import { getDbSync } from "../db";
 import { sql } from "drizzle-orm";
+import { globalTaskQueue } from "./taskQueue";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -1140,17 +1141,36 @@ function startTaskWatchdog() {
       
       for (const table of tables) {
         try {
-          const result = await db.execute(
-            sql`UPDATE ${sql.raw(table)} SET 
-              status = 'failed', 
-              completedAt = NOW()
+          // 先查询卡死任务的taskId，用于通知taskQueue终止执行
+          const staleRows = await db.execute(
+            sql`SELECT id, taskId FROM ${sql.raw(table)} 
             WHERE status = 'running' 
             AND updatedAt < DATE_SUB(NOW(), INTERVAL ${sql.raw(String(STALE_THRESHOLD_MINUTES))} MINUTE)`
           );
-          const affected = (result as any)?.[0]?.affectedRows || 0;
-          if (affected > 0) {
+          const staleTasks = (staleRows as any)?.[0] || [];
+          
+          if (staleTasks.length > 0) {
+            // 标记为失败
+            const result = await db.execute(
+              sql`UPDATE ${sql.raw(table)} SET 
+                status = 'failed', 
+                completedAt = NOW()
+              WHERE status = 'running' 
+              AND updatedAt < DATE_SUB(NOW(), INTERVAL ${sql.raw(String(STALE_THRESHOLD_MINUTES))} MINUTE)`
+            );
+            const affected = (result as any)?.[0]?.affectedRows || 0;
             totalCleaned += affected;
             console.log(`[Watchdog] ${table}: ${affected} 个卡死任务已标记为 failed（超过${STALE_THRESHOLD_MINUTES}分钟无进度）`);
+            
+            // v1.2: 通知 taskQueue 终止这些任务的实际执行
+            for (const row of staleTasks) {
+              if (row.taskId) {
+                const aborted = globalTaskQueue.abortTask(row.taskId);
+                if (aborted) {
+                  console.log(`[Watchdog] 已发送终止信号给任务 ${row.taskId}`);
+                }
+              }
+            }
           }
         } catch (err: any) {
           console.error(`[Watchdog] 检查 ${table} 失败:`, err.message);
