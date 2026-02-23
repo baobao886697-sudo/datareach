@@ -50,7 +50,7 @@ export interface QueuedTask {
   /** 用户ID */
   userId: number;
   /** 搜索模块类型 */
-  module: 'tps' | 'spf' | 'anywho' | 'batch';
+  module: 'tps' | 'spf' | 'anywho';
   /** 实际执行函数 */
   execute: () => Promise<void>;
   /** 入队时间 */
@@ -195,7 +195,6 @@ class GlobalTaskQueue {
           tps: 'tps_search_tasks',
           spf: 'spf_search_tasks',
           anywho: 'anywho_search_tasks',
-          batch: 'batch_search_tasks',
         };
         const table = tableMap[runningTask.module];
         if (table) {
