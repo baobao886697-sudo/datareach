@@ -33,8 +33,11 @@ import { sql } from 'drizzle-orm';
 // 配置
 // ============================================================================
 
-/** 全局最大并发搜索任务数（TPS/SPF/Anywho 共享） */
-const MAX_CONCURRENT_TASKS = 5;
+/** 全局最大并发搜索任务数（TPS/SPF/Anywho 共享）
+ * 内存评估: 15个任务 × 23MB(流式保存) = 345MB，远低于8GB上限
+ * HTTP评估: 15个任务共享180个HTTP并发信号量，每任务详情阶段30并发 = 峰值450，受信号量限制为180
+ */
+const MAX_CONCURRENT_TASKS = 15;
 
 /** 单个任务最大执行时间（毫秒）：2小时 */
 const MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000;

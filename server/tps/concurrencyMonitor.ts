@@ -85,7 +85,7 @@ const monitorState: MonitorState = {
   currentConcurrency: 0,
   
   // BUG-11修复：更新为实际配置值
-  maxThreads: 5,                   // MAX_CONCURRENT_TASKS
+  maxThreads: 15,                  // MAX_CONCURRENT_TASKS
   maxConcurrencyPerThread: 30,     // BATCH_CONFIG.BATCH_SIZE
   globalMaxConcurrency: 180,       // HTTP_SEMAPHORE_LIMIT
   
