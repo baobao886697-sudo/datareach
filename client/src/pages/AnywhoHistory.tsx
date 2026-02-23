@@ -292,7 +292,7 @@ export default function AnywhoHistory() {
                               <Eye className="h-4 w-4 mr-1" />
                               查看
                             </Button>
-                            {(task.status === "completed" || task.status === "insufficient_credits" || task.status === "service_busy") && (
+                            {(task.status === "completed" || task.status === "insufficient_credits" || task.status === "service_busy" || task.status === "failed") && (
                               <Button
                                 variant="ghost"
                                 size="sm"

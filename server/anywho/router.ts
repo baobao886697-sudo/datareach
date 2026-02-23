@@ -324,7 +324,8 @@ export const anywhoRouter = router({
         });
       }
       
-      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy") {
+      // 允许 failed 状态导出（失败任务可能已通过流式保存获取了部分结果）
+      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy" && task.status !== "failed") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成",

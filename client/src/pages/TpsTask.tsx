@@ -182,7 +182,7 @@ export default function TpsTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.tps.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") }
   );
   
   // v7.0: 任务阶段状态（通过WS实时更新）
@@ -386,7 +386,7 @@ export default function TpsTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (
+            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}
@@ -813,7 +813,7 @@ export default function TpsTask() {
         )}
         
         {/* 无结果提示 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (!results || results.results.length === 0) && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (!results || results.results.length === 0) && (
           <Card className="rainbow-border">
             <CardContent className="py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

@@ -186,7 +186,7 @@ export default function AnywhoTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.anywho.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") }
   );
   
   // v9.0: 任务超时检测
@@ -390,7 +390,7 @@ export default function AnywhoTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (
+            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}
@@ -615,7 +615,7 @@ export default function AnywhoTask() {
         )}
         
         {/* 搜索结果表格 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && results && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && results && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -714,7 +714,7 @@ export default function AnywhoTask() {
         )}
         
         {/* 无结果提示 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && (!results || !results.results || results.results.length === 0) && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (!results || !results.results || results.results.length === 0) && (
           <Card className="rainbow-border">
             <CardContent className="py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

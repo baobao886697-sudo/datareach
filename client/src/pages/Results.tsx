@@ -369,7 +369,7 @@ export default function Results() {
                 刷新
               </Button>
             )}
-            {task.status === "completed" && results && results.length > 0 && (
+            {(task.status === "completed" || task.status === "failed") && results && results.length > 0 && (
               <Button
                 onClick={() => exportMutation.mutate({ taskId: taskId || "" })}
                 disabled={exportMutation.isPending}
