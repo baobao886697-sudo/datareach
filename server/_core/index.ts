@@ -1101,7 +1101,7 @@ async function cleanupStaleTasksOnStartup() {
           sql`UPDATE ${sql.raw(table)} SET 
             status = 'failed', 
             completedAt = NOW()
-          WHERE status = 'running' OR status = 'pending'`
+          WHERE status = 'running'`
         );
         const affected = (result as any)?.[0]?.affectedRows || 0;
         if (affected > 0) {
@@ -1159,6 +1159,8 @@ function startTaskWatchdog() {
       
       if (totalCleaned > 0) {
         console.log(`[Watchdog] ⚠️ 共清理 ${totalCleaned} 个卡死任务`);
+      } else {
+        console.log(`[Watchdog] ✅ 检测完成，没有发现卡死任务`);
       }
     } catch (error: any) {
       console.error('[Watchdog] 定时检测失败:', error.message);

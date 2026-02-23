@@ -501,6 +501,7 @@ export const anywhoSearchTasks = mysqlTable("anywho_search_tasks", {
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   startedAt: timestamp("startedAt"),
   completedAt: timestamp("completedAt"),
 });
@@ -731,6 +732,7 @@ export const spfSearchTasks = mysqlTable("spf_search_tasks", {
   logs: json("logs").$type<Array<{ timestamp: string; message: string }>>(),
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   startedAt: timestamp("startedAt"),
   completedAt: timestamp("completedAt"),
 });
