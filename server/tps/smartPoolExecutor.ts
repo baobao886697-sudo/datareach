@@ -45,7 +45,7 @@ export const BATCH_CONFIG = {
   /** 批次间延迟（毫秒），给上游 API 恢复时间 */
   BATCH_DELAY_MS: 500,
   /** 延后重试前等待时间（毫秒） */
-  RETRY_DELAY_MS: 3000,
+  RETRY_DELAY_MS: 4000,
   /** 延后重试的批次大小（更保守） */
   RETRY_BATCH_SIZE: 8,
   /** 延后重试的批间延迟（更保守） */

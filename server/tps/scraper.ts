@@ -799,8 +799,8 @@ export async function searchOnly(
       if (retryUrls.length > 0) {
         onProgress?.(`🔄 开始延后重试 ${retryUrls.length} 个失败页面...`);
         
-        // 等待 2 秒后开始重试，给服务器恢复时间
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 等待 4 秒后开始重试，给服务器恢复时间
+        await new Promise(resolve => setTimeout(resolve, 4000));
         
         // 分块并发重试，每批最多5个，与主搜索保持一致
         const RETRY_CHUNK_SIZE = 5;
