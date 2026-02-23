@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { globalTaskQueue } from "../_core/taskQueue";
 import { 
   searchOnly,
   convertSearchResultToDetail,
@@ -218,15 +219,26 @@ export const anywhoRouter = router({
         details: `开始 Anywho 搜索任务: ${task.taskId}，实时扣费模式`
       });
       
-      // 异步执行搜索（实时扣费模式）
-      executeAnywhoSearchRealtime(task.taskId, task.id, userId, subTasks, input.filters || {}, config).catch(err => {
-        console.error(`[Anywho] 任务执行失败: ${task.taskId}`, err);
+      // 🛡️ v9.0: 通过全局任务队列提交，防止过多任务同时运行导致OOM
+      const queueResult = globalTaskQueue.enqueue({
+        taskDbId: task.id,
+        taskId: task.taskId,
+        userId,
+        module: 'anywho',
+        enqueuedAt: Date.now(),
+        execute: async () => {
+          await executeAnywhoSearchRealtime(task.taskId, task.id, userId, subTasks, input.filters || {}, config);
+        },
       });
       
       return {
         taskId: task.taskId,
-        message: "搜索任务已提交（实时扣费模式）",
+        message: queueResult.queued 
+          ? `搜索任务已提交，当前排队位置 #${queueResult.position}，请稍候...`
+          : "搜索任务已提交（实时扣费模式）",
         currentBalance: userCredits,
+        queued: queueResult.queued,
+        queuePosition: queueResult.position,
       };
     }),
 
@@ -806,7 +818,25 @@ async function executeAnywhoSearchRealtime(
           emitTaskProgress(userId, taskId, "anywho", { progress });
           emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "anywho", taskId });
           if (current) {
-            await addLog(`✅ [${completed}/${total}] ${current.name} - 已获取`);
+            await addLog(`\u2705 [${completed}/${total}] ${current.name} - \u5df2\u83b7\u53d6`);
+          }
+        },
+        // v9.0: Anywho batch save - merge details into filteredResults in real-time
+        async (batchDetails) => {
+          for (const item of batchDetails) {
+            const searchResult = searchResultsForDetail[item.globalIdx];
+            if (searchResult) {
+              const fr = filteredResults.find(r => r.detailLink === searchResult.detailLink);
+              if (fr && item.detail) {
+                fr.carrier = item.detail.carrier || fr.carrier;
+                fr.phoneType = item.detail.phoneType || fr.phoneType;
+                fr.marriageStatus = item.detail.marriageStatus || fr.marriageStatus;
+                fr.isDeceased = item.detail.isDeceased;
+                if (item.detail.allPhones && item.detail.allPhones.length > 0) {
+                  fr.allPhones = item.detail.allPhones;
+                }
+              }
+            }
           }
         }
       );
@@ -1060,7 +1090,9 @@ async function fetchDetailsWithCredits(
   searchResults: AnywhoSearchResult[],
   token: string,
   creditTracker: AnywhoRealtimeCreditTracker,
-  onProgress?: (completed: number, total: number, current?: AnywhoDetailResult) => Promise<void>
+  onProgress?: (completed: number, total: number, current?: AnywhoDetailResult) => Promise<void>,
+  /** 🛡️ v9.0: 流式保存回调 - 每批结果立即保存到数据库 */
+  onBatchSave?: (batchDetails: Array<{ globalIdx: number; detail: AnywhoDetailResult }>) => Promise<void>
 ): Promise<{
   details: (AnywhoDetailResult | null)[];
   requestCount: number;
@@ -1166,6 +1198,24 @@ async function fetchDetailsWithCredits(
     
     if (stoppedDueToCredits || apiCreditsExhausted) break;
     
+    // 🛡️ v9.0: 流式保存 - 每批处理完后立即保存到数据库
+    if (onBatchSave) {
+      const batchSaveItems: Array<{ globalIdx: number; detail: AnywhoDetailResult }> = [];
+      for (let i = startIdx; i < endIdx && i < details.length; i++) {
+        if (details[i]) {
+          batchSaveItems.push({ globalIdx: i, detail: details[i]! });
+          details[i] = null; // 释放内存，已保存到数据库
+        }
+      }
+      if (batchSaveItems.length > 0) {
+        try {
+          await onBatchSave(batchSaveItems);
+        } catch (err: any) {
+          console.error('[Anywho] 流式保存失败:', err.message);
+        }
+      }
+    }
+    
     // 批间延迟
     if (batchIdx < totalBatches - 1) {
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
@@ -1226,6 +1276,24 @@ async function fetchDetailsWithCredits(
       }
       
       if (stoppedDueToCredits) break;
+      
+      // 🛡️ v9.0: 重试阶段也流式保存
+      if (onBatchSave) {
+        const retrySaveItems: Array<{ globalIdx: number; detail: AnywhoDetailResult }> = [];
+        for (const idx of retryItems) {
+          if (details[idx]) {
+            retrySaveItems.push({ globalIdx: idx, detail: details[idx]! });
+            details[idx] = null;
+          }
+        }
+        if (retrySaveItems.length > 0) {
+          try {
+            await onBatchSave(retrySaveItems);
+          } catch (err: any) {
+            console.error('[Anywho] 重试流式保存失败:', err.message);
+          }
+        }
+      }
       
       // 重试批间延迟
       if (retryBatchIdx < retryBatches - 1) {

@@ -32,6 +32,7 @@ import {
   isThreadPoolEnabled,
 } from "./scraper";
 import { executeSpfSearchWithThreadPool, shouldUseThreadPool } from "./threadPoolExecutor";
+import { globalTaskQueue } from "../_core/taskQueue";
 import { THREAD_POOL_CONFIG } from "./config";
 import { emitTaskProgress, emitTaskCompleted, emitTaskFailed, emitCreditsUpdate } from "../_core/wsEmitter";
 import {
@@ -199,52 +200,58 @@ export const spfRouter = router({
         filters: input.filters || {},
       });
       
-      // v4.0: 不再预扣费，改为实时扣除
-      // 异步执行搜索任务
-      if (shouldUseThreadPool()) {
-        // 线程池模式 (实时扣除)
-        console.log(`[SPF] 使用线程池模式执行任务 (实时扣除): ${task.taskId}`);
-        executeSpfSearchWithThreadPool(
-          task.id,
-          task.taskId,
-          config,
-          input,
-          userId,
-          0, // 不再使用预扣费
-          (msg) => console.log(`[SPF Task ${task.taskId}] ${msg}`),
-          getCachedSpfDetails, // 保留参数兼容性，但不再使用
-          async (items) => {
-            const cacheDays = config.cacheDays || 180;
-            await saveSpfDetailCache(items, cacheDays);
-          },
-          async (data) => await updateSpfSearchTaskProgress(task.id, data),
-          async (data) => await completeSpfSearchTask(task.id, data),
-          async (error, logs) => await failSpfSearchTask(task.id, error, logs.map(msg => ({ timestamp: new Date().toISOString(), message: msg }))),
-          async () => ({ refundAmount: 0, newBalance: 0 }), // 不再使用结算
-          logApi,
-          logUserActivity,
-          saveSpfSearchResults
-        ).catch(err => {
-          console.error(`[SPF] 线程池任务执行失败: ${task.taskId}`, err);
-        });
-      } else {
-        // 纯异步模式 (实时扣除)
-        executeSpfSearchRealtimeDeduction(
-          task.id,
-          task.taskId,
-          config,
-          input,
-          userId
-        ).catch(err => {
-          console.error(`[SPF] 任务执行失败: ${task.taskId}`, err);
-        });
-      }
+      // 🛡️ v9.0: 通过全局任务队列提交，防止过多任务同时运行导致OOM
+      const queueResult = globalTaskQueue.enqueue({
+        taskDbId: task.id,
+        taskId: task.taskId,
+        userId,
+        module: 'spf',
+        enqueuedAt: Date.now(),
+        execute: async () => {
+          if (shouldUseThreadPool()) {
+            console.log(`[SPF] 使用线程池模式执行任务 (实时扣除): ${task.taskId}`);
+            await executeSpfSearchWithThreadPool(
+              task.id,
+              task.taskId,
+              config,
+              input,
+              userId,
+              0,
+              (msg) => console.log(`[SPF Task ${task.taskId}] ${msg}`),
+              getCachedSpfDetails,
+              async (items) => {
+                const cacheDays = config.cacheDays || 180;
+                await saveSpfDetailCache(items, cacheDays);
+              },
+              async (data) => await updateSpfSearchTaskProgress(task.id, data),
+              async (data) => await completeSpfSearchTask(task.id, data),
+              async (error, logs) => await failSpfSearchTask(task.id, error, logs.map(msg => ({ timestamp: new Date().toISOString(), message: msg }))),
+              async () => ({ refundAmount: 0, newBalance: 0 }),
+              logApi,
+              logUserActivity,
+              saveSpfSearchResults
+            );
+          } else {
+            await executeSpfSearchRealtimeDeduction(
+              task.id,
+              task.taskId,
+              config,
+              input,
+              userId
+            );
+          }
+        },
+      });
       
       return {
         taskId: task.taskId,
-        message: "搜索任务已提交",
+        message: queueResult.queued 
+          ? `搜索任务已提交，当前排队位置 #${queueResult.position}，请稍候...`
+          : "搜索任务已提交",
         currentBalance: currentBalance,
         note: "实时扣费模式：用多少扣多少，积分不足时自动停止",
+        queued: queueResult.queued,
+        queuePosition: queueResult.position,
       };
     }),
 
@@ -802,6 +809,47 @@ async function executeSpfSearchRealtimeDeduction(
           emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getCostBreakdown().totalCost, source: "spf", taskId });
         };
         
+        // 🛡️ v9.0: 流式保存回调 - 每批结果立即保存到数据库，不在内存中累积
+        const onBatchSave = async (items: Array<{ task: typeof detailTasksToFetch[0]; details: SpfDetailResult }>) => {
+          const resultsBySubTask = new Map<number, SpfDetailResult[]>();
+          
+          for (const { task, details } of items) {
+            if (!details) continue;
+            
+            if (!resultsBySubTask.has(task.subTaskIndex)) {
+              resultsBySubTask.set(task.subTaskIndex, []);
+            }
+            
+            // 跨任务电话号码去重
+            if (details.phone && seenPhones.has(details.phone)) {
+              continue;
+            }
+            if (details.phone) {
+              seenPhones.add(details.phone);
+            }
+            
+            const resultWithSearchInfo = {
+              ...details,
+              searchName: task.searchName,
+              searchLocation: task.searchLocation,
+            };
+            
+            resultsBySubTask.get(task.subTaskIndex)!.push(resultWithSearchInfo);
+          }
+          
+          let batchSavedCount = 0;
+          for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
+            const subTask = subTasks.find(t => t.index === subTaskIndex);
+            if (subTask && results.length > 0) {
+              await saveSpfSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+              batchSavedCount += results.length;
+            }
+          }
+          
+          totalResults += batchSavedCount;
+          return batchSavedCount;
+        };
+        
         const detailResult = await fetchDetailsInBatch(
           detailTasksToFetch,
           token,
@@ -810,7 +858,8 @@ async function executeSpfSearchRealtimeDeduction(
           addLog,
           async () => new Map(), // 不读取缓存
           setCachedDetails, // 保存数据用于 CSV 导出
-          onDetailProgress // v8.2: 详情进度回调
+          onDetailProgress, // v8.2: 详情进度回调
+          onBatchSave // 🛡️ v9.0: 流式保存回调
         );
         
         // 实时扣除详情页费用（逐条扣除 + 实时推送积分更新）
@@ -833,43 +882,6 @@ async function executeSpfSearchRealtimeDeduction(
           addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
           addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
           stoppedDueToApiExhausted = true;
-        }
-        
-        // 按子任务分组保存结果
-        const resultsBySubTask = new Map<number, SpfDetailResult[]>();
-        
-        for (const { task, details } of detailResult.results) {
-          if (!details) continue;
-          
-          if (!resultsBySubTask.has(task.subTaskIndex)) {
-            resultsBySubTask.set(task.subTaskIndex, []);
-          }
-          
-          // 跨任务电话号码去重
-          if (details.phone && seenPhones.has(details.phone)) {
-            continue;
-          }
-          if (details.phone) {
-            seenPhones.add(details.phone);
-          }
-          
-          // 添加搜索信息
-          const resultWithSearchInfo = {
-            ...details,
-            searchName: task.searchName,
-            searchLocation: task.searchLocation,
-          };
-          
-          resultsBySubTask.get(task.subTaskIndex)!.push(resultWithSearchInfo);
-        }
-        
-        // 保存结果到数据库
-        for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
-          const subTask = subTasks.find(t => t.index === subTaskIndex);
-          if (subTask && results.length > 0) {
-            await saveSpfSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
-            totalResults += results.length;
-          }
         }
       }
       

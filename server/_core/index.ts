@@ -1081,9 +1081,99 @@ async function ensureTables() {
   }
 }
 
+// ============================================================================
+// 启动自检：清理上次崩溃遗留的僵尸任务
+// ============================================================================
+async function cleanupStaleTasksOnStartup() {
+  try {
+    const db = getDbSync();
+    if (!db) {
+      console.log('[Startup] 数据库未连接，跳过僵尸任务清理');
+      return;
+    }
+    
+    const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+    let totalCleaned = 0;
+    
+    for (const table of tables) {
+      try {
+        const result = await db.execute(
+          sql`UPDATE ${sql.raw(table)} SET 
+            status = 'failed', 
+            completedAt = NOW()
+          WHERE status = 'running' OR status = 'pending'`
+        );
+        const affected = (result as any)?.[0]?.affectedRows || 0;
+        if (affected > 0) {
+          totalCleaned += affected;
+          console.log(`[Startup] ${table}: ${affected} 个遗留任务已标记为 failed`);
+        }
+      } catch (err: any) {
+        console.error(`[Startup] 清理 ${table} 失败:`, err.message);
+      }
+    }
+    
+    if (totalCleaned > 0) {
+      console.log(`[Startup] ⚠️ 共清理 ${totalCleaned} 个上次崩溃遗留的僵尸任务`);
+    } else {
+      console.log('[Startup] ✅ 没有遗留的僵尸任务');
+    }
+  } catch (error: any) {
+    console.error('[Startup] 僵尸任务清理失败:', error.message);
+  }
+}
+
+// ============================================================================
+// 看门狗：定时检测卡死任务（每5分钟检查一次）
+// ============================================================================
+function startTaskWatchdog() {
+  const WATCHDOG_INTERVAL = 5 * 60 * 1000;  // 5分钟
+  const STALE_THRESHOLD_MINUTES = 30;        // 30分钟无进度更新视为卡死
+  
+  setInterval(async () => {
+    try {
+      const db = getDbSync();
+      if (!db) return;
+      
+      const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks', 'batch_search_tasks'];
+      let totalCleaned = 0;
+      
+      for (const table of tables) {
+        try {
+          const result = await db.execute(
+            sql`UPDATE ${sql.raw(table)} SET 
+              status = 'failed', 
+              completedAt = NOW()
+            WHERE status = 'running' 
+            AND updatedAt < DATE_SUB(NOW(), INTERVAL ${sql.raw(String(STALE_THRESHOLD_MINUTES))} MINUTE)`
+          );
+          const affected = (result as any)?.[0]?.affectedRows || 0;
+          if (affected > 0) {
+            totalCleaned += affected;
+            console.log(`[Watchdog] ${table}: ${affected} 个卡死任务已标记为 failed（超过${STALE_THRESHOLD_MINUTES}分钟无进度）`);
+          }
+        } catch (err: any) {
+          console.error(`[Watchdog] 检查 ${table} 失败:`, err.message);
+        }
+      }
+      
+      if (totalCleaned > 0) {
+        console.log(`[Watchdog] ⚠️ 共清理 ${totalCleaned} 个卡死任务`);
+      }
+    } catch (error: any) {
+      console.error('[Watchdog] 定时检测失败:', error.message);
+    }
+  }, WATCHDOG_INTERVAL);
+  
+  console.log(`[Watchdog] 看门狗已启动，每${WATCHDOG_INTERVAL / 60000}分钟检测一次卡死任务`);
+}
+
 async function startServer() {
   // 确保数据库表存在
   await ensureTables();
+  
+  // 🛡️ 启动自检：清理上次崩溃遗留的僵尸任务
+  await cleanupStaleTasksOnStartup();
   
   const app = express();
   const server = createServer(app);
@@ -1136,6 +1226,9 @@ async function startServer() {
       // 启动佣金自动结算服务（每小时检查一次）
       startCommissionSettlement(60 * 60 * 1000);
       console.log("[Background] Commission settlement service started");
+      
+      // 🛡️ 启动看门狗：定时检测卡死任务
+      startTaskWatchdog();
     }
   });
 }

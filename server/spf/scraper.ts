@@ -1210,7 +1210,9 @@ export async function fetchDetailsInBatch(
   getCachedDetails: (links: string[]) => Promise<Map<string, SpfDetailResult>>,
   setCachedDetails: (items: Array<{ link: string; data: SpfDetailResult }>) => Promise<void>,
   /** v8.2: 详情进度回调，用于实时推送指标更新 */
-  onDetailProgress?: (info: { completedDetails: number; totalDetails: number; percent: number; detailPageRequests: number; totalResults: number }) => void
+  onDetailProgress?: (info: { completedDetails: number; totalDetails: number; percent: number; detailPageRequests: number; totalResults: number }) => void,
+  /** 🛡️ v9.0: 流式保存回调 - 每批结果立即保存到数据库 */
+  onBatchSave?: (items: Array<{ task: DetailTask; details: SpfDetailResult }>) => Promise<number>
 ): Promise<FetchDetailsResult> {
   const { BATCH_SIZE, BATCH_DELAY_MS, RETRY_BATCH_SIZE, RETRY_BATCH_DELAY_MS, RETRY_WAIT_MS } = SPF_DETAIL_BATCH_CONFIG;
   
@@ -1390,6 +1392,20 @@ export async function fetchDetailsInBatch(
         }
       }
       
+      // 🛡️ v9.0: 流式保存 - 每批处理完后立即保存到数据库
+      if (onBatchSave) {
+        const batchValidResults = results.filter(r => r.details !== null) as Array<{ task: DetailTask; details: SpfDetailResult }>;
+        if (batchValidResults.length > 0) {
+          try {
+            await onBatchSave(batchValidResults);
+          } catch (err: any) {
+            console.error('[SPF] 流式保存失败:', err.message);
+          }
+          // 清空已保存的结果，释放内存
+          results.length = 0;
+        }
+      }
+      
       // 进度报告（每5批报告一次，或最后一批）
       if ((batchIdx + 1) % 5 === 0 || batchIdx === totalBatches - 1) {
         const percent = Math.round((completed / tasksToFetch.length) * 100);
@@ -1480,6 +1496,19 @@ export async function fetchDetailsInBatch(
             for (const t of linkTasks) {
               results.push({ task: t, details: null });
             }
+          }
+        }
+        
+        // 🛡️ v9.0: 重试阶段也流式保存
+        if (onBatchSave) {
+          const retryValidResults = results.filter(r => r.details !== null) as Array<{ task: DetailTask; details: SpfDetailResult }>;
+          if (retryValidResults.length > 0) {
+            try {
+              await onBatchSave(retryValidResults);
+            } catch (err: any) {
+              console.error('[SPF] 重试流式保存失败:', err.message);
+            }
+            results.length = 0;
           }
         }
         

@@ -27,7 +27,9 @@ import {
   fetchDetailsWithSmartPool,
   DetailProgressInfo,
   BATCH_CONFIG,
+  BatchSaveItem,
 } from "./smartPoolExecutor";
+import { globalTaskQueue } from "../_core/taskQueue";
 // v8.0: smartConcurrencyPool 已废弃，分批配置从 smartPoolExecutor 导入
 import {
   getTpsConfig,
@@ -187,15 +189,26 @@ export const tpsRouter = router({
         maxPages: config.maxPages,
       });
       
-      // 异步执行搜索（实时扣分模式）
-      executeTpsSearchRealtimeDeduction(task.id, task.taskId, config, input, userId).catch(err => {
-        console.error(`TPS 搜索任务 ${task.taskId} 执行失败:`, err);
+      // 🛡️ v9.0: 通过全局任务队列提交，防止过多任务同时运行导致OOM
+      const queueResult = globalTaskQueue.enqueue({
+        taskDbId: task.id,
+        taskId: task.taskId,
+        userId,
+        module: 'tps',
+        enqueuedAt: Date.now(),
+        execute: async () => {
+          await executeTpsSearchRealtimeDeduction(task.id, task.taskId, config, input, userId);
+        },
       });
       
       return {
         taskId: task.taskId,
-        message: "搜索任务已提交（实时扣分模式）",
+        message: queueResult.queued 
+          ? `搜索任务已提交，当前排队位置 #${queueResult.position}，请稍候...`
+          : "搜索任务已提交（实时扣分模式）",
         currentBalance: userCredits,
+        queued: queueResult.queued,
+        queuePosition: queueResult.position,
       };
     }),
 
@@ -721,7 +734,43 @@ async function executeTpsSearchRealtimeDeduction(
         emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getTotalDeducted(), source: "tps", taskId });
       };
       
-      // 使用智能并发池获取详情
+      // 🛡️ v9.0: 流式保存回调 - 每批结果立即保存到数据库，不在内存中累积
+      const onBatchSave = async (items: BatchSaveItem[]): Promise<number> => {
+        // 按子任务分组
+        const resultsBySubTask = new Map<number, TpsDetailResult[]>();
+        
+        for (const { task, details } of items) {
+          if (!resultsBySubTask.has(task.subTaskIndex)) {
+            resultsBySubTask.set(task.subTaskIndex, []);
+          }
+          
+          // 跨任务电话号码去重
+          for (const detail of details) {
+            if (detail.phone && seenPhones.has(detail.phone)) {
+              continue;
+            }
+            if (detail.phone) {
+              seenPhones.add(detail.phone);
+            }
+            resultsBySubTask.get(task.subTaskIndex)!.push(detail);
+          }
+        }
+        
+        // 立即保存到数据库
+        let batchSavedCount = 0;
+        for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
+          const subTask = subTasks.find(t => t.index === subTaskIndex);
+          if (subTask && results.length > 0) {
+            await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+            batchSavedCount += results.length;
+          }
+        }
+        
+        totalResults += batchSavedCount;
+        return batchSavedCount;
+      };
+      
+      // 使用智能并发池获取详情（v9.0 流式保存模式）
       const detailResult = await fetchDetailsWithSmartPool(
         allDetailTasks,
         token,
@@ -730,7 +779,8 @@ async function executeTpsSearchRealtimeDeduction(
         setCachedDetails,
         creditTracker,
         userId,
-        onDetailProgress
+        onDetailProgress,
+        onBatchSave
       );
       
       totalDetailPages += detailResult.stats.detailPageRequests;
@@ -746,35 +796,6 @@ async function executeTpsSearchRealtimeDeduction(
         addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
         addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
         stoppedDueToApiExhausted = true;
-      }
-      
-      // 按子任务分组保存结果
-      const resultsBySubTask = new Map<number, TpsDetailResult[]>();
-      
-      for (const { task, details } of detailResult.results) {
-        if (!resultsBySubTask.has(task.subTaskIndex)) {
-          resultsBySubTask.set(task.subTaskIndex, []);
-        }
-        
-        // 跨任务电话号码去重
-        for (const detail of details) {
-          if (detail.phone && seenPhones.has(detail.phone)) {
-            continue;
-          }
-          if (detail.phone) {
-            seenPhones.add(detail.phone);
-          }
-          resultsBySubTask.get(task.subTaskIndex)!.push(detail);
-        }
-      }
-      
-      // 保存结果到数据库
-      for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
-        const subTask = subTasks.find(t => t.index === subTaskIndex);
-        if (subTask && results.length > 0) {
-          await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
-          totalResults += results.length;
-        }
       }
     }
     

@@ -189,6 +189,30 @@ export default function AnywhoTask() {
     { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") }
   );
   
+  // v9.0: 任务超时检测
+  const [lastProgressTime, setLastProgressTime] = useState<number>(Date.now());
+  const [isStale, setIsStale] = useState(false);
+  
+  useEffect(() => {
+    if (task?.status === 'running') {
+      setLastProgressTime(Date.now());
+      setIsStale(false);
+    }
+  }, [task?.progress, task?.totalResults, task?.logs?.length]);
+  
+  useEffect(() => {
+    if (task?.status !== 'running') {
+      setIsStale(false);
+      return;
+    }
+    const checkInterval = setInterval(() => {
+      if (Date.now() - lastProgressTime > 5 * 60 * 1000) {
+        setIsStale(true);
+      }
+    }, 30000);
+    return () => clearInterval(checkInterval);
+  }, [task?.status, lastProgressTime]);
+  
   // WebSocket 实时订阅：收到推送时立即刷新数据
   useEffect(() => {
     if (!taskId) return;
@@ -469,6 +493,21 @@ export default function AnywhoTask() {
             </CardContent>
           </Card>
         </div>
+        
+        {/* v9.0: 任务超时提示 */}
+        {isStale && task?.status === "running" && (
+          <Card className="border-amber-500/50 bg-amber-500/10">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0" />
+                <div>
+                  <p className="text-amber-300 font-medium">任务可能已停滞</p>
+                  <p className="text-amber-400/70 text-sm mt-1">该任务已超过 5 分钟未有新的进度更新。系统正在自动检测并尝试恢复，如问题持续请联系客服。已获取的结果已实时保存，不会丢失。</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         
         {/* 实时日志终端 - 黄金模板核心功能 */}
         {(task?.status === "running" || task?.status === "pending" || (task?.logs && task.logs.length > 0)) && (
