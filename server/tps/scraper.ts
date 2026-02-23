@@ -760,7 +760,7 @@ export async function searchOnly(
       for (let chunkStart = 0; chunkStart < remainingUrls.length; chunkStart += SEARCH_PAGE_CHUNK_SIZE) {
         // 检查超时终止信号
         if (signal?.aborted) {
-          onProgress?.(`⚠️ 任务已超时，停止搜索页面获取`);
+          onProgress?.(`任务已结束，已获取的结果已保存`);
           break;
         }
         // 如果API积分已耗尽，停止获取更多页面
@@ -775,9 +775,7 @@ export async function searchOnly(
               searchApiCreditsExhausted = true;
               return null;
             }
-            // v3.0: 不再加入重试队列，失败直接跳过
-            const safeErrMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-            onProgress?.(`页面获取失败: ${safeErrMsg}`);
+            // v3.0: 失败静默处理，不向用户显示错误信息
             return null;
           })
         );
@@ -843,7 +841,7 @@ export async function searchOnly(
     }
     
     const safeSearchErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
-    onProgress?.(`搜索任务失败: ${safeSearchErrMsg}`);
+    onProgress?.(`未找到匹配结果`);
     return {
       success: false,
       searchResults: [],

@@ -186,7 +186,7 @@ export async function fetchDetailsWithSmartPool(
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
     // 检查超时终止信号
     if (signal?.aborted) {
-      onProgress(`⚠️ 任务已超时，停止获取详情（已完成 ${batchIndex}/${totalBatches} 批）`);
+      onProgress(`任务已结束，已获取的结果已保存`);
       break;
     }
     if (stoppedDueToCredits || stoppedDueToApiCredits) break;
@@ -318,8 +318,8 @@ export async function fetchDetailsWithSmartPool(
     if (batchSuccess === 0 && batchFail > 0) {
       consecutiveFailBatches++;
       if (consecutiveFailBatches >= BATCH_CONFIG.CONSECUTIVE_FAIL_THRESHOLD && !stoppedDueToApiCredits) {
-        onProgress(`🚫 连续 ${consecutiveFailBatches} 批请求全部失败，自动停止（可能是 API 服务异常）`);
-        onProgress(`💡 请稍后重试或联系客服处理`);
+        onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+        onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
         console.error(`[TPS v9.0] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
         // BUG-08修复：使用独立标志，不再复用 stoppedDueToApiCredits
         stoppedDueToConsecutiveFails = true;
@@ -332,7 +332,7 @@ export async function fetchDetailsWithSmartPool(
     // 批次日志（每5批或最后一批输出）
     if (batchNum % 5 === 0 || batchNum === totalBatches) {
       const overallPercent = Math.round((completedDetails / totalDetails) * 100);
-      onProgress(`📥 批次 ${batchNum}/${totalBatches} 完成 (成功${batchSuccess}/失败${batchFail}), 总进度 ${completedDetails}/${totalDetails} (${overallPercent}%)`);
+      onProgress(`📥 批次 ${batchNum}/${totalBatches} 完成, 总进度 ${completedDetails}/${totalDetails} (${overallPercent}%)`);
     }
     
     // 批间延迟（最后一批不需要延迟）

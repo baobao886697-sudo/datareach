@@ -581,7 +581,7 @@ async function executeTpsSearchRealtimeDeduction(
     const processSearch = async (subTask: { name: string; location: string; index: number }) => {
       // 检查超时终止信号
       if (signal?.aborted) {
-        addLog(`⚠️ 任务已超时，停止搜索`);
+        addLog(`任务已结束，已获取的结果已保存`);
         stoppedDueToCredits = true;  // 复用停止标志终止后续流程
         return;
       }
@@ -673,7 +673,7 @@ async function executeTpsSearchRealtimeDeduction(
           stoppedDueToCredits = true;
           return;
         }
-        addLog(`❌ [${subTask.index + 1}/${subTasks.length}] 搜索失败: ${result.error}`);
+        addLog(`[${subTask.index + 1}/${subTasks.length}] 未找到匹配结果`);
       }
       
       // 更新进度
@@ -970,7 +970,7 @@ async function executeTpsSearchRealtimeDeduction(
     
     } catch (error: any) {
     const safeMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
-    addLog(`❌ 任务失败: ${safeMsg}`);
+    addLog(`任务已结束，已获取的结果已保存`);
     
     // 获取已消耗的费用
     const costBreakdown = creditTracker.getCostBreakdown();
