@@ -196,8 +196,8 @@ export const tpsRouter = router({
         userId,
         module: 'tps',
         enqueuedAt: Date.now(),
-        execute: async () => {
-          await executeTpsSearchRealtimeDeduction(task.id, task.taskId, config, input, userId);
+        execute: async (signal?: AbortSignal) => {
+          await executeTpsSearchRealtimeDeduction(task.id, task.taskId, config, input, userId, signal);
         },
       });
       
@@ -467,7 +467,8 @@ async function executeTpsSearchRealtimeDeduction(
   taskId: string,
   config: any,
   input: z.infer<typeof tpsSearchInputSchema>,
-  userId: number
+  userId: number,
+  signal?: AbortSignal
 ) {
   // v8.0: 全局信号量已移除，并发由分批模式控制
   console.log(`[TPS v8.0] 用户 ${userId} 开始任务`);
@@ -578,6 +579,12 @@ async function executeTpsSearchRealtimeDeduction(
     const searchQueue = [...subTasks];
     
     const processSearch = async (subTask: { name: string; location: string; index: number }) => {
+      // 检查超时终止信号
+      if (signal?.aborted) {
+        addLog(`⚠️ 任务已超时，停止搜索`);
+        stoppedDueToCredits = true;  // 复用停止标志终止后续流程
+        return;
+      }
       // BUG-04修复：先检查同步标志，再检查异步余额，减少竞态窗口
       if (stoppedDueToCredits || creditTracker.isStopped()) {
         return;
@@ -597,7 +604,8 @@ async function executeTpsSearchRealtimeDeduction(
         token,
         maxPages,
         input.filters || {},
-        (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`)
+        (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`),
+        signal
       );
       
       completedSearches++;
@@ -673,7 +681,7 @@ async function executeTpsSearchRealtimeDeduction(
       let currentIndex = 0;
       
       const runNext = async (): Promise<void> => {
-        while (currentIndex < searchQueue.length && !stoppedDueToCredits) {
+        while (currentIndex < searchQueue.length && !stoppedDueToCredits && !signal?.aborted) {
           const task = searchQueue[currentIndex++];
           await processSearch(task);
         }
@@ -696,7 +704,7 @@ async function executeTpsSearchRealtimeDeduction(
     // stoppedDueToCredits 已在搜索阶段首次触发时输出日志，此处不再重复
     
     // ==================== 阶段二：智能并发池获取详情（v7.0 全局弹性并发 + 实时进度推送） ====================
-    if (allDetailTasks.length > 0 && !stoppedDueToCredits) {
+    if (allDetailTasks.length > 0 && !stoppedDueToCredits && !signal?.aborted) {
       addLog(`════════ 进入详情获取阶段 ════════`);
       addLog(`📋 待获取详情: ${allDetailTasks.length} 条`);
       addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
@@ -784,7 +792,8 @@ async function executeTpsSearchRealtimeDeduction(
         creditTracker,
         userId,
         onDetailProgress,
-        onBatchSave
+        onBatchSave,
+        signal
       );
       
       totalDetailPages += detailResult.stats.detailPageRequests;

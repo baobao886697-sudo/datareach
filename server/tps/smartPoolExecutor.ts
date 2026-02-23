@@ -126,7 +126,8 @@ export async function fetchDetailsWithSmartPool(
   creditTracker: TpsRealtimeCreditTracker,
   userId: number,
   onDetailProgress?: (info: DetailProgressInfo) => void,
-  onBatchSave?: OnBatchSaveCallback
+  onBatchSave?: OnBatchSaveCallback,
+  signal?: AbortSignal
 ): Promise<SmartPoolFetchResult> {
   let totalSaved = 0;
   let detailPageRequests = 0;
@@ -188,6 +189,11 @@ export async function fetchDetailsWithSmartPool(
   console.log(`[TPS v9.0] 流式保存模式: ${totalDetails} 条详情, ${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个`);
   
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    // 检查超时终止信号
+    if (signal?.aborted) {
+      onProgress(`⚠️ 任务已超时，停止获取详情（已完成 ${batchIndex}/${totalBatches} 批）`);
+      break;
+    }
     if (stoppedDueToCredits || stoppedDueToApiCredits) break;
     
     const batchStart = batchIndex * BATCH_CONFIG.BATCH_SIZE;
@@ -351,8 +357,8 @@ export async function fetchDetailsWithSmartPool(
   let retrySuccess = 0;
   const retryTotal = failedLinks.length;
   
-  // API 积分耗尽时跳过重试
-  if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
+  // API 积分耗尽或任务超时时跳过重试
+  if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits && !signal?.aborted) {
     onProgress(`🔄 开始延后重试 ${failedLinks.length} 个失败链接 (等待 ${BATCH_CONFIG.RETRY_DELAY_MS}ms)...`);
     console.log(`[TPS v9.0] 延后重试: ${failedLinks.length} 个失败链接`);
     
@@ -363,7 +369,7 @@ export async function fetchDetailsWithSmartPool(
     const retryBatches = Math.ceil(failedLinks.length / BATCH_CONFIG.RETRY_BATCH_SIZE);
     
     for (let ri = 0; ri < retryBatches; ri++) {
-      if (stoppedDueToCredits || stoppedDueToApiCredits) break;
+      if (stoppedDueToCredits || stoppedDueToApiCredits || signal?.aborted) break;
       
       const retryBatchStart = ri * BATCH_CONFIG.RETRY_BATCH_SIZE;
       const retryBatchLinks = failedLinks.slice(retryBatchStart, retryBatchStart + BATCH_CONFIG.RETRY_BATCH_SIZE);

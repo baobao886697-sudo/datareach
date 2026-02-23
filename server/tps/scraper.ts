@@ -719,7 +719,8 @@ export async function searchOnly(
   token: string,
   maxPages: number,
   filters: TpsFilters,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
 ): Promise<SearchOnlyResult> {
   let searchPageRequests = 0;   // 成功的请求数（用于扣费）
   let totalSearchAttempts = 0;  // 总尝试数（含失败和重试）
@@ -769,6 +770,11 @@ export async function searchOnly(
       let searchApiCreditsExhausted = false;
       
       for (let chunkStart = 0; chunkStart < remainingUrls.length; chunkStart += SEARCH_PAGE_CHUNK_SIZE) {
+        // 检查超时终止信号
+        if (signal?.aborted) {
+          onProgress?.(`⚠️ 任务已超时，停止搜索页面获取`);
+          break;
+        }
         // 如果API积分已耗尽，停止获取更多页面
         if (searchApiCreditsExhausted) break;
         
@@ -828,7 +834,7 @@ export async function searchOnly(
       
       // ==================== 搜索阶段延后重试 ====================
       // 借鉴 EXE 版 2+2 延后重试机制：主批次完成后统一重试失败的页面
-      if (retryUrls.length > 0) {
+      if (retryUrls.length > 0 && !signal?.aborted) {
         onProgress?.(`🔄 开始延后重试 ${retryUrls.length} 个失败页面...`);
         
         // 等待 4 秒后开始重试，给服务器恢复时间
