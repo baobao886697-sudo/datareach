@@ -451,7 +451,7 @@ export async function saveTpsDetailCache(
         .onDuplicateKeyUpdate({
           set: {
             data: sql`VALUES(data)`,
-            expiresAt: sql`VALUES(expires_at)`,
+            expiresAt: sql`VALUES(expiresAt)`,
           },
         });
     } catch (error) {
