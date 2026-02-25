@@ -316,8 +316,12 @@ export default function SpfTask() {
       const link = document.createElement("a");
       link.href = url;
       link.download = data.fileName;
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1000);
       toast.success("导出成功");
     } catch (error: any) {
       toast.error("导出失败", { description: error.message });

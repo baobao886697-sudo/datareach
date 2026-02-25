@@ -207,8 +207,10 @@ export function UserDetailDialog({ userId, open, onOpenChange, onRefresh }: User
         link.download = `积分记录_用户${userId}_${new Date().toISOString().split('T')[0]}.csv`;
         document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 1000);
         toast.success("导出成功");
       }
     } catch (error) {

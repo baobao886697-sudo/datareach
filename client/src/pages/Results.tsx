@@ -132,8 +132,11 @@ export default function Results() {
       link.download = data.filename;
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // 🛡️ BUG-FIX: 延迟释放，确保浏览器有足够时间处理下载，防止首次下载0字节
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1000);
       toast.success("导出成功");
     },
     onError: (error) => {
