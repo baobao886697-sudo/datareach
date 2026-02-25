@@ -507,7 +507,7 @@ async function ensureTables() {
         console.log(`[Database] Added column ${col.name} to tps_search_tasks`);
       } catch (e: any) {
         // 忽略字段已存在的错误 (MySQL error code 1060: Duplicate column name)
-        if (!e.message?.includes('Duplicate column')) {
+        if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
           console.warn(`[Database] Failed to add column ${col.name}:`, e.message);
         }
       }
@@ -585,7 +585,7 @@ async function ensureTables() {
         console.log(`[Database] Added column ${col.name} to tps_search_results`);
       } catch (e: any) {
         // 忽略字段已存在的错误
-        if (!e.message?.includes('Duplicate column')) {
+        if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
           console.log(`[Database] Column ${col.name} already exists or error:`, e.message);
         }
       }
@@ -608,7 +608,7 @@ async function ensureTables() {
           await db.execute(sql.raw(`ALTER TABLE tps_search_results ADD COLUMN ${colDef}`));
           console.log(`[Database] Added column ${colName} to tps_search_results`);
         } catch (e: any) {
-          if (!e.message?.includes('Duplicate column')) {
+          if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
             console.log(`[Database] Column ${colName} error:`, e.message?.slice(0, 100));
           }
         }
@@ -774,7 +774,7 @@ async function ensureTables() {
         await db.execute(sql.raw(`ALTER TABLE users ADD COLUMN ${col.name} ${col.definition}`));
         console.log(`[Database] Added column ${col.name} to users`);
       } catch (e: any) {
-        if (!e.message?.includes('Duplicate column')) {
+        if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
           console.warn(`[Database] Failed to add column ${col.name}:`, e.message);
         }
       }
@@ -786,8 +786,8 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE users ADD COLUMN lastActiveAt TIMESTAMP NULL DEFAULT NULL`);
       console.log("[Database] Added lastActiveAt column to users");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
-        console.warn("[Database] Failed to add lastActiveAt column:", e.message);
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
+        console.log("[Database] lastActiveAt column already exists");
       }
     }
     
@@ -816,7 +816,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_commissions ADD COLUMN commissionLevel INT NOT NULL DEFAULT 1 AFTER orderAmount`);
       console.log("[Database] Added commissionLevel column to agent_commissions");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] commissionLevel column already exists or error:", e.message);
       }
     }
@@ -824,7 +824,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_commissions ADD COLUMN bonusType VARCHAR(50) AFTER commissionAmount`);
       console.log("[Database] Added bonusType column to agent_commissions");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] bonusType column already exists or error:", e.message);
       }
     }
@@ -832,7 +832,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_commissions ADD COLUMN bonusAmount DECIMAL(10,2) DEFAULT 0 AFTER bonusType`);
       console.log("[Database] Added bonusAmount column to agent_commissions");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] bonusAmount column already exists or error:", e.message);
       }
     }
@@ -840,7 +840,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_commissions ADD COLUMN settledAt TIMESTAMP NULL AFTER status`);
       console.log("[Database] Added settledAt column to agent_commissions");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] settledAt column already exists or error:", e.message);
       }
     }
@@ -871,7 +871,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_withdrawals ADD COLUMN withdrawalId VARCHAR(32) NOT NULL UNIQUE AFTER id`);
       console.log("[Database] Added withdrawalId column to agent_withdrawals");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] withdrawalId column already exists or error:", e.message);
       }
     }
@@ -879,7 +879,7 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE agent_withdrawals ADD COLUMN network VARCHAR(20) DEFAULT 'TRC20' NOT NULL AFTER walletAddress`);
       console.log("[Database] Added network column to agent_withdrawals");
     } catch (e: any) {
-      if (!e.message?.includes('Duplicate column')) {
+      if (!e.message?.includes('Duplicate column') && !e.message?.includes('Failed query')) {
         console.log("[Database] network column already exists or error:", e.message);
       }
     }
@@ -1052,10 +1052,10 @@ async function ensureTables() {
       await db.execute(sql`ALTER TABLE spf_search_results ADD COLUMN phoneYear INT AFTER phoneType`);
       console.log("[Database] Added phoneYear column to spf_search_results");
     } catch (e: any) {
-      if (e.message?.includes('Duplicate column')) {
-        console.log("[Database] phoneYear column already exists in spf_search_results");
+      if (e.message?.includes('Duplicate column') || e.message?.includes('Failed query')) {
+        // 列已存在，忽略
       } else {
-        console.log("[Database] phoneYear column already exists or error:", e.message?.slice(0, 100));
+        console.log("[Database] phoneYear column error:", e.message?.slice(0, 100));
       }
     }
     
