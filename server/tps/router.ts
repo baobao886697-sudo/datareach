@@ -735,6 +735,10 @@ async function executeTpsSearchRealtimeDeduction(
     // 搜索阶段完成日志（简洁版）
     addLog(`✅ 搜索完成: ${totalSearchPages} 页, 找到 ${allDetailTasks.length} 条待获取`);
     
+    // 🛡️ v9.1 内存优化：搜索阶段完成后释放不再需要的数据
+    searchQueue.length = 0;
+    subTaskResults.clear();
+    
     // stoppedDueToCredits 已在搜索阶段首次触发时输出日志，此处不再重复
     
     // ==================== 阶段二：智能并发池获取详情（v7.0 全局弹性并发 + 实时进度推送） ====================
@@ -890,6 +894,10 @@ async function executeTpsSearchRealtimeDeduction(
       
       addLog(`✅ 已保存 ${totalResults} 条搜索结果（无详情数据）`);
     }
+    
+    // 🛡️ v9.1 内存优化：所有数据已保存到数据库，释放内存中的大数组
+    allDetailTasks.length = 0;
+    seenPhones.clear();
     
     // 更新最终进度
     await updateTpsSearchTaskProgress(taskDbId, {
