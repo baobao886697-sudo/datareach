@@ -448,6 +448,20 @@ async function ensureTables() {
     `);
     console.log("[Database] TPS detail cache table ready");
     
+    // 🛡️ BUG-FIX: 确保 tps_detail_cache 表有 expiresAt 列（早期建表可能缺失）
+    try {
+      await db.execute(sql`ALTER TABLE tps_detail_cache ADD COLUMN expiresAt TIMESTAMP NULL`);
+      console.log("[Database] TPS detail cache expiresAt column added");
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
+    try {
+      await db.execute(sql`ALTER TABLE tps_detail_cache ADD INDEX idx_expiresAt (expiresAt)`);
+      console.log("[Database] TPS detail cache expiresAt index added");
+    } catch (e) {
+      // 索引已存在，忽略错误
+    }
+    
     // 20. TPS 搜索任务表
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS tps_search_tasks (
@@ -1131,10 +1145,13 @@ function startTaskWatchdog() {
   const WATCHDOG_INTERVAL = 5 * 60 * 1000;  // 5分钟
   const STALE_THRESHOLD_MINUTES = 30;        // 30分钟无进度更新视为卡死
   
-  setInterval(async () => {
+  const runWatchdog = async () => {
     try {
       const db = getDbSync();
-      if (!db) return;
+      if (!db) {
+        console.warn('[Watchdog] 数据库未连接，跳过本次检测');
+        return;
+      }
       
       const tables = ['tps_search_tasks', 'spf_search_tasks', 'anywho_search_tasks'];
       let totalCleaned = 0;
@@ -1185,7 +1202,14 @@ function startTaskWatchdog() {
     } catch (error: any) {
       console.error('[Watchdog] 定时检测失败:', error.message);
     }
-  }, WATCHDOG_INTERVAL);
+  };
+  
+  // 🛡️ BUG-FIX: 启动后延迟30秒执行第一次检测（等待数据库完全就绪）
+  setTimeout(() => {
+    runWatchdog();
+  }, 30000);
+  
+  setInterval(runWatchdog, WATCHDOG_INTERVAL);
   
   console.log(`[Watchdog] 看门狗已启动，每${WATCHDOG_INTERVAL / 60000}分钟检测一次卡死任务`);
 }

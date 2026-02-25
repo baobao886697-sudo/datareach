@@ -310,13 +310,23 @@ export default function TpsTask() {
   // 导出 CSV
   const exportMutation = trpc.tps.exportResults.useMutation({
     onSuccess: (data) => {
+      if (!data.csv || data.csv.length === 0) {
+        toast.error("导出失败", { description: "没有可导出的数据" });
+        return;
+      }
       const blob = new Blob([data.csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = data.filename;
+      // 🛡️ BUG-FIX: 将link添加到DOM中再触发点击，确保浏览器能正确处理下载
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      // 延迟释放，确保浏览器有足够时间处理下载
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1000);
       toast.success("导出成功");
     },
     onError: (error: any) => {

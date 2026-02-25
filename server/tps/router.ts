@@ -337,7 +337,19 @@ export const tpsRouter = router({
         });
       }
       
-      const results = await getTpsSearchResults(task.id, 1, 10000);
+      // 🛡️ BUG-FIX: 移除硬编码的 10000 条上限，先查询总数，再一次性获取所有结果
+      const countCheck = await getTpsSearchResults(task.id, 1, 1);
+      const totalRecords = countCheck.total;
+      
+      if (totalRecords === 0) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "该任务没有可导出的结果数据",
+        });
+      }
+      
+      console.log(`[TPS CSV] 导出任务 ${task.taskId}: 总记录数 ${totalRecords}`);
+      const results = await getTpsSearchResults(task.id, 1, Math.max(totalRecords, 1));
       
       // 电话号码格式化函数：转换为纯数字+前缀1格式
       const formatPhone = (phone: string): string => {
@@ -482,8 +494,17 @@ async function executeTpsSearchRealtimeDeduction(
   const maxPages = TPS_CONFIG.MAX_SAFE_PAGES;
   
   const logs: Array<{ timestamp: string; message: string }> = [];
+  // 🛡️ BUG-FIX: 限制日志条数和消息长度，防止内存无限增长
+  const MAX_LOG_ENTRIES = 200;
+  const MAX_MESSAGE_LENGTH = 300;
   const addLog = (message: string) => {
-    logs.push({ timestamp: new Date().toISOString(), message });
+    const truncatedMsg = message.length > MAX_MESSAGE_LENGTH 
+      ? message.substring(0, MAX_MESSAGE_LENGTH) + '...' 
+      : message;
+    if (logs.length >= MAX_LOG_ENTRIES) {
+      logs.shift(); // 移除最旧的日志
+    }
+    logs.push({ timestamp: new Date().toISOString(), message: truncatedMsg });
   };
   
   // 创建实时积分跟踪器
@@ -786,8 +807,13 @@ async function executeTpsSearchRealtimeDeduction(
         for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
           const subTask = subTasks.find(t => t.index === subTaskIndex);
           if (subTask && results.length > 0) {
-            await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
-            batchSavedCount += results.length;
+            try {
+              await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+              batchSavedCount += results.length;
+            } catch (saveErr: any) {
+              console.error(`[TPS v9.0] onBatchSave 子任务 ${subTaskIndex} 保存失败 (${results.length}条):`, saveErr.message);
+              // 保存失败不中断，继续处理其他子任务
+            }
           }
         }
         

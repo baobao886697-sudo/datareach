@@ -507,9 +507,17 @@ async function executeAnywhoSearchRealtime(
   let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
   
   const logs: Array<{ timestamp: string; message: string }> = [];
-  
+  // 🛡️ BUG-FIX: 限制日志条数和消息长度，防止内存无限增长
+  const MAX_LOG_ENTRIES = 200;
+  const MAX_MESSAGE_LENGTH = 300;
   const addLog = async (message: string) => {
-    logs.push({ timestamp: new Date().toISOString(), message });
+    const truncatedMsg = message.length > MAX_MESSAGE_LENGTH 
+      ? message.substring(0, MAX_MESSAGE_LENGTH) + '...' 
+      : message;
+    if (logs.length >= MAX_LOG_ENTRIES) {
+      logs.shift();
+    }
+    logs.push({ timestamp: new Date().toISOString(), message: truncatedMsg });
     await updateAnywhoSearchTaskProgress(taskId, { logs });
   };
   

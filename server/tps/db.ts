@@ -346,7 +346,24 @@ export async function saveTpsSearchResults(
     fromCache: r.fromCache ?? false,
   }));
   
-  await database.insert(tpsSearchResults).values(values);
+  // 🛡️ BUG-FIX: 分批插入，防止单次SQL语句过大导致插入失败
+  const BATCH_INSERT_SIZE = 50;
+  for (let i = 0; i < values.length; i += BATCH_INSERT_SIZE) {
+    const batch = values.slice(i, i + BATCH_INSERT_SIZE);
+    try {
+      await database.insert(tpsSearchResults).values(batch);
+    } catch (insertError: any) {
+      console.error(`[TPS DB] 批量插入失败 (${batch.length}条)，回退到逐条插入:`, insertError.message);
+      // 回退到逐条插入，确保尽可能多的数据被保存
+      for (const value of batch) {
+        try {
+          await database.insert(tpsSearchResults).values([value]);
+        } catch (singleError: any) {
+          console.error(`[TPS DB] 单条插入失败 (${value.name}):`, singleError.message);
+        }
+      }
+    }
+  }
 }
 
 /**
