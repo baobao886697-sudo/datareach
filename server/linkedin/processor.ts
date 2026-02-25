@@ -576,8 +576,12 @@ export async function executeSearchV3(
     addLog(`📊 开始处理 ${actualCount} 条数据...`, 'info', 'process', '');
     
     const shuffledResults = shuffleArray(searchResults);
+    // 🛡️ v9.1: 释放原始搜索结果引用，减少内存占用
+    searchResults.length = 0;
 
     const toProcess = shuffledResults.slice(0, actualCount);
+    // 🛡️ v9.1: 释放 shuffledResults 引用
+    shuffledResults.length = 0;
     const CONCURRENT_BATCH_SIZE = 16;
     
     const recordsWithPhone: typeof toProcess = [];
@@ -600,8 +604,8 @@ export async function executeSearchV3(
         recordsWithoutPhone.push(person);
       }
     }
-    
-
+    // 🛡️ v9.1: 分类完成后释放 toProcess 引用
+    toProcess.length = 0;
     
     let processedCount = 0;
     let insufficientCredits = false;
@@ -660,8 +664,8 @@ export async function executeSearchV3(
         stats.excludedNoContact++;
       }
     }
-    
-
+    // 🛡️ v9.1: 无电话记录处理完毕，释放内存
+    recordsWithoutPhone.length = 0;
     
     let taskStopped = false;
     const currentTaskCheck = await getSearchTask(task.taskId);
@@ -863,6 +867,8 @@ export async function executeSearchV3(
         }
       }
     }
+    // 🛡️ v9.1: 有电话记录处理完毕，释放内存
+    recordsWithPhone.length = 0;
 
     stats.totalDuration = Date.now() - startTime;
     if (stats.recordsProcessed > 0) {

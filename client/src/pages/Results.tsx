@@ -374,7 +374,7 @@ export default function Results() {
             )}
             {(task.status === "completed" || task.status === "failed") && results && results.length > 0 && (
               <Button
-                onClick={() => exportMutation.mutate({ taskId: taskId || "" })}
+                onClick={() => exportMutation.mutate({ taskId: taskId || "", includeUnverified: true })}
                 disabled={exportMutation.isPending}
                 className="bg-gradient-to-r from-cyan-500 to-blue-600"
               >
