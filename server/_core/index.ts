@@ -522,13 +522,11 @@ async function ensureTables() {
       console.log("[Database] tps_search_tasks.errorMessage modify error:", e.message);
     }
     
-    // 21. TPS 搜索结果表 - 先删除旧表再重建以确保字段一致
+    // 21. TPS 搜索结果表 - 安全迁移：仅在表不存在时创建，保留历史数据
     console.log("[Database] ===== Starting TPS search results table migration =====");
     try {
-      await db.execute(sql`DROP TABLE IF EXISTS tps_search_results`);
-    console.log("[Database] Dropped old tps_search_results table");
     await db.execute(sql`
-      CREATE TABLE tps_search_results (
+      CREATE TABLE IF NOT EXISTS tps_search_results (
         id INT AUTO_INCREMENT PRIMARY KEY,
         taskId INT NOT NULL,
         subTaskIndex INT NOT NULL DEFAULT 0,
@@ -618,10 +616,9 @@ async function ensureTables() {
     
     // ========== Anywho 相关表 ==========
     
-    // 22. Anywho 配置表 - 先删除旧表再创建新表以确保字段一致
-    await db.execute(sql`DROP TABLE IF EXISTS anywho_config`);
+    // 22. Anywho 配置表 - 安全迁移：仅在表不存在时创建，保留自定义配置
     await db.execute(sql`
-      CREATE TABLE anywho_config (
+      CREATE TABLE IF NOT EXISTS anywho_config (
         id INT AUTO_INCREMENT PRIMARY KEY,
         searchCost DECIMAL(10,2) NOT NULL DEFAULT 0.5,
         detailCost DECIMAL(10,2) NOT NULL DEFAULT 0.5,
@@ -686,11 +683,9 @@ async function ensureTables() {
     `);
     console.log("[Database] Anywho search tasks table ready");
     
-    // 25. Anywho 搜索结果表 - 强制重建以确保结构正确
-    await db.execute(sql`DROP TABLE IF EXISTS anywho_search_results`);
-    console.log("[Database] Dropped old anywho_search_results table");
+    // 25. Anywho 搜索结果表 - 安全迁移：仅在表不存在时创建，保留历史数据
     await db.execute(sql`
-      CREATE TABLE anywho_search_results (
+      CREATE TABLE IF NOT EXISTS anywho_search_results (
         id INT AUTO_INCREMENT PRIMARY KEY,
         taskId INT NOT NULL,
         subTaskIndex INT NOT NULL DEFAULT 0,
@@ -723,11 +718,41 @@ async function ensureTables() {
     `);
     console.log("[Database] Anywho search results table ready");
     
-    // 注意：表已在上面强制重建，无需额外修复逻辑
+    // Anywho 搜索结果表字段同步（确保新字段存在）
+    const anywhoColumnsToAdd = [
+      { name: 'firstName', definition: 'VARCHAR(100)' },
+      { name: 'lastName', definition: 'VARCHAR(100)' },
+      { name: 'searchName', definition: 'VARCHAR(200)' },
+      { name: 'searchLocation', definition: 'VARCHAR(200)' },
+      { name: 'location', definition: 'VARCHAR(200)' },
+      { name: 'currentAddress', definition: 'VARCHAR(500)' },
+      { name: 'phone', definition: 'VARCHAR(50)' },
+      { name: 'phoneType', definition: 'VARCHAR(50)' },
+      { name: 'carrier', definition: 'VARCHAR(100)' },
+      { name: 'allPhones', definition: 'JSON' },
+      { name: 'reportYear', definition: 'INT' },
+      { name: 'isPrimary', definition: 'BOOLEAN DEFAULT TRUE' },
+      { name: 'marriageStatus', definition: 'VARCHAR(50)' },
+      { name: 'marriageRecords', definition: 'JSON' },
+      { name: 'familyMembers', definition: 'JSON' },
+      { name: 'emails', definition: 'JSON' },
+      { name: 'isDeceased', definition: 'BOOLEAN DEFAULT FALSE' },
+      { name: 'detailLink', definition: 'VARCHAR(500)' },
+      { name: 'fromCache', definition: 'BOOLEAN DEFAULT FALSE' },
+    ];
+    for (const col of anywhoColumnsToAdd) {
+      try {
+        await db.execute(sql.raw(`ALTER TABLE anywho_search_results ADD COLUMN ${col.name} ${col.definition}`));
+        console.log(`[Database] Added column ${col.name} to anywho_search_results`);
+      } catch (e: any) {
+        // 忽略字段已存在的错误
+      }
+    }
+    console.log("[Database] Anywho search results columns sync completed");
     
-    // 插入默认 Anywho 配置
+    // 插入默认 Anywho 配置（仅在不存在时插入）
     await db.execute(sql`
-      INSERT INTO anywho_config (id, searchCost, detailCost, maxConcurrent, cacheDays, maxPages, batchDelay, enabled, defaultMinAge, defaultMaxAge)
+      INSERT IGNORE INTO anywho_config (id, searchCost, detailCost, maxConcurrent, cacheDays, maxPages, batchDelay, enabled, defaultMinAge, defaultMaxAge)
       VALUES (1, 0.5, 0.5, 20, 180, 10, 300, TRUE, 50, 79)
     `);
     console.log("[Database] Default Anywho config inserted");
