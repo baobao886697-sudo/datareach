@@ -79,6 +79,8 @@ export interface SmartPoolFetchResult {
     failedRequests: number;
     retrySuccess: number;
     retryTotal: number;
+    /** v9.1: 详情页502/5xx失败计数（仅用于后端日志统计） */
+    detailPageFailed?: number;
   };
 }
 
@@ -127,6 +129,7 @@ export async function fetchDetailsWithSmartPool(
   let totalSaved = 0;
   let detailPageRequests = 0;
   let filteredOut = 0;
+  let detailPageFailed = 0;  // v9.1: 详情页失败计数（仅用于后端日志）
   let stoppedDueToCredits = false;
   let stoppedDueToApiCredits = false;
   let stoppedDueToConsecutiveFails = false;  // BUG-08: 独立的连续失败标志
@@ -203,6 +206,10 @@ export async function fetchDetailsWithSmartPool(
         return { link, html, success: true as const, error: '', isApiCreditsError: false };
       } catch (error: any) {
         const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+        // v9.1: 记录详情页失败到后端日志（不推送给用户）
+        if (!isApiCreditsError) {
+          console.error(`[TPS 502-Monitor] 详情页失败: link="${link}", batch=${batchNum}/${totalBatches}, error=${error.message || error}`);
+        }
         return { link, html: '', success: false as const, error: error.message || String(error), isApiCreditsError };
       }
     });
@@ -272,6 +279,7 @@ export async function fetchDetailsWithSmartPool(
         }
       } else {
         batchFail++;
+        detailPageFailed++;  // v9.1: 详情页失败计数
         // v3.0: 失败也已扣费，直接跳过
       }
       
@@ -357,6 +365,13 @@ export async function fetchDetailsWithSmartPool(
     onProgress(`🚫 服务繁忙，任务提前结束`);
   }
   
+  // v9.1: 详情阶段502统计汇总（仅后端日志，不推送给用户）
+  if (detailPageFailed > 0) {
+    console.error(`[TPS 502-Monitor] 详情阶段汇总: 总请求=${detailPageRequests}, 失败=${detailPageFailed}, 失败率=${(detailPageFailed / detailPageRequests * 100).toFixed(1)}%, 丢失详情数据=${detailPageFailed}条`);
+  } else {
+    console.log(`[TPS 502-Monitor] 详情阶段汇总: 总请求=${detailPageRequests}, 失败=0, 全部成功`);
+  }
+  
   return {
     stats: {
       totalSaved,
@@ -369,6 +384,7 @@ export async function fetchDetailsWithSmartPool(
       failedRequests: retryTotal - retrySuccess,
       retrySuccess,
       retryTotal,
+      detailPageFailed,
     },
   };
 }

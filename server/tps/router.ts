@@ -574,6 +574,8 @@ async function executeTpsSearchRealtimeDeduction(
   let totalResults = 0;
   let totalFilteredOut = 0;
   let totalSkippedDeceased = 0;
+  let totalSearchPageFailed = 0;  // v9.1: 搜索页502失败总数（仅后端日志）
+  let totalDetailPageFailed = 0;  // v9.1: 详情页502失败总数（仅后端日志）
   let stoppedDueToCredits = false;
   let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
   
@@ -644,6 +646,7 @@ async function executeTpsSearchRealtimeDeduction(
         totalSearchPages += result.stats.searchPageRequests;
         totalFilteredOut += result.stats.filteredOut;
         totalSkippedDeceased += result.stats.skippedDeceased || 0;
+        totalSearchPageFailed += result.stats.searchPageFailed || 0;  // v9.1: 累计搜索页失败数
         
         // 保存搜索结果
         subTaskResults.set(subTask.index, {
@@ -684,6 +687,7 @@ async function executeTpsSearchRealtimeDeduction(
             }
           }
           totalSearchPages += result.stats.searchPageRequests;
+          totalSearchPageFailed += result.stats.searchPageFailed || 0;  // v9.1: 累计搜索页失败数
         }
         
         // 检查是否因 API 积分耗尽导致失败
@@ -841,6 +845,7 @@ async function executeTpsSearchRealtimeDeduction(
       
       totalDetailPages += detailResult.stats.detailPageRequests;
       totalFilteredOut += detailResult.stats.filteredOut;
+      totalDetailPageFailed += detailResult.stats.detailPageFailed || 0;  // v9.1: 累计详情页失败数
       
       // 检查是否因积分不足停止
       if (detailResult.stats.stoppedDueToCredits || creditTracker.isStopped()) {
@@ -992,6 +997,13 @@ async function executeTpsSearchRealtimeDeduction(
     // BUG-10修复：记录任务完成到监控器
     recordTaskComplete(taskId, true);
     console.log(`[TPS v8.0] 用户 ${userId} 任务完成`);
+    
+    // v9.1: 502统计汇总（仅后端日志，不推送给用户）
+    console.log(`[TPS 502-Monitor] 任务汇总: taskId=${taskId}, 名字数=${input.names.length}, 搜索页总数=${totalSearchPages}, 搜索页失败=${totalSearchPageFailed}, 详情页总数=${totalDetailPages}, 详情页失败=${totalDetailPageFailed}, 最终结果=${totalResults}条`);
+    if (totalSearchPageFailed > 0 || totalDetailPageFailed > 0) {
+      const searchLoss = totalSearchPageFailed * 10; // 每页约10条搜索结果
+      console.error(`[TPS 502-Monitor] ❗ 数据丢失估算: 搜索页失败${totalSearchPageFailed}页(约丢失${searchLoss}条搜索结果), 详情页失败${totalDetailPageFailed}条(直接丢失${totalDetailPageFailed}条详情数据)`);
+    }
 
     // 记录用户活动日志
     await logUserActivity({

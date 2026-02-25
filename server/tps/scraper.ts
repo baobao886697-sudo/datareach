@@ -688,6 +688,8 @@ export interface SearchOnlyResult {
     totalSearchAttempts: number;      // 总请求尝试数（含失败和重试，用于统计）
     filteredOut: number;
     skippedDeceased?: number;  // 跳过的已故人员数量
+    /** v9.1: 搜索页502/5xx失败计数（仅用于后端日志统计） */
+    searchPageFailed?: number;
   };
   error?: string;
   /** Scrape.do API 积分耗尽标志 */
@@ -713,6 +715,7 @@ export async function searchOnly(
   let searchPageRequests = 0;
   let totalSearchAttempts = 0;
   let filteredOut = 0;
+  let searchPageFailed = 0;  // v9.1: 搜索页失败计数（仅用于后端日志）
 
   try {
     // 阶段一: 获取第一页，解析总记录数
@@ -768,14 +771,17 @@ export async function searchOnly(
         
         const chunk = remainingUrls.slice(chunkStart, chunkStart + SEARCH_PAGE_CHUNK_SIZE);
         
-        const chunkPromises = chunk.map(url => 
+        const chunkPromises = chunk.map((url, i) => 
           fetchWithScrapedo(url, token).catch(err => {
             // 检测 API 积分耗尽错误
             if (err instanceof ScrapeApiCreditsError) {
               searchApiCreditsExhausted = true;
               return null;
             }
-            // v3.0: 失败静默处理，不向用户显示错误信息
+            // v9.1: 记录搜索页失败到后端日志（不推送给用户）
+            const pageNum = chunkStart + i + 2; // +2 因为第1页已单独获取
+            console.error(`[TPS 502-Monitor] 搜索页失败: name="${name}", page=${pageNum}, error=${err.message || err}`);
+            searchPageFailed++;
             return null;
           })
         );
@@ -808,7 +814,7 @@ export async function searchOnly(
         return {
           success: true,
           searchResults: uniqueResults,
-          stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased },
+          stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased, searchPageFailed },
           apiCreditsExhausted: true,
         };
       }
@@ -818,12 +824,16 @@ export async function searchOnly(
 
     // 阶段三: 去重
     const uniqueResults = deduplicateByDetailLink(allResults);
-    // 搜索完成日志已在 router.ts 中输出，这里不再重复
+    
+    // v9.1: 搜索阶段完成时输出502统计（仅后端日志）
+    if (searchPageFailed > 0) {
+      console.error(`[TPS 502-Monitor] 搜索阶段汇总: name="${name}", 总页数=${searchPageRequests}, 失败页数=${searchPageFailed}, 丢失约${searchPageFailed * 10}条搜索结果`);
+    }
 
     return {
       success: true,
       searchResults: uniqueResults,
-      stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased },
+      stats: { searchPageRequests, totalSearchAttempts, filteredOut, skippedDeceased: totalSkippedDeceased, searchPageFailed },
     };
 
   } catch (error: any) {
@@ -840,12 +850,15 @@ export async function searchOnly(
       };
     }
     
+    // v9.1: 第一页就失败时记录后端日志
+    console.error(`[TPS 502-Monitor] 搜索第一页失败: name="${name}", error=${error.message || error}`);
+    searchPageFailed++;
     const safeSearchErrMsg = (error.message || '').includes('Scrape.do') ? '服务繁忙，请稍后重试' : error.message;
     onProgress?.(`未找到匹配结果`);
     return {
       success: false,
       searchResults: [],
-        stats: { searchPageRequests, totalSearchAttempts, filteredOut },
+        stats: { searchPageRequests, totalSearchAttempts, filteredOut, searchPageFailed },
         error: safeSearchErrMsg || String(error),
     };
   }
