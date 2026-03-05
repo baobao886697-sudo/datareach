@@ -50,6 +50,8 @@ import {
   AlertTriangle,
   Info,
   DollarSign,
+  StopCircle,
+  Square,
 } from "lucide-react";
 
 // 七彩鎏金动画样式
@@ -182,7 +184,7 @@ export default function TpsTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.tps.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") }
+    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed" || task?.status === "cancelled") }
   );
   
   // v7.0: 任务阶段状态（通过WS实时更新）
@@ -247,6 +249,10 @@ export default function TpsTask() {
           toast.warning(`⚠️ 服务繁忙，TPS 任务提前结束。已找到 ${msg.data?.totalResults || 0} 条结果`, {
             duration: 8000,
           });
+        } else if (status === "cancelled") {
+          toast.info(`⏹ TPS 搜索已停止，已获取的 ${msg.data?.totalResults || 0} 条结果已保存`, {
+            duration: 8000,
+          });
         } else {
           toast.success(`✅ TPS 搜索任务已完成！共找到 ${msg.data?.totalResults || 0} 条结果`, {
             duration: 8000,
@@ -307,6 +313,34 @@ export default function TpsTask() {
     }
   };
   
+  // v9.3: 停止搜索任务
+  const [isStopping, setIsStopping] = useState(false);
+  const stopMutation = trpc.tps.stopTask.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success("搜索已停止", {
+          description: data.message,
+          duration: 5000,
+        });
+        refetchTask();
+        refetchResults();
+      } else {
+        toast.warning(data.message);
+      }
+      setIsStopping(false);
+    },
+    onError: (error: any) => {
+      toast.error("停止失败", { description: error.message });
+      setIsStopping(false);
+    },
+  });
+  
+  const handleStopTask = () => {
+    if (!taskId) return;
+    setIsStopping(true);
+    stopMutation.mutate({ taskId });
+  };
+  
   // 导出 CSV
   const exportMutation = trpc.tps.exportResults.useMutation({
     onSuccess: (data) => {
@@ -345,7 +379,7 @@ export default function TpsTask() {
       case "failed":
         return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">失败</Badge>;
       case "cancelled":
-        return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">已取消</Badge>;
+        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">已停止</Badge>;
       case "insufficient_credits":
         return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">积分不足</Badge>;
       case "service_busy":
@@ -396,7 +430,29 @@ export default function TpsTask() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (
+            {/* v9.3: 停止搜索按钮 - 运行中时显示 */}
+            {(task?.status === "running" || task?.status === "pending") && (
+              <Button
+                variant="destructive"
+                onClick={handleStopTask}
+                disabled={isStopping || stopMutation.isPending}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-lg shadow-red-500/25"
+              >
+                {isStopping ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    停止中...
+                  </>
+                ) : (
+                  <>
+                    <Square className="h-4 w-4 mr-2 fill-current" />
+                    停止搜索
+                  </>
+                )}
+              </Button>
+            )}
+            {/* 导出按钮 - 任务完成/停止后显示 */}
+            {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed" || task?.status === "cancelled") && (
               <Button
                 variant="outline"
                 onClick={() => exportMutation.mutate({ taskId: taskId! })}
@@ -441,6 +497,8 @@ export default function TpsTask() {
                   <AlertTriangle className="h-8 w-8 text-orange-400" />
                 ) : task?.status === "service_busy" ? (
                   <AlertTriangle className="h-8 w-8 text-amber-400" />
+                ) : task?.status === "cancelled" ? (
+                  <StopCircle className="h-8 w-8 text-orange-400" />
                 ) : task?.status === "failed" ? (
                   <XCircle className="h-8 w-8 text-red-400" />
                 ) : (
@@ -651,8 +709,8 @@ export default function TpsTask() {
           </Card>
         )}
         
-        {/* 已完成时显示简洁日志 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && task?.logs && task.logs.length > 0 && (
+        {/* 已完成/已停止时显示简洁日志 */}
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "cancelled") && task?.logs && task.logs.length > 0 && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -693,7 +751,7 @@ export default function TpsTask() {
         )}
         
         {/* 搜索结果表格 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy") && results && results.results.length > 0 && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "cancelled") && results && results.results.length > 0 && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -823,7 +881,7 @@ export default function TpsTask() {
         )}
         
         {/* 无结果提示 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed") && (!results || results.results.length === 0) && (
+        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed" || task?.status === "cancelled") && (!results || results.results.length === 0) && (
           <Card className="rainbow-border">
             <CardContent className="py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -833,6 +891,8 @@ export default function TpsTask() {
                   ? "任务因积分不足提前停止，未获取到有效数据"
                   : task?.status === "service_busy"
                   ? "当前使用人数过多，服务繁忙，请稍后重试或联系客服"
+                  : task?.status === "cancelled"
+                  ? "搜索已手动停止，未获取到有效数据"
                   : "未找到符合条件的数据，请尝试其他搜索条件"}
               </p>
             </CardContent>

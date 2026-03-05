@@ -449,6 +449,83 @@ export const tpsRouter = router({
       };
     }),
 
+  // ==================== v9.3: 停止搜索任务 ====================
+  
+  stopTask: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.user!.id;
+      
+      // 验证任务存在且属于当前用户
+      const task = await getTpsSearchTask(input.taskId);
+      if (!task) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "任务不存在",
+        });
+      }
+      if (task.userId !== userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "无权操作此任务",
+        });
+      }
+      
+      // 只有运行中的任务可以停止
+      if (task.status !== "running" && task.status !== "pending" && task.status !== "queued") {
+        return {
+          success: false,
+          message: "任务已完成或已停止，无法再次停止",
+        };
+      }
+      
+      // 通过全局任务队列发送 AbortSignal
+      const aborted = globalTaskQueue.abortTask(input.taskId);
+      
+      if (aborted) {
+        console.log(`[TPS v9.3] 用户 ${userId} 手动停止任务 ${input.taskId}`);
+        
+        // 更新数据库状态为 cancelled（数据库 enum 已支持）
+        const database = await getDb();
+        if (database) {
+          try {
+            await database.update(tpsSearchTasks).set({
+              status: 'cancelled',
+              completedAt: new Date(),
+            }).where(eq(tpsSearchTasks.id, task.id));
+          } catch (dbError: any) {
+            console.error(`[TPS v9.3] cancelled 状态更新失败:`, dbError.message);
+            try {
+              await database.update(tpsSearchTasks).set({
+                status: 'failed',
+                errorMessage: '用户手动停止',
+                completedAt: new Date(),
+              }).where(eq(tpsSearchTasks.id, task.id));
+            } catch (e) {
+              console.error(`[TPS v9.3] fallback 也失败:`, (e as Error).message);
+            }
+          }
+        }
+        
+        // 通知前端任务已停止
+        emitTaskCompleted(userId, input.taskId, "tps", {
+          totalResults: task.totalResults || 0,
+          creditsUsed: parseFloat(task.creditsUsed) || 0,
+          status: 'cancelled',
+        });
+        
+        return {
+          success: true,
+          message: "任务已停止，已获取的结果已保存",
+        };
+      } else {
+        return {
+          success: false,
+          message: "任务不在运行中，可能已完成",
+        };
+      }
+    }),
+
   // ==================== 并发监控 API ====================
   
   // 获取并发统计信息
