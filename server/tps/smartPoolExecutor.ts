@@ -1,24 +1,19 @@
 /**
- * TPS 详情获取执行器 v9.0 (流式保存+分批模式)
+ * TPS 详情获取执行器 v9.2 (流式保存+分批模式+延后重试)
  * 
- * v9.0 重构 (内存安全):
- * - 🛡️ 核心改造：每批结果处理完成后立即通过回调保存到数据库，不再在内存中累积
- * - 内存占用从 O(N) 降为 O(batch_size)，无论任务多大都不会 OOM
- * - 函数返回统计数据而非结果数组，彻底消除内存泄漏风险
- * 
- * 基于 v8.0/v8.1:
- * - 保留分批 + 批间延迟的稳定模式
- * - 保留 Scrape.do API 积分耗尽检测
- * - 保留连续失败计数器兜底机制
- * - 保留前端 WebSocket 实时进度推送
+ * v9.2 重试机制恢复 (基于 v9.0 + v8.2):
+ * - 保留 v9.0 的流式保存（内存安全）
+ * - 恢复 v8.2 的延后重试机制：所有批次完成后，对失败链接进行一轮延后重试
+ * - 恢复 v8.2 的扣费逻辑：只对成功的请求扣费
  * 
  * 核心逻辑:
  * 1. 将所有待获取的详情链接按 BATCH_SIZE 分成多个批次
  * 2. 每个批次内使用 Promise.all 并行获取
  * 3. 每批完成后立即调用 onBatchSave 回调保存到数据库，然后释放内存
  * 4. 批次间强制等待 BATCH_DELAY_MS，给上游 API 恢复时间
- * 5. 所有批次完成后，对失败的链接进行一轮延后重试
+ * 5. 所有批次完成后，对失败的链接进行一轮延后重试（等3s，保守参数分批重试）
  * 6. 检测到 API 积分耗尽时立即停止，不再重试
+ * 7. 只对成功的请求扣费
  * 
  * 独立模块: 仅用于 TPS 搜索功能
  */
@@ -36,7 +31,7 @@ import { ScrapeApiCreditsError } from './scrapeClient';
 import { TpsRealtimeCreditTracker } from './realtimeCredits';
 
 // ============================================================================
-// v8.0 分批配置
+// v9.2 分批配置（恢复延后重试参数）
 // ============================================================================
 
 export const BATCH_CONFIG = {
@@ -44,7 +39,12 @@ export const BATCH_CONFIG = {
   BATCH_SIZE: 30,
   /** 批次间延迟（毫秒），给上游 API 恢复时间 */
   BATCH_DELAY_MS: 500,
-  // v3.0: 已移除延后重试机制
+  /** v9.2: 延后重试前等待时间（毫秒） */
+  RETRY_DELAY_MS: 3000,
+  /** v9.2: 延后重试的批次大小（更保守） */
+  RETRY_BATCH_SIZE: 8,
+  /** v9.2: 延后重试的批间延迟（更保守） */
+  RETRY_BATCH_DELAY_MS: 800,
   /** 连续失败阈值：连续 N 批全部失败时自动停止（兜底机制） */
   CONSECUTIVE_FAIL_THRESHOLD: 3,
 };
@@ -101,18 +101,21 @@ export interface DetailProgressInfo {
 }
 
 // ============================================================================
-// 核心执行函数: 流式保存+分批模式 (v9.0)
+// 核心执行函数: 流式保存+分批模式+延后重试 (v9.2)
 // ============================================================================
 
 /**
- * 使用流式保存+分批模式获取详情 (v9.0)
+ * 使用流式保存+分批模式获取详情 (v9.2)
  * 
- * 🛡️ 内存安全改造:
+ * 🛡️ 内存安全改造 (v9.0):
  * - 新增 onBatchSave 回调：每批处理完成后立即保存到数据库
  * - 不再返回 results 数组，改为返回统计数据
  * - 每批保存后释放该批结果的引用，让 GC 回收内存
  * 
- * 其他逻辑与 v8.0/v8.1 完全一致，保持稳定性。
+ * 🔄 重试机制恢复 (v9.2):
+ * - 失败链接收集到 failedLinks 数组
+ * - 所有批次完成后，等待 3s，用保守参数分批重试
+ * - 只对成功的请求扣费
  */
 export async function fetchDetailsWithSmartPool(
   tasks: DetailTaskWithIndex[],
@@ -178,13 +181,13 @@ export async function fetchDetailsWithSmartPool(
   
   const totalDetails = linksToFetch.length;
   let completedDetails = 0;
-  // v3.0: 不再收集失败链接，失败直接跳过
+  const failedLinks: string[] = [];  // v9.2: 收集失败的链接用于延后重试
   let consecutiveFailBatches = 0;  // 连续全部失败的批次计数
   
   const totalBatches = Math.ceil(totalDetails / BATCH_CONFIG.BATCH_SIZE);
   
   onProgress(`📤 开始分批获取 ${totalDetails} 条详情 (${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个, 间隔 ${BATCH_CONFIG.BATCH_DELAY_MS}ms)`);
-  console.log(`[TPS v9.0] 流式保存模式: ${totalDetails} 条详情, ${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个`);
+  console.log(`[TPS v9.2] 流式保存模式: ${totalDetails} 条详情, ${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个`);
   
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
     // 检查超时终止信号
@@ -222,7 +225,7 @@ export async function fetchDetailsWithSmartPool(
       stoppedDueToApiCredits = true;
       onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
       onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
-      console.error(`[TPS v9.0] Scrape.do API 积分耗尽，停止详情获取`);
+      console.error(`[TPS v9.2] Scrape.do API 积分耗尽，停止详情获取`);
     }
     
     // 🛡️ v9.0: 本批的结果临时收集，处理完立即保存并释放
@@ -237,17 +240,17 @@ export async function fetchDetailsWithSmartPool(
       const result = batchResults[ri];
       if (stoppedDueToCredits) break;
       
-      // v3.0: 每次API调用都扣费，无论成功失败
-      detailPageRequests++;
-      const deductResult = await creditTracker.deductDetailPage();
-      if (!deductResult.success) {
-        stoppedDueToCredits = true;
-        onProgress(`⚠️ 积分不足，停止获取详情（当前批次结果已保存）`);
-        break;
-      }
-      
       if (result.success) {
         batchSuccess++;
+        
+        // v9.2: 只对成功的请求扣费
+        detailPageRequests++;
+        const deductResult = await creditTracker.deductDetailPage();
+        if (!deductResult.success) {
+          stoppedDueToCredits = true;
+          onProgress(`⚠️ 积分不足，停止获取详情（当前批次结果已保存）`);
+          break;
+        }
         
         // 解析详情页
         const linkTasks = tasksByLink.get(result.link) || [];
@@ -280,7 +283,10 @@ export async function fetchDetailsWithSmartPool(
       } else {
         batchFail++;
         detailPageFailed++;  // v9.1: 详情页失败计数
-        // v3.0: 失败也已扣费，直接跳过
+        // v9.2: API 积分耗尽的链接不加入重试队列，其他失败的加入
+        if (!result.isApiCreditsError) {
+          failedLinks.push(result.link);
+        }
       }
       
       // 更新进度（每个请求完成后都触发）
@@ -303,7 +309,7 @@ export async function fetchDetailsWithSmartPool(
         const savedCount = await onBatchSave(batchSaveItems);
         totalSaved += savedCount;
       } catch (saveError: any) {
-        console.error(`[TPS v9.0] 批次 ${batchNum} 保存失败:`, saveError.message);
+        console.error(`[TPS v9.2] 批次 ${batchNum} 保存失败:`, saveError.message);
         // 保存失败不中断任务，继续处理下一批
       }
     } else if (batchSaveItems.length > 0 && !onBatchSave) {
@@ -316,7 +322,7 @@ export async function fetchDetailsWithSmartPool(
       try {
         await setCachedDetails(batchCacheItems);
       } catch (cacheError: any) {
-        console.error(`[TPS v9.0] 批次 ${batchNum} 缓存保存失败:`, cacheError.message);
+        console.error(`[TPS v9.2] 批次 ${batchNum} 缓存保存失败:`, cacheError.message);
       }
     }
     
@@ -328,7 +334,7 @@ export async function fetchDetailsWithSmartPool(
       if (consecutiveFailBatches >= BATCH_CONFIG.CONSECUTIVE_FAIL_THRESHOLD && !stoppedDueToApiCredits) {
         onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
         onProgress(`💡 已获取的结果已保存，如需继续请联系客服`);
-        console.error(`[TPS v9.0] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
+        console.error(`[TPS v9.2] 连续 ${consecutiveFailBatches} 批全部失败，自动停止`);
         // BUG-08修复：使用独立标志，不再复用 stoppedDueToApiCredits
         stoppedDueToConsecutiveFails = true;
         stoppedDueToApiCredits = true;  // 保持向后兼容，仍用于停止控制流
@@ -349,9 +355,136 @@ export async function fetchDetailsWithSmartPool(
     }
   }
   
-  // v3.0: 已移除延后重试阶段，失败的链接直接跳过
-  const retrySuccess = 0;
-  const retryTotal = 0;
+  // ==================== v9.2: 延后重试阶段 ====================
+  
+  let retrySuccess = 0;
+  const retryTotal = failedLinks.length;
+  
+  // API 积分耗尽时跳过重试
+  if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
+    onProgress(`🔄 开始延后重试 ${failedLinks.length} 个失败链接 (等待 ${BATCH_CONFIG.RETRY_DELAY_MS}ms)...`);
+    console.log(`[TPS v9.2] 延后重试: ${failedLinks.length} 个失败链接`);
+    
+    // 等待一段时间，给上游服务恢复
+    await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.RETRY_DELAY_MS));
+    
+    // 分批重试（使用更保守的参数）
+    const retryBatches = Math.ceil(failedLinks.length / BATCH_CONFIG.RETRY_BATCH_SIZE);
+    
+    for (let ri = 0; ri < retryBatches; ri++) {
+      if (stoppedDueToCredits || stoppedDueToApiCredits) break;
+      if (signal?.aborted) break;
+      
+      const retryBatchStart = ri * BATCH_CONFIG.RETRY_BATCH_SIZE;
+      const retryBatchLinks = failedLinks.slice(retryBatchStart, retryBatchStart + BATCH_CONFIG.RETRY_BATCH_SIZE);
+      
+      const retryPromises = retryBatchLinks.map(async (link) => {
+        const detailUrl = link.startsWith('http') ? link : `${baseUrl}${link}`;
+        try {
+          const html = await fetchWithScrapedo(detailUrl, token);
+          return { link, html, success: true as const, isApiCreditsError: false };
+        } catch (error: any) {
+          const isApiCreditsError = error instanceof ScrapeApiCreditsError;
+          return { link, html: '', success: false as const, isApiCreditsError };
+        }
+      });
+      
+      const retryResults = await Promise.all(retryPromises);
+      
+      // 检查重试中是否有 API 积分耗尽
+      if (retryResults.some(r => r.isApiCreditsError)) {
+        stoppedDueToApiCredits = true;
+        onProgress(`🚫 服务暂时不可用，停止重试`);
+        break;
+      }
+      
+      // 🛡️ v9.2: 重试结果也使用流式保存
+      const retrySaveItems: BatchSaveItem[] = [];
+      const retryCacheItems: Array<{ link: string; data: TpsDetailResult }> = [];
+      
+      for (const result of retryResults) {
+        if (stoppedDueToCredits) break;
+        
+        if (result.success) {
+          retrySuccess++;
+          
+          // v9.2: 只对成功的请求扣费
+          detailPageRequests++;
+          const deductResult = await creditTracker.deductDetailPage();
+          if (!deductResult.success) {
+            stoppedDueToCredits = true;
+            break;
+          }
+          
+          const linkTasks = tasksByLink.get(result.link) || [];
+          if (linkTasks.length > 0) {
+            const details = parseDetailPage(result.html, linkTasks[0].searchResult);
+            
+            // 收集缓存
+            for (const detail of details) {
+              if (detail.phone && detail.phone.length >= 10) {
+                retryCacheItems.push({ link: result.link, data: detail });
+              }
+            }
+            
+            // 过滤结果
+            const detailsWithFlag = details.map(d => ({ ...d, fromCache: false }));
+            const filtered = detailsWithFlag.filter(r => shouldIncludeResult(r, filters));
+            filteredOut += details.length - filtered.length;
+            
+            for (const task of linkTasks) {
+              retrySaveItems.push({ task, details: filtered });
+            }
+          }
+        } else {
+          // 重试仍失败，最终放弃
+          detailPageFailed++;
+        }
+        
+        // 重试阶段也推送进度
+        if (onDetailProgress) {
+          onDetailProgress({
+            completedDetails: completedDetails,  // 保持总数不变，重试不增加总数
+            totalDetails,
+            percent: Math.round((completedDetails / totalDetails) * 100),
+            phase: 'retrying',
+            detailPageRequests,
+            totalResults: totalSaved + retrySaveItems.reduce((sum, item) => sum + item.details.length, 0),
+          });
+        }
+      }
+      
+      // 🛡️ v9.2: 重试批次也立即保存到数据库
+      if (retrySaveItems.length > 0 && onBatchSave) {
+        try {
+          const savedCount = await onBatchSave(retrySaveItems);
+          totalSaved += savedCount;
+        } catch (saveError: any) {
+          console.error(`[TPS v9.2] 重试批次保存失败:`, saveError.message);
+        }
+      } else if (retrySaveItems.length > 0 && !onBatchSave) {
+        totalSaved += retrySaveItems.reduce((sum, item) => sum + item.details.length, 0);
+      }
+      
+      // 保存重试缓存
+      if (retryCacheItems.length > 0) {
+        try {
+          await setCachedDetails(retryCacheItems);
+        } catch (cacheError: any) {
+          console.error(`[TPS v9.2] 重试缓存保存失败:`, cacheError.message);
+        }
+      }
+      
+      // 重试批间延迟
+      if (ri < retryBatches - 1 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_CONFIG.RETRY_BATCH_DELAY_MS));
+      }
+    }
+    
+    onProgress(`🔄 延后重试完成: ${retrySuccess}/${failedLinks.length} 成功`);
+  } else if (failedLinks.length > 0 && stoppedDueToApiCredits) {
+    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（服务暂时不可用）`);
+  }
   
   // ==================== 统计信息 ====================
   
@@ -360,7 +493,9 @@ export async function fetchDetailsWithSmartPool(
   onProgress(`📊 有效结果: ${totalSaved} 条（已实时保存到数据库）`);
   onProgress(`📊 过滤排除: ${filteredOut} 条`);
   onProgress(`📊 批次模式: ${totalBatches} 批 × ${BATCH_CONFIG.BATCH_SIZE} 并发, 间隔 ${BATCH_CONFIG.BATCH_DELAY_MS}ms`);
-  // v3.0: 不再有延后重试
+  if (retryTotal > 0) {
+    onProgress(`🔄 延后重试: ${retrySuccess}/${retryTotal} 成功`);
+  }
   if (stoppedDueToApiCredits) {
     onProgress(`🚫 服务繁忙，任务提前结束`);
   }
