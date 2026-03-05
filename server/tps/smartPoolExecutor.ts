@@ -502,7 +502,8 @@ export async function fetchDetailsWithSmartPool(
   
   // v9.1: 详情阶段502统计汇总（仅后端日志，不推送给用户）
   if (detailPageFailed > 0) {
-    console.error(`[TPS 502-Monitor] 详情阶段汇总: 总请求=${detailPageRequests}, 失败=${detailPageFailed}, 失败率=${(detailPageFailed / detailPageRequests * 100).toFixed(1)}%, 丢失详情数据=${detailPageFailed}条`);
+    const failRate = detailPageRequests > 0 ? (detailPageFailed / detailPageRequests * 100).toFixed(1) : '0.0';
+    console.error(`[TPS 502-Monitor] 详情阶段汇总: 总请求=${detailPageRequests}, 失败=${detailPageFailed}, 失败率=${failRate}%, 丢失详情数据=${detailPageFailed}条`);
   } else {
     console.log(`[TPS 502-Monitor] 详情阶段汇总: 总请求=${detailPageRequests}, 失败=0, 全部成功`);
   }

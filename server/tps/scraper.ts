@@ -849,10 +849,16 @@ export async function searchOnly(
         // 分块并发重试，每批最多5个
         const RETRY_CHUNK_SIZE = 5;
         for (let i = 0; i < retryUrls.length; i += RETRY_CHUNK_SIZE) {
-          if (signal?.aborted) break;
+          if (signal?.aborted || searchApiCreditsExhausted) break;
           const chunk = retryUrls.slice(i, i + RETRY_CHUNK_SIZE);
           const chunkPromises = chunk.map(url =>
             fetchWithScrapedo(url, token).catch(err => {
+              // v9.3: 检测 API 积分耗尽，停止重试
+              if (err instanceof ScrapeApiCreditsError) {
+                searchApiCreditsExhausted = true;
+                onProgress?.(`🚫 延后重试中检测到 API 积分耗尽，停止重试`);
+                return null;
+              }
               const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
               onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
               searchPageFailed++;

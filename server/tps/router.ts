@@ -330,8 +330,8 @@ export const tpsRouter = router({
         });
       }
       
-      // 允许 completed、insufficient_credits、service_busy 和 failed 状态导出（失败任务可能已通过流式保存获取了部分结果）
-      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy" && task.status !== "failed") {
+      // 允许 completed、insufficient_credits、service_busy、failed 和 cancelled 状态导出（停止/失败任务可能已通过流式保存获取了部分结果）
+      if (task.status !== "completed" && task.status !== "insufficient_credits" && task.status !== "service_busy" && task.status !== "failed" && task.status !== "cancelled") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "任务尚未完成，无法导出",
@@ -656,6 +656,7 @@ async function executeTpsSearchRealtimeDeduction(
   let totalDetailPageFailed = 0;  // v9.1: 详情页502失败总数（仅后端日志）
   let stoppedDueToCredits = false;
   let stoppedDueToApiExhausted = false; // API 服务额度耗尽（与用户积分不足区分）
+  let stoppedByUser = false; // v9.3: 用户手动停止标志（区别于积分不足）
   
   // 缓存保存函数（只保存，不读取）
   const setCachedDetails = async (items: Array<{ link: string; data: TpsDetailResult }>) => {
@@ -716,7 +717,7 @@ async function executeTpsSearchRealtimeDeduction(
     // ==================== 逐组执行流水线 ====================
     for (let groupIndex = 0; groupIndex < totalGroups; groupIndex++) {
       // 检查停止条件
-      if (stoppedDueToCredits || stoppedDueToApiExhausted || signal?.aborted) break;
+      if (stoppedDueToCredits || stoppedDueToApiExhausted || stoppedByUser || signal?.aborted) break;
       
       const groupStart = groupIndex * GROUP_SIZE;
       const groupEnd = Math.min(groupStart + GROUP_SIZE, subTasks.length);
@@ -729,7 +730,7 @@ async function executeTpsSearchRealtimeDeduction(
       
       const processSearch = async (subTask: { name: string; location: string; index: number }) => {
         if (signal?.aborted) {
-          stoppedDueToCredits = true;
+          stoppedByUser = true;
           return;
         }
         if (stoppedDueToCredits || creditTracker.isStopped()) {
@@ -842,8 +843,8 @@ async function executeTpsSearchRealtimeDeduction(
       await runGroupSearch();
       
       // 检查停止条件
-      if (stoppedDueToCredits || stoppedDueToApiExhausted || signal?.aborted) {
-        // 如果搜索阶段积分耗尽，保存已获取的搜索结果
+      if (stoppedDueToCredits || stoppedDueToApiExhausted || stoppedByUser || signal?.aborted) {
+        // 如果搜索阶段积分耗尽或用户停止，保存已获取的搜索结果
         if (groupDetailTasks.length > 0 && totalResults === 0) {
           addLog(`📋 保存第 ${groupIndex + 1} 组搜索结果...`);
           const searchResultsBySubTask = new Map<number, TpsDetailResult[]>();
@@ -992,6 +993,32 @@ async function executeTpsSearchRealtimeDeduction(
     }
     
     // 完成任务
+    // v9.3: 如果是用户手动停止，跳过状态更新（stopTask 已设置 cancelled 状态）
+    if (stoppedByUser || signal?.aborted) {
+      console.log(`[TPS v9.3] 任务被用户手动停止，跳过状态覆盖 (taskId=${taskId})`);
+      // 只更新统计数据，不覆盖 cancelled 状态
+      const database = await getDb();
+      if (database) {
+        try {
+          await database.update(tpsSearchTasks).set({
+            totalResults,
+            searchPageRequests: totalSearchPages,
+            detailPageRequests: totalDetailPages,
+            cacheHits: 0,
+            creditsUsed: creditTracker.getTotalDeducted().toFixed(2),
+            logs,
+          }).where(eq(tpsSearchTasks.id, taskDbId));
+        } catch (e: any) {
+          console.error(`[TPS v9.3] 手动停止后更新统计失败:`, e.message);
+        }
+      }
+      // 发送最终的 emitTaskCompleted（带最新统计数据）
+      emitTaskCompleted(userId, taskId, "tps", { totalResults, creditsUsed: creditTracker.getTotalDeducted(), status: 'cancelled' });
+      recordTaskComplete(taskId, true);
+      console.log(`[TPS v9.3] 用户 ${userId} 手动停止任务完成`);
+      return;
+    }
+    
     const finalStatus = stoppedDueToApiExhausted ? "service_busy" : (stoppedDueToCredits ? "insufficient_credits" : "completed");
     
     if (stoppedDueToApiExhausted || stoppedDueToCredits) {
