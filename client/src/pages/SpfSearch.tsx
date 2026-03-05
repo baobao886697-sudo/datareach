@@ -300,7 +300,7 @@ export default function SpfSearch() {
           <Button 
             variant="outline" 
             onClick={() => setLocation("/history")} 
-            className="absolute top-6 right-6 border-pink-500/50 hover:bg-pink-500/10"
+            className="absolute top-6 right-6 border-pink-500/50 hover:bg-pink-500/10 z-20"
           >
             <Clock className="h-4 w-4 mr-2 text-pink-500" />
             搜索历史
