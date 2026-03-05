@@ -62,8 +62,9 @@ import {
 } from "./concurrencyMonitor";
 import { emitTaskProgress, emitTaskCompleted, emitTaskFailed, emitCreditsUpdate } from "../_core/wsEmitter";
 
-// v8.0: 搜索并发配置（详情并发由 BATCH_CONFIG 控制）
-const SEARCH_CONCURRENCY = 3;  // 搜索并发：固定3个名字同时搜索
+// v9.3: 分组流水线配置
+const SEARCH_CONCURRENCY = 3;  // 搜索并发：每组内3个组合同时搜索
+const GROUP_SIZE = 3;          // 每组3个搜索组合，搜完立即获取详情
 
 // 输入验证 schema
 const tpsFiltersSchema = z.object({
@@ -589,96 +590,95 @@ async function executeTpsSearchRealtimeDeduction(
   const seenPhones = new Set<string>();
   
   try {
-    // ==================== 阶段一：并发搜索（实时扣费） ====================
-    addLog(`📋 阶段一：开始搜索...`);
+    // ==================== v9.3: 分组流水线模式 ====================
+    // 每 GROUP_SIZE(3) 个搜索组合为一组，每组完成搜索后立即获取详情
+    // 避免大量组合时内存堆积，同时让用户更快看到结果
     
-    // 收集所有详情任务
-    const allDetailTasks: DetailTaskWithIndex[] = [];
-    const subTaskResults: Map<number, { searchResults: TpsSearchResult[]; searchPages: number }> = new Map();
+    const totalGroups = Math.ceil(subTasks.length / GROUP_SIZE);
+    addLog(`📋 分组流水线模式: ${subTasks.length} 个组合, 分 ${totalGroups} 组执行 (每组 ${GROUP_SIZE} 个)`);
     
     let completedSearches = 0;
     
-    // 并发执行搜索
-    const searchQueue = [...subTasks];
-    
-    const processSearch = async (subTask: { name: string; location: string; index: number }) => {
-      // 检查超时终止信号
-      if (signal?.aborted) {
-        addLog(`任务已结束，已获取的结果已保存`);
-        stoppedDueToCredits = true;  // 复用停止标志终止后续流程
-        return;
-      }
-      // BUG-04修复：先检查同步标志，再检查异步余额，减少竞态窗口
-      if (stoppedDueToCredits || creditTracker.isStopped()) {
-        return;
-      }
+    // ==================== 流式保存回调（所有组共享） ====================
+    const onBatchSave = async (items: BatchSaveItem[]): Promise<number> => {
+      const resultsBySubTask = new Map<number, TpsDetailResult[]>();
       
-      // BUG-05修复：搜索前预检查是否足够支付至少1页搜索费用
-      const canAfford = await creditTracker.canAffordSearchPage();
-      if (!canAfford) {
-        stoppedDueToCredits = true;
-        addLog(`⚠️ 积分不足，停止搜索阶段`);
-        return;
+      for (const { task, details } of items) {
+        if (!resultsBySubTask.has(task.subTaskIndex)) {
+          resultsBySubTask.set(task.subTaskIndex, []);
+        }
+        
+        for (const detail of details) {
+          if (detail.phone && seenPhones.has(detail.phone)) {
+            continue;
+          }
+          if (detail.phone) {
+            seenPhones.add(detail.phone);
+          }
+          resultsBySubTask.get(task.subTaskIndex)!.push(detail);
+        }
       }
       
-      const result = await searchOnly(
-        subTask.name,
-        subTask.location,
-        token,
-        maxPages,
-        input.filters || {},
-        (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`),
-        signal
-      );
-      
-      completedSearches++;
-      
-      if (result.success) {
-        // v3.0: 按所有API调用次数扣费（含失败），调用1次API扣除1次
-        for (let i = 0; i < result.stats.searchPageRequests; i++) {
-          const deductResult = await creditTracker.deductSearchPage();
-          if (!deductResult.success) {
-            stoppedDueToCredits = true;
-            break;
+      let batchSavedCount = 0;
+      for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
+        const subTask = subTasks.find(t => t.index === subTaskIndex);
+        if (subTask && results.length > 0) {
+          try {
+            await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+            batchSavedCount += results.length;
+          } catch (saveErr: any) {
+            console.error(`[TPS v9.3] onBatchSave 子任务 ${subTaskIndex} 保存失败 (${results.length}条):`, saveErr.message);
           }
         }
-        
-        totalSearchPages += result.stats.searchPageRequests;
-        totalFilteredOut += result.stats.filteredOut;
-        totalSkippedDeceased += result.stats.skippedDeceased || 0;
-        totalSearchPageFailed += result.stats.searchPageFailed || 0;  // v9.1: 累计搜索页失败数
-        
-        // 保存搜索结果
-        subTaskResults.set(subTask.index, {
-          searchResults: result.searchResults,
-          searchPages: result.stats.searchPageRequests,
-        });
-        
-        // 收集详情任务
-        for (const searchResult of result.searchResults) {
-          allDetailTasks.push({
-            searchResult,
-            subTaskIndex: subTask.index,
-            name: subTask.name,
-            location: subTask.location,
-          });
-        }
-        
-        const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
-        addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页成功`);
-        
-        // 检查 Scrape.do API 积分耗尽
-        if (result.apiCreditsExhausted) {
-          addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
-          addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToApiExhausted = true;
-          stoppedDueToCredits = true; // 仍用于停止后续任务的控制流
+      }
+      
+      totalResults += batchSavedCount;
+      return batchSavedCount;
+    };
+    
+    // ==================== 逐组执行流水线 ====================
+    for (let groupIndex = 0; groupIndex < totalGroups; groupIndex++) {
+      // 检查停止条件
+      if (stoppedDueToCredits || stoppedDueToApiExhausted || signal?.aborted) break;
+      
+      const groupStart = groupIndex * GROUP_SIZE;
+      const groupEnd = Math.min(groupStart + GROUP_SIZE, subTasks.length);
+      const groupTasks = subTasks.slice(groupStart, groupEnd);
+      
+      addLog(`════════ 第 ${groupIndex + 1}/${totalGroups} 组 (${groupTasks.length} 个组合) ════════`);
+      
+      // ---------- 组内搜索阶段 ----------
+      const groupDetailTasks: DetailTaskWithIndex[] = [];
+      
+      const processSearch = async (subTask: { name: string; location: string; index: number }) => {
+        if (signal?.aborted) {
+          stoppedDueToCredits = true;
           return;
         }
-      } else {
-        // v3.0: 搜索失败也要扣费（API已被调用）
-        // searchPageRequests 在 scraper.ts 中已统计所有调用（含失败）
-        if (result.stats.searchPageRequests > 0) {
+        if (stoppedDueToCredits || creditTracker.isStopped()) {
+          return;
+        }
+        
+        const canAfford = await creditTracker.canAffordSearchPage();
+        if (!canAfford) {
+          stoppedDueToCredits = true;
+          addLog(`⚠️ 积分不足，停止搜索`);
+          return;
+        }
+        
+        const result = await searchOnly(
+          subTask.name,
+          subTask.location,
+          token,
+          maxPages,
+          input.filters || {},
+          (msg) => addLog(`[${subTask.index + 1}/${subTasks.length}] ${msg}`),
+          signal
+        );
+        
+        completedSearches++;
+        
+        if (result.success) {
           for (let i = 0; i < result.stats.searchPageRequests; i++) {
             const deductResult = await creditTracker.deductSearchPage();
             if (!deductResult.success) {
@@ -686,222 +686,192 @@ async function executeTpsSearchRealtimeDeduction(
               break;
             }
           }
+          
           totalSearchPages += result.stats.searchPageRequests;
-          totalSearchPageFailed += result.stats.searchPageFailed || 0;  // v9.1: 累计搜索页失败数
+          totalFilteredOut += result.stats.filteredOut;
+          totalSkippedDeceased += result.stats.skippedDeceased || 0;
+          totalSearchPageFailed += result.stats.searchPageFailed || 0;
+          
+          for (const searchResult of result.searchResults) {
+            groupDetailTasks.push({
+              searchResult,
+              subTaskIndex: subTask.index,
+              name: subTask.name,
+              location: subTask.location,
+            });
+          }
+          
+          const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
+          addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页成功`);
+          
+          if (result.apiCreditsExhausted) {
+            addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+            stoppedDueToApiExhausted = true;
+            stoppedDueToCredits = true;
+            return;
+          }
+        } else {
+          if (result.stats.searchPageRequests > 0) {
+            for (let i = 0; i < result.stats.searchPageRequests; i++) {
+              const deductResult = await creditTracker.deductSearchPage();
+              if (!deductResult.success) {
+                stoppedDueToCredits = true;
+                break;
+              }
+            }
+            totalSearchPages += result.stats.searchPageRequests;
+            totalSearchPageFailed += result.stats.searchPageFailed || 0;
+          }
+          
+          if (result.apiCreditsExhausted) {
+            addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
+            stoppedDueToApiExhausted = true;
+            stoppedDueToCredits = true;
+            return;
+          }
+          addLog(`[${subTask.index + 1}/${subTasks.length}] 未找到匹配结果`);
         }
         
-        // 检查是否因 API 积分耗尽导致失败
-        if (result.apiCreditsExhausted) {
-          addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
-          addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-          stoppedDueToApiExhausted = true;
-          stoppedDueToCredits = true;
-          return;
-        }
-        addLog(`[${subTask.index + 1}/${subTasks.length}] 未找到匹配结果`);
-      }
-      
-      // 更新进度
-      const searchProgress = Math.round((completedSearches / subTasks.length) * 30);
-      await updateTpsSearchTaskProgress(taskDbId, {
-        completedSubTasks: completedSearches,
-        progress: searchProgress,
-        searchPageRequests: totalSearchPages,
-        creditsUsed: creditTracker.getTotalDeducted(),
-        logs,
-      });
-      emitTaskProgress(userId, taskId, "tps", { progress: searchProgress, completedSubTasks: completedSearches, totalSubTasks: subTasks.length, creditsUsed: creditTracker.getTotalDeducted(), logs });
-      emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getTotalDeducted(), source: "tps", taskId });
-    };
-    
-    // 并发执行搜索
-    const runConcurrentSearches = async () => {
-      let currentIndex = 0;
-      
-      const runNext = async (): Promise<void> => {
-        while (currentIndex < searchQueue.length && !stoppedDueToCredits && !signal?.aborted) {
-          const task = searchQueue[currentIndex++];
-          await processSearch(task);
-        }
-      };
-      
-      const workers = Math.min(SEARCH_CONCURRENCY, searchQueue.length);
-      const workerPromises: Promise<void>[] = [];
-      for (let i = 0; i < workers; i++) {
-        workerPromises.push(runNext());
-      }
-      
-      await Promise.all(workerPromises);
-    };
-    
-    await runConcurrentSearches();
-    
-    // 搜索阶段完成日志（简洁版）
-    addLog(`✅ 搜索完成: ${totalSearchPages} 页, 找到 ${allDetailTasks.length} 条待获取`);
-    
-    // 🛡️ v9.1 内存优化：搜索阶段完成后释放不再需要的数据
-    searchQueue.length = 0;
-    subTaskResults.clear();
-    
-    // stoppedDueToCredits 已在搜索阶段首次触发时输出日志，此处不再重复
-    
-    // ==================== 阶段二：智能并发池获取详情（v7.0 全局弹性并发 + 实时进度推送） ====================
-    if (allDetailTasks.length > 0 && !stoppedDueToCredits && !signal?.aborted) {
-      addLog(`════════ 进入详情获取阶段 ════════`);
-      addLog(`📋 待获取详情: ${allDetailTasks.length} 条`);
-      addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
-      
-      // v7.0: 详情进度回调 — 每完成一批就更新数据库和推送WS
-      let lastDetailProgressPush = 0; // 防止推送过于频繁
-      const onDetailProgress = (info: DetailProgressInfo) => {
-        const now = Date.now();
-        // 每2秒最多推送一次，或者是最后一条
-        if (now - lastDetailProgressPush < 2000 && info.completedDetails < info.totalDetails) return;
-        lastDetailProgressPush = now;
-        
-        // 详情阶段进度占 30%-95%
-        const detailProgress = 30 + Math.round(info.percent * 0.65);
-        const phase = info.phase === 'retrying' ? '重试中' : '获取详情';
-        
-        // v7.2: 使用 fire-and-forget 模式，避免阻塞并发池的 onStats 回调
-        // v8.2: 增加 detailPageRequests 和 totalResults 实时推送
-        updateTpsSearchTaskProgress(taskDbId, {
-          progress: detailProgress,
+        // 更新进度（搜索阶段占 0-30% 的总进度）
+        const searchProgress = Math.round((completedSearches / subTasks.length) * 30);
+        await updateTpsSearchTaskProgress(taskDbId, {
+          completedSubTasks: completedSearches,
+          progress: searchProgress,
           searchPageRequests: totalSearchPages,
-          detailPageRequests: info.detailPageRequests,
-          totalResults: info.totalResults,
-          creditsUsed: creditTracker.getTotalDeducted(),
-          logs,
-        }).catch(err => console.error('[TPS] 详情进度更新DB失败:', err));
-        
-        // WS推送是同步的，不会抛异常
-        emitTaskProgress(userId, taskId, "tps", {
-          progress: detailProgress,
-          phase,
-          completedDetails: info.completedDetails,
-          totalDetails: info.totalDetails,
-          detailPageRequests: info.detailPageRequests,
-          totalResults: info.totalResults,
           creditsUsed: creditTracker.getTotalDeducted(),
           logs,
         });
+        emitTaskProgress(userId, taskId, "tps", { progress: searchProgress, completedSubTasks: completedSearches, totalSubTasks: subTasks.length, creditsUsed: creditTracker.getTotalDeducted(), logs });
         emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getTotalDeducted(), source: "tps", taskId });
       };
       
-      // 🛡️ v9.0: 流式保存回调 - 每批结果立即保存到数据库，不在内存中累积
-      const onBatchSave = async (items: BatchSaveItem[]): Promise<number> => {
-        // 按子任务分组
-        const resultsBySubTask = new Map<number, TpsDetailResult[]>();
-        
-        for (const { task, details } of items) {
-          if (!resultsBySubTask.has(task.subTaskIndex)) {
-            resultsBySubTask.set(task.subTaskIndex, []);
+      // 组内并发搜索（最多 SEARCH_CONCURRENCY 个 worker）
+      const runGroupSearch = async () => {
+        let idx = 0;
+        const runNext = async (): Promise<void> => {
+          while (idx < groupTasks.length && !stoppedDueToCredits && !signal?.aborted) {
+            const task = groupTasks[idx++];
+            await processSearch(task);
           }
-          
-          // 跨任务电话号码去重
-          for (const detail of details) {
-            if (detail.phone && seenPhones.has(detail.phone)) {
-              continue;
-            }
-            if (detail.phone) {
-              seenPhones.add(detail.phone);
-            }
-            resultsBySubTask.get(task.subTaskIndex)!.push(detail);
-          }
+        };
+        const workers = Math.min(SEARCH_CONCURRENCY, groupTasks.length);
+        const workerPromises: Promise<void>[] = [];
+        for (let i = 0; i < workers; i++) {
+          workerPromises.push(runNext());
         }
-        
-        // 立即保存到数据库
-        let batchSavedCount = 0;
-        for (const [subTaskIndex, results] of Array.from(resultsBySubTask.entries())) {
-          const subTask = subTasks.find(t => t.index === subTaskIndex);
-          if (subTask && results.length > 0) {
-            try {
-              await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
-              batchSavedCount += results.length;
-            } catch (saveErr: any) {
-              console.error(`[TPS v9.0] onBatchSave 子任务 ${subTaskIndex} 保存失败 (${results.length}条):`, saveErr.message);
-              // 保存失败不中断，继续处理其他子任务
-            }
-          }
-        }
-        
-        totalResults += batchSavedCount;
-        return batchSavedCount;
+        await Promise.all(workerPromises);
       };
       
-      // 使用智能并发池获取详情（v9.0 流式保存模式）
-      const detailResult = await fetchDetailsWithSmartPool(
-        allDetailTasks,
-        token,
-        input.filters || {},
-        addLog,
-        setCachedDetails,
-        creditTracker,
-        userId,
-        onDetailProgress,
-        onBatchSave,
-        signal
-      );
+      await runGroupSearch();
       
-      totalDetailPages += detailResult.stats.detailPageRequests;
-      totalFilteredOut += detailResult.stats.filteredOut;
-      totalDetailPageFailed += detailResult.stats.detailPageFailed || 0;  // v9.1: 累计详情页失败数
-      
-      // 检查是否因积分不足停止
-      if (detailResult.stats.stoppedDueToCredits || creditTracker.isStopped()) {
-        stoppedDueToCredits = true;
-      }
-      
-      // 检查是否因 Scrape.do API 积分耗尽停止
-      if (detailResult.stats.stoppedDueToApiCredits) {
-        addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
-        addLog(`💡 已获取的结果已保存，如需继续请联系客服`);
-        stoppedDueToApiExhausted = true;
-      }
-    }
-    
-    // ==================== 搜索阶段积分耗尽时保存搜索结果 ====================
-    // 如果搜索阶段积分耗尽导致详情阶段被跳过，仍需保存已获取的搜索结果
-    if (stoppedDueToCredits && totalResults === 0 && allDetailTasks.length > 0) {
-      addLog(`📋 保存搜索阶段已获取的 ${allDetailTasks.length} 条基础结果...`);
-      
-      // 按子任务分组，将搜索结果转换为基础详情格式
-      const searchResultsBySubTask = new Map<number, TpsDetailResult[]>();
-      
-      for (const task of allDetailTasks) {
-        if (!searchResultsBySubTask.has(task.subTaskIndex)) {
-          searchResultsBySubTask.set(task.subTaskIndex, []);
+      // 检查停止条件
+      if (stoppedDueToCredits || stoppedDueToApiExhausted || signal?.aborted) {
+        // 如果搜索阶段积分耗尽，保存已获取的搜索结果
+        if (groupDetailTasks.length > 0 && totalResults === 0) {
+          addLog(`📋 保存第 ${groupIndex + 1} 组搜索结果...`);
+          const searchResultsBySubTask = new Map<number, TpsDetailResult[]>();
+          for (const task of groupDetailTasks) {
+            if (!searchResultsBySubTask.has(task.subTaskIndex)) {
+              searchResultsBySubTask.set(task.subTaskIndex, []);
+            }
+            const locationParts = task.searchResult.location?.split(',').map(s => s.trim()) || [];
+            searchResultsBySubTask.get(task.subTaskIndex)!.push({
+              name: task.searchResult.name,
+              age: task.searchResult.age,
+              city: locationParts[0] || '',
+              state: locationParts[1] || '',
+              location: task.searchResult.location,
+              detailLink: task.searchResult.detailLink,
+            });
+          }
+          for (const [subTaskIndex, results] of Array.from(searchResultsBySubTask.entries())) {
+            const subTask = subTasks.find(t => t.index === subTaskIndex);
+            if (subTask && results.length > 0) {
+              await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
+              totalResults += results.length;
+            }
+          }
+          addLog(`✅ 已保存 ${totalResults} 条搜索结果（无详情数据）`);
         }
+        break;
+      }
+      
+      // ---------- 组内详情获取阶段 ----------
+      if (groupDetailTasks.length > 0) {
+        addLog(`📋 第 ${groupIndex + 1} 组详情获取: ${groupDetailTasks.length} 条`);
+        addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
         
-        // 跨任务电话号码去重（搜索结果无phone，跳过去重）
-        
-        // 将 TpsSearchResult 转换为 TpsDetailResult 基础格式
-        const locationParts = task.searchResult.location?.split(',').map(s => s.trim()) || [];
-        const basicResult: TpsDetailResult = {
-          name: task.searchResult.name,
-          age: task.searchResult.age,
-          city: locationParts[0] || '',
-          state: locationParts[1] || '',
-          location: task.searchResult.location,
-          detailLink: task.searchResult.detailLink,
+        // 详情进度回调
+        let lastDetailProgressPush = 0;
+        const onDetailProgress = (info: DetailProgressInfo) => {
+          const now = Date.now();
+          if (now - lastDetailProgressPush < 2000 && info.completedDetails < info.totalDetails) return;
+          lastDetailProgressPush = now;
+          
+          // 详情阶段进度：基于已完成的组数和当前组内进度计算
+          const groupBaseProgress = 30 + Math.round((groupIndex / totalGroups) * 65);
+          const groupDetailProgress = Math.round((info.percent / 100) * (65 / totalGroups));
+          const detailProgress = Math.min(95, groupBaseProgress + groupDetailProgress);
+          const phase = info.phase === 'retrying' ? '重试中' : '获取详情';
+          
+          updateTpsSearchTaskProgress(taskDbId, {
+            progress: detailProgress,
+            searchPageRequests: totalSearchPages,
+            detailPageRequests: totalDetailPages + info.detailPageRequests,
+            totalResults: totalResults + (info.totalResults || 0),
+            creditsUsed: creditTracker.getTotalDeducted(),
+            logs,
+          }).catch(err => console.error('[TPS] 详情进度更新DB失败:', err));
+          
+          emitTaskProgress(userId, taskId, "tps", {
+            progress: detailProgress,
+            phase,
+            completedDetails: info.completedDetails,
+            totalDetails: info.totalDetails,
+            detailPageRequests: totalDetailPages + info.detailPageRequests,
+            totalResults: totalResults + (info.totalResults || 0),
+            creditsUsed: creditTracker.getTotalDeducted(),
+            logs,
+          });
+          emitCreditsUpdate(userId, { newBalance: creditTracker.getCurrentBalance(), deductedAmount: creditTracker.getTotalDeducted(), source: "tps", taskId });
         };
         
-        searchResultsBySubTask.get(task.subTaskIndex)!.push(basicResult);
-      }
-      
-      for (const [subTaskIndex, results] of Array.from(searchResultsBySubTask.entries())) {
-        const subTask = subTasks.find(t => t.index === subTaskIndex);
-        if (subTask && results.length > 0) {
-          await saveTpsSearchResults(taskDbId, subTaskIndex, subTask.name, subTask.location, results);
-          totalResults += results.length;
+        const detailResult = await fetchDetailsWithSmartPool(
+          groupDetailTasks,
+          token,
+          input.filters || {},
+          addLog,
+          setCachedDetails,
+          creditTracker,
+          userId,
+          onDetailProgress,
+          onBatchSave,
+          signal
+        );
+        
+        totalDetailPages += detailResult.stats.detailPageRequests;
+        totalFilteredOut += detailResult.stats.filteredOut;
+        totalDetailPageFailed += detailResult.stats.detailPageFailed || 0;
+        
+        if (detailResult.stats.stoppedDueToCredits || creditTracker.isStopped()) {
+          stoppedDueToCredits = true;
         }
+        
+        if (detailResult.stats.stoppedDueToApiCredits) {
+          addLog(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
+          stoppedDueToApiExhausted = true;
+        }
+      } else {
+        addLog(`📋 第 ${groupIndex + 1} 组无详情需获取，跳过`);
       }
       
-      addLog(`✅ 已保存 ${totalResults} 条搜索结果（无详情数据）`);
+      // 🛡️ 内存优化：每组完成后释放该组的详情任务
+      groupDetailTasks.length = 0;
+      
+      addLog(`✅ 第 ${groupIndex + 1}/${totalGroups} 组完成`);
     }
     
-    // 🛡️ v9.1 内存优化：所有数据已保存到数据库，释放内存中的大数组
-    allDetailTasks.length = 0;
+    // 🛡️ 内存优化：所有组完成后释放
     seenPhones.clear();
     
     // 更新最终进度
