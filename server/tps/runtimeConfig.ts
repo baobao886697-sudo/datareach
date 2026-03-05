@@ -44,8 +44,8 @@ const DEFAULT_CONFIG = {
   REQUEST_DELAY_MS: 100,
   
   // 积分配置
-  SEARCH_COST: 0.3,
-  DETAIL_COST: 0.3,
+  SEARCH_COST: 0.5,
+  DETAIL_COST: 0.5,
 };
 
 // ============================================================================

@@ -48,9 +48,9 @@ export const TPS_CONFIG = {
   TOTAL_CONCURRENCY: 20,
   MAX_SAFE_PAGES: 25,       // 最大搜索页数（仍在使用）
   /** @deprecated 费用现从数据库 tps_config 读取 */
-  SEARCH_COST: 0.3,
+  SEARCH_COST: 0.5,
   /** @deprecated 费用现从数据库 tps_config 读取 */
-  DETAIL_COST: 0.3,
+  DETAIL_COST: 0.5,
 };
 
 // ==================== 类型定义 ====================

@@ -57,8 +57,8 @@ export async function getTpsConfig() {
   const defaultMaxAge = maxAgeConfig ? parseInt(maxAgeConfig, 10) : 79;
   
   // 解析积分配置
-  const searchCost = searchCreditsConfig || "0.3";
-  const detailCost = detailCreditsConfig || "0.3";
+  const searchCost = searchCreditsConfig || "0.5";
+  const detailCost = detailCreditsConfig || "0.5";
   
   if (!config) {
     // 返回默认配置，优先使用 systemConfigs 中的配置

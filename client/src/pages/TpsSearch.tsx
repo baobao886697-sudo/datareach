@@ -180,9 +180,9 @@ export default function TpsSearch() {
   const names = namesInput.trim().split("\n").filter(n => n.trim());
   const locations = locationsInput.trim().split("\n").filter(l => l.trim());
   
-  // TPS 费率（从后端配置获取，默认 0.3）
-  const searchCost = tpsConfig?.searchCost || 0.3;
-  const detailCost = tpsConfig?.detailCost || 0.3;
+  // TPS 费率（从后端配置获取，默认 0.5）
+  const searchCost = tpsConfig?.searchCost || 0.5;
+  const detailCost = tpsConfig?.detailCost || 0.5;
   
   // ==================== 预扣费用计算（多扣少补策略） ====================
   // 预扣上限：固定 25 搜索页 + 200 详情页（与后端保持一致）
