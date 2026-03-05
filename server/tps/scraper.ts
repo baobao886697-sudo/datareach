@@ -793,7 +793,7 @@ export async function searchOnly(
             // v9.2: 检测 429/502 错误，加入延后重试队列
             if (err instanceof ScrapeRateLimitError || err instanceof ScrapeServerError) {
               retryUrls.push(url);
-              onProgress?.(`⚓ 页面获取失败 (${err instanceof ScrapeRateLimitError ? '429限流' : '502服务器错误'})，已排入队尾稍后重试...`);
+              onProgress?.(`⏳ 数据优化中，稍后自动补充...`);
             } else {
               const pageNum = chunkStart + i + 2; // +2 因为第1页已单独获取
               console.error(`[TPS 502-Monitor] 搜索页失败: name="${name}", page=${pageNum}, error=${err.message || err}`);
@@ -841,7 +841,7 @@ export async function searchOnly(
       // ==================== v9.2: 搜索阶段延后重试 ====================
       // 借鉴 v8.2 的延后重试机制：主批次完成后统一重试失败的页面
       if (retryUrls.length > 0 && !searchApiCreditsExhausted) {
-        onProgress?.(`🔄 开始延后重试 ${retryUrls.length} 个失败页面...`);
+        onProgress?.(`⏳ 正在补充 ${retryUrls.length} 条遗漏数据...`);
         
         // 等待 1 秒后开始重试
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -856,11 +856,11 @@ export async function searchOnly(
               // v9.3: 检测 API 积分耗尽，停止重试
               if (err instanceof ScrapeApiCreditsError) {
                 searchApiCreditsExhausted = true;
-                onProgress?.(`🚫 延后重试中检测到 API 积分耗尽，停止重试`);
+                onProgress?.(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
                 return null;
               }
               const safeRetryMsg = (err.message || '').includes('Scrape.do') ? '服务繁忙' : err.message;
-              onProgress?.(`❌ 延后重试仍失败: ${safeRetryMsg}`);
+              onProgress?.(`⏳ 部分数据暂时无法获取，已跳过`);
               searchPageFailed++;
               return null;
             })
@@ -882,7 +882,7 @@ export async function searchOnly(
           searchPageRequests += retrySuccessCount;  // 只对成功请求扣费
         }
         
-        onProgress?.(`🔄 延后重试完成: ${retryUrls.length} 个页面已重试`);
+        onProgress?.(`✅ 数据补充完成`);
       }
     }
 

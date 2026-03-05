@@ -450,16 +450,10 @@ export function formatTpsCostBreakdown(
   lines.push(`📊 任务摘要:`);
   lines.push(`   • 已获取结果: ${totalResults} 条`);
   if (breakdown.searchPages > 0) {
-    const perPage = breakdown.searchCost / breakdown.searchPages;
-    lines.push(`   • 搜索页: ${breakdown.searchPages} 页 × ${perPage.toFixed(2)} = ${breakdown.searchCost.toFixed(1)} 积分`);
-  } else {
-    lines.push(`   • 搜索页: 0 页`);
+    lines.push(`   • 搜索页: ${breakdown.searchCost.toFixed(1)} 积分`);
   }
   if (breakdown.detailPages > 0) {
-    const perPage = breakdown.detailCost / breakdown.detailPages;
-    lines.push(`   • 详情页: ${breakdown.detailPages} 页 × ${perPage.toFixed(2)} = ${breakdown.detailCost.toFixed(1)} 积分`);
-  } else {
-    lines.push(`   • 详情页: 0 页`);
+    lines.push(`   • 详情获取: ${breakdown.detailCost.toFixed(1)} 积分`);
   }
   lines.push(`───────────────────────────────────────────────────`);
   lines.push(`💰 本次消耗: ${breakdown.totalCost.toFixed(1)} 积分`);

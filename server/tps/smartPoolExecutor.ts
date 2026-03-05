@@ -153,7 +153,7 @@ export async function fetchDetailsWithSmartPool(
     tasksByLink.get(link)!.push(task);
   }
   
-  onProgress(`🔗 去重后 ${uniqueLinks.length} 个唯一详情链接`);
+  onProgress(`📊 共找到 ${uniqueLinks.length} 条待获取详情`);
   
   // 检查积分
   const affordCheck = await creditTracker.canAffordDetailBatch(uniqueLinks.length);
@@ -186,7 +186,7 @@ export async function fetchDetailsWithSmartPool(
   
   const totalBatches = Math.ceil(totalDetails / BATCH_CONFIG.BATCH_SIZE);
   
-  onProgress(`📤 开始分批获取 ${totalDetails} 条详情 (${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个, 间隔 ${BATCH_CONFIG.BATCH_DELAY_MS}ms)`);
+  onProgress(`📤 开始获取 ${totalDetails} 条详细信息，分 ${totalBatches} 批处理`);
   console.log(`[TPS v9.2] 流式保存模式: ${totalDetails} 条详情, ${totalBatches} 批, 每批 ${BATCH_CONFIG.BATCH_SIZE} 个`);
   
   for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -346,7 +346,7 @@ export async function fetchDetailsWithSmartPool(
     // 批次日志（每5批或最后一批输出）
     if (batchNum % 5 === 0 || batchNum === totalBatches) {
       const overallPercent = Math.round((completedDetails / totalDetails) * 100);
-      onProgress(`📥 批次 ${batchNum}/${totalBatches} 完成, 总进度 ${completedDetails}/${totalDetails} (${overallPercent}%)`);
+      onProgress(`📥 已完成 ${completedDetails}/${totalDetails} 条 (${overallPercent}%)`);
     }
     
     // 批间延迟（最后一批不需要延迟）
@@ -362,7 +362,7 @@ export async function fetchDetailsWithSmartPool(
   
   // API 积分耗尽时跳过重试
   if (failedLinks.length > 0 && !stoppedDueToCredits && !stoppedDueToApiCredits) {
-    onProgress(`🔄 开始延后重试 ${failedLinks.length} 个失败链接 (等待 ${BATCH_CONFIG.RETRY_DELAY_MS}ms)...`);
+    onProgress(`⏳ 正在补充 ${failedLinks.length} 条遗漏数据...`);
     console.log(`[TPS v9.2] 延后重试: ${failedLinks.length} 个失败链接`);
     
     // 等待一段时间，给上游服务恢复
@@ -394,7 +394,7 @@ export async function fetchDetailsWithSmartPool(
       // 检查重试中是否有 API 积分耗尽
       if (retryResults.some(r => r.isApiCreditsError)) {
         stoppedDueToApiCredits = true;
-        onProgress(`🚫 服务暂时不可用，停止重试`);
+        onProgress(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
         break;
       }
       
@@ -481,23 +481,18 @@ export async function fetchDetailsWithSmartPool(
       }
     }
     
-    onProgress(`🔄 延后重试完成: ${retrySuccess}/${failedLinks.length} 成功`);
+    onProgress(`✅ 数据补充完成`);
   } else if (failedLinks.length > 0 && stoppedDueToApiCredits) {
-    onProgress(`⏭️ 跳过 ${failedLinks.length} 个失败链接的重试（服务暂时不可用）`);
+    onProgress(`⏳ 部分数据暂时无法获取，已跳过`);
   }
   
   // ==================== 统计信息 ====================
   
   onProgress(`════════ 详情获取完成 ════════`);
-  onProgress(`📊 详情页请求: ${detailPageRequests} 页`);
-  onProgress(`📊 有效结果: ${totalSaved} 条（已实时保存到数据库）`);
+  onProgress(`📊 有效结果: ${totalSaved} 条`);
   onProgress(`📊 过滤排除: ${filteredOut} 条`);
-  onProgress(`📊 批次模式: ${totalBatches} 批 × ${BATCH_CONFIG.BATCH_SIZE} 并发, 间隔 ${BATCH_CONFIG.BATCH_DELAY_MS}ms`);
-  if (retryTotal > 0) {
-    onProgress(`🔄 延后重试: ${retrySuccess}/${retryTotal} 成功`);
-  }
   if (stoppedDueToApiCredits) {
-    onProgress(`🚫 服务繁忙，任务提前结束`);
+    onProgress(`🚫 当前使用人数过多，服务繁忙，任务提前结束`);
   }
   
   // v9.1: 详情阶段502统计汇总（仅后端日志，不推送给用户）

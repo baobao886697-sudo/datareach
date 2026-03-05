@@ -614,7 +614,7 @@ async function executeTpsSearchRealtimeDeduction(
   
   // v8.2: 启动日志（统一为Anywho标杆风格）
   addLog(`═══════════════════════════════════════════════════`);
-  addLog(`🚀 开始 TPS 搜索（实时扣费模式）`);
+  addLog(`🚀 开始 TPS 搜索`);
   addLog(`═══════════════════════════════════════════════════`);
   
   // 显示搜索配置
@@ -634,8 +634,8 @@ async function executeTpsSearchRealtimeDeduction(
   if (filters.minYear) addLog(`   • 号码年份: ≥ ${filters.minYear} 年`);
   addLog(`   • 排除已故: 是`);  // TPS默认排除已故
   
-  addLog(`💰 扣费模式: 实时扣费，用多少扣多少`);
-  addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+  addLog(`💰 扣费模式: 按实际用量扣费`);
+  
   addLog(`═══════════════════════════════════════════════════`);
   
   // 更新任务状态
@@ -673,7 +673,7 @@ async function executeTpsSearchRealtimeDeduction(
     // 避免大量组合时内存堆积，同时让用户更快看到结果
     
     const totalGroups = Math.ceil(subTasks.length / GROUP_SIZE);
-    addLog(`📋 分组流水线模式: ${subTasks.length} 个组合, 分 ${totalGroups} 组执行 (每组 ${GROUP_SIZE} 个)`);
+    addLog(`📋 共 ${subTasks.length} 个搜索组合，分 ${totalGroups} 组执行`);
     
     let completedSearches = 0;
     
@@ -723,7 +723,7 @@ async function executeTpsSearchRealtimeDeduction(
       const groupEnd = Math.min(groupStart + GROUP_SIZE, subTasks.length);
       const groupTasks = subTasks.slice(groupStart, groupEnd);
       
-      addLog(`════════ 第 ${groupIndex + 1}/${totalGroups} 组 (${groupTasks.length} 个组合) ════════`);
+      addLog(`════════ 第 ${groupIndex + 1}/${totalGroups} 组 ════════`);
       
       // ---------- 组内搜索阶段 ----------
       const groupDetailTasks: DetailTaskWithIndex[] = [];
@@ -780,7 +780,7 @@ async function executeTpsSearchRealtimeDeduction(
           }
           
           const taskName = subTask.location ? `${subTask.name} @ ${subTask.location}` : subTask.name;
-          addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果, ${result.stats.searchPageRequests} 页成功`);
+          addLog(`✅ [${subTask.index + 1}/${subTasks.length}] ${taskName} - ${result.searchResults.length} 条结果`);
           
           if (result.apiCreditsExhausted) {
             addLog(`🚫 当前使用人数过多，服务繁忙，请联系客服处理`);
@@ -876,8 +876,8 @@ async function executeTpsSearchRealtimeDeduction(
       
       // ---------- 组内详情获取阶段 ----------
       if (groupDetailTasks.length > 0) {
-        addLog(`📋 第 ${groupIndex + 1} 组详情获取: ${groupDetailTasks.length} 条`);
-        addLog(`💰 当前余额: ${creditTracker.getCurrentBalance().toFixed(1)} 积分`);
+        addLog(`📋 第 ${groupIndex + 1} 组正在获取 ${groupDetailTasks.length} 条详细信息`);
+        
         
         // 详情进度回调
         let lastDetailProgressPush = 0;
@@ -890,7 +890,7 @@ async function executeTpsSearchRealtimeDeduction(
           const groupBaseProgress = 30 + Math.round((groupIndex / totalGroups) * 65);
           const groupDetailProgress = Math.round((info.percent / 100) * (65 / totalGroups));
           const detailProgress = Math.min(95, groupBaseProgress + groupDetailProgress);
-          const phase = info.phase === 'retrying' ? '重试中' : '获取详情';
+          const phase = info.phase === 'retrying' ? '数据优化中' : '获取详情';
           
           updateTpsSearchTaskProgress(taskDbId, {
             progress: detailProgress,
