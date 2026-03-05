@@ -56,9 +56,9 @@ export async function getTpsConfig() {
   const defaultMinAge = minAgeConfig ? parseInt(minAgeConfig, 10) : 50;
   const defaultMaxAge = maxAgeConfig ? parseInt(maxAgeConfig, 10) : 79;
   
-  // 解析积分配置
-  const searchCost = searchCreditsConfig || "0.5";
-  const detailCost = detailCreditsConfig || "0.5";
+  // 解析积分配置 - 强制使用 0.5，忽略数据库旧值
+  const searchCost = "0.5";
+  const detailCost = "0.5";
   
   if (!config) {
     // 返回默认配置，优先使用 systemConfigs 中的配置
@@ -109,8 +109,8 @@ export async function updateTpsConfig(data: {
   } else {
     await database.insert(tpsConfig).values({
       ...data,
-      searchCost: data.searchCost || "0.3",
-      detailCost: data.detailCost || "0.3",
+      searchCost: data.searchCost || "0.5",
+      detailCost: data.detailCost || "0.5",
     });
   }
 }
