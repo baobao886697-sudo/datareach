@@ -299,7 +299,7 @@ export default function SpfSearch() {
           </div>
           <Button 
             variant="outline" 
-            onClick={() => setLocation("/spf/history")} 
+            onClick={() => setLocation("/history")} 
             className="absolute top-6 right-6 border-pink-500/50 hover:bg-pink-500/10"
           >
             <Clock className="h-4 w-4 mr-2 text-pink-500" />

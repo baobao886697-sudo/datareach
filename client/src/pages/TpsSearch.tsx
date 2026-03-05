@@ -290,7 +290,7 @@ export default function TpsSearch() {
           </div>
           <Button 
             variant="outline" 
-            onClick={() => setLocation("/tps/history")} 
+            onClick={() => setLocation("/history")} 
             className="absolute top-6 right-6 border-amber-500/50 hover:bg-amber-500/10"
           >
             <Clock className="h-4 w-4 mr-2 text-amber-500" />
