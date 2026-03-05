@@ -16,6 +16,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarSeparator,
+  SidebarGroup,
+  SidebarGroupLabel,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
@@ -29,19 +32,28 @@ import { Button } from "./ui/button";
 import { NotificationCenter } from "./NotificationCenter";
 import { trpc } from "@/lib/trpc";
 
-const menuItems: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; path: string; adminOnly?: boolean; isNew?: boolean; isRainbow?: boolean; isTopRecommend?: boolean; isMaintenance?: boolean }> = [
+type MenuItem = { icon: React.ComponentType<{ className?: string }>; label: string; path: string; adminOnly?: boolean; isNew?: boolean; isRainbow?: boolean; isTopRecommend?: boolean; isMaintenance?: boolean };
+
+// 数据源搜索引擎
+const searchEngineItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "仪表盘", path: "/dashboard" },
   { icon: Linkedin, label: "LinkedIn", path: "/search", isMaintenance: true },
   { icon: Users, label: "TruePeopleSearch", path: "/tps", isRainbow: true, isTopRecommend: true },
   { icon: UserSearch, label: "PeopleSearchNow", path: "/people-search-now", isNew: true },
   { icon: SearchCheck, label: "SearchPeopleFree", path: "/spf/search", isRainbow: true },
   { icon: Sparkles, label: "Anywho", path: "/anywho", isRainbow: true },
-  { icon: Rocket, label: "产品路线图", path: "/roadmap" },
+];
+
+// 工具与设置
+const utilityItems: MenuItem[] = [
   { icon: History, label: "历史记录", path: "/history" },
   { icon: Wallet, label: "积分充值", path: "/recharge" },
+  { icon: Rocket, label: "产品路线图", path: "/roadmap" },
   { icon: MessageCircle, label: "联系我们", path: "/feedback" },
   { icon: Shield, label: "管理后台", path: "/admin", adminOnly: true },
 ];
+
+const menuItems = [...searchEngineItems, ...utilityItems];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 280;
@@ -204,7 +216,7 @@ function DashboardLayoutContent({
             </div>
           </SidebarHeader>
 
-          <SidebarContent className="gap-0">
+          <SidebarContent className="gap-0 overflow-y-auto">
             {/* 七彩錆金动画样式 */}
             <style>{`
               @keyframes rainbow-shimmer {
@@ -252,85 +264,86 @@ function DashboardLayoutContent({
                 animation: star-sparkle 1.5s ease-in-out infinite;
               }
             `}</style>
-            <SidebarMenu className="px-2 py-1">
-              {menuItems.filter(item => !item.adminOnly || user?.role === 'admin').map(item => {
-                const isActive = location === item.path;
-                const isNewItem = item.isNew;
-                const isRainbowItem = item.isRainbow;
-                const isTopRecommend = item.isTopRecommend;
-                return (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      onClick={() => setLocation(item.path)}
-                      tooltip={item.label}
-                      className={`h-10 transition-all font-normal ${isNewItem ? 'hover:bg-emerald-500/10' : ''} ${isRainbowItem ? 'rainbow-menu-item rounded-lg' : ''}`}
-                    >
-                      <item.icon
-                        className={`h-4 w-4 ${isActive ? (isNewItem ? "text-emerald-400" : isRainbowItem ? "text-yellow-400" : "text-primary") : (isNewItem ? "text-emerald-500" : isRainbowItem ? "text-amber-400" : "")}`}
-                      />
-                      <span className={isNewItem ? "text-emerald-400 font-medium" : isRainbowItem ? "rainbow-menu-text font-bold" : ""}>{item.label}</span>
-                      {isNewItem && (
-                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          NEW
-                        </span>
-                      )}
-                      {isRainbowItem && isTopRecommend && (
-                        <span className="ml-auto flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" />
-                          <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" style={{ animationDelay: '0.3s' }} />
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gradient-to-r from-yellow-500/20 via-pink-500/20 to-purple-500/20 text-yellow-300 border border-yellow-500/30">
-                            推荐
+
+            {/* 数据源搜索引擎 */}
+            <SidebarGroup>
+              <SidebarMenu className="px-2 py-1">
+                {searchEngineItems.filter(item => !item.adminOnly || user?.role === 'admin').map(item => {
+                  const isActive = location === item.path;
+                  const isNewItem = item.isNew;
+                  const isRainbowItem = item.isRainbow;
+                  const isTopRecommend = item.isTopRecommend;
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        onClick={() => setLocation(item.path)}
+                        tooltip={item.label}
+                        className={`h-10 transition-all font-normal ${isNewItem ? 'hover:bg-emerald-500/10' : ''} ${isRainbowItem ? 'rainbow-menu-item rounded-lg' : ''}`}
+                      >
+                        <item.icon
+                          className={`h-4 w-4 ${isActive ? (isNewItem ? "text-emerald-400" : isRainbowItem ? "text-yellow-400" : "text-primary") : (isNewItem ? "text-emerald-500" : isRainbowItem ? "text-amber-400" : "")}`}
+                        />
+                        <span className={isNewItem ? "text-emerald-400 font-medium" : isRainbowItem ? "rainbow-menu-text font-bold" : ""}>{item.label}</span>
+                        {isNewItem && (
+                          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            NEW
                           </span>
-                        </span>
-                      )}
-                      {isRainbowItem && !isTopRecommend && (
-                        <span className="ml-auto flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" />
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gradient-to-r from-yellow-500/20 via-pink-500/20 to-purple-500/20 text-yellow-300 border border-yellow-500/30">
-                            推荐
+                        )}
+                        {isRainbowItem && isTopRecommend && (
+                          <span className="ml-auto flex items-center gap-1">
+                            <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" />
+                            <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" style={{ animationDelay: '0.3s' }} />
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gradient-to-r from-yellow-500/20 via-pink-500/20 to-purple-500/20 text-yellow-300 border border-yellow-500/30">
+                              推荐
+                            </span>
                           </span>
-                        </span>
-                      )}
-                      {item.isMaintenance && (
-                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">
-                          维护中
-                        </span>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-            
-            {/* 产品介绍 */}
-            {!isCollapsed && (
-              <div className="mx-3 mt-4 p-3 rounded-lg bg-gradient-to-br from-cyan-500/5 to-blue-500/5 border border-cyan-500/10 group-data-[collapsible=icon]:hidden">
-                <div className="text-xs font-medium text-cyan-400 mb-2">精准获客 · 多源数据融合</div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  DataReach Pro 整合美国多平台人口与商业数据，提供高质量联系人信息。
-                </p>
-                <div className="mt-2 space-y-1">
-                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                    <span className="w-1 h-1 rounded-full bg-teal-400"></span>
-                    <span>TPS · 3亿+ 美国人口记录</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                    <span className="w-1 h-1 rounded-full bg-purple-400"></span>
-                    <span>SPF · 深度人口数据 + 婚姻/就业</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                    <span className="w-1 h-1 rounded-full bg-amber-400"></span>
-                    <span>Anywho · AT&T 官方电话数据</span>
-                  </div>
-                </div>
-                <div className="mt-3 pt-2 border-t border-gray-700/50">
-                  <p className="text-[10px] text-gray-500">
-                    如有定制开发或商务合作需求，欢迎通过「联系我们」与我们的团队沟通。
-                  </p>
-                </div>
-              </div>
-            )}
+                        )}
+                        {isRainbowItem && !isTopRecommend && (
+                          <span className="ml-auto flex items-center gap-1">
+                            <Star className="h-3 w-3 text-yellow-400 fill-yellow-400 star-sparkle" />
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gradient-to-r from-yellow-500/20 via-pink-500/20 to-purple-500/20 text-yellow-300 border border-yellow-500/30">
+                              推荐
+                            </span>
+                          </span>
+                        )}
+                        {item.isMaintenance && (
+                          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                            维护中
+                          </span>
+                        )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+
+            <SidebarSeparator className="mx-3" />
+
+            {/* 工具与设置 */}
+            <SidebarGroup>
+              <SidebarMenu className="px-2 py-1">
+                {utilityItems.filter(item => !item.adminOnly || user?.role === 'admin').map(item => {
+                  const isActive = location === item.path;
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        onClick={() => setLocation(item.path)}
+                        tooltip={item.label}
+                        className="h-10 transition-all font-normal"
+                      >
+                        <item.icon
+                          className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
+                        />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
           </SidebarContent>
 
           <SidebarFooter className="p-3">
