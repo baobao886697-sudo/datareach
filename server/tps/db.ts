@@ -77,11 +77,11 @@ export async function getTpsConfig() {
     };
   }
   
-  // 合并 tpsConfig 表和 systemConfigs 表的配置，systemConfigs 优先
+  // 合并 tpsConfig 表和 systemConfigs 表的配置，积分费率强制使用 0.5
   return {
     ...config,
-    searchCost: searchCreditsConfig || config.searchCost,
-    detailCost: detailCreditsConfig || config.detailCost,
+    searchCost,
+    detailCost,
     scrapeDoToken: config.scrapeDoToken || tokenFromSystemConfig || process.env.TPS_SCRAPE_DO_TOKEN || null,
     defaultMinAge: minAgeConfig ? defaultMinAge : (config.defaultMinAge || 50),
     defaultMaxAge: maxAgeConfig ? defaultMaxAge : (config.defaultMaxAge || 79),
