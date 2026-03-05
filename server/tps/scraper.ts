@@ -18,7 +18,7 @@ const SCRAPE_MAX_RETRIES = 1;    // 超时/网络错误最多重试 1 次
  * 使用 Scrape.do API 获取页面 (v9.2 重试版)
  * 
  * 恢复 v8.2 的 HTTP 层面错误重试:
- * - 502 错误: 指数退避重试 (2s → 4s → 6s)，最多 3 次
+ * - 502 错误: 固定间隔重试 (1s → 1s → 1s)，最多 3 次
  * - 429 错误: 即时重试 2 次（间隔 1s），仍失败则抛出 ScrapeRateLimitError
  * - 超时/网络错误: 重试 1 次
  */
@@ -28,9 +28,9 @@ export async function fetchWithScrapedo(url: string, token: string): Promise<str
     maxRetries: SCRAPE_MAX_RETRIES,
     retryDelayMs: 0,
     enableLogging: true,
-    // 502 容错: 指数退避 2s → 4s → 6s
+    // 502 容错: 固定间隔 1s → 1s → 1s
     maxRetries502: 3,
-    retryBaseDelay502Ms: 2000,
+    retryBaseDelay502Ms: 1000,
     // 429 即时重试: 2 次，间隔 1s
     maxRetries429: 2,
     retryDelay429Ms: 1000,
@@ -843,8 +843,8 @@ export async function searchOnly(
       if (retryUrls.length > 0 && !searchApiCreditsExhausted) {
         onProgress?.(`🔄 开始延后重试 ${retryUrls.length} 个失败页面...`);
         
-        // 等待 2 秒后开始重试，给服务器恢复时间
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 等待 1 秒后开始重试
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         // 分块并发重试，每批最多5个
         const RETRY_CHUNK_SIZE = 5;

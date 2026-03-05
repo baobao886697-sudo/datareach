@@ -9,7 +9,7 @@
  * 
  * v9.2 重试机制恢复 (基于 v8.2 + v9.1):
  * - 恢复 v8.2 的三层重试策略
- * - 502/5xx 错误: 指数退避重试 (2s → 4s → 6s)，最多重试 3 次
+ * - 502/5xx 错误: 固定间隔重试 (1s → 1s → 1s)，最多重试 3 次
  * - 429 错误: 即时重试 2 次（间隔 1s），仍失败则抛出 ScrapeRateLimitError
  * - 超时/网络错误: 重试 1 次
  * - 401/403 积分耗尽: 不重试，立即抛出
@@ -33,7 +33,7 @@ export interface ScrapeOptions {
   enableLogging?: boolean;
   /** 502 最大重试次数，默认 3 */
   maxRetries502?: number;
-  /** 502 基础重试延迟（毫秒），默认 2000 (2s → 4s → 6s) */
+  /** 502 基础重试延迟（毫秒），默认 1000 (1s → 1s → 1s) */
   retryBaseDelay502Ms?: number;
   /** 429 即时重试次数，默认 2 */
   maxRetries429?: number;
@@ -92,7 +92,7 @@ const DEFAULT_OPTIONS: Required<ScrapeOptions> = {
   retryDelayMs: 0,
   enableLogging: false,
   maxRetries502: 3,
-  retryBaseDelay502Ms: 2000,
+  retryBaseDelay502Ms: 1000,
   maxRetries429: 2,
   retryDelay429Ms: 1000,
 };
@@ -182,8 +182,8 @@ export async function fetchWithScrapeClient(
         if (statusCode >= 500) {
           if (retryCount502 < maxRetries502) {
             retryCount502++;
-            // 指数退避: 2s → 4s → 6s (基础延迟 × 重试次数)
-            const delay502 = retryBaseDelay502Ms * retryCount502;
+            // 固定间隔: 1s → 1s → 1s
+            const delay502 = retryBaseDelay502Ms;
             if (enableLogging) {
               console.log(`[ScrapeClient] HTTP ${statusCode} 服务器错误，第 ${retryCount502}/${maxRetries502} 次重试，等待 ${delay502}ms...`);
             }

@@ -39,12 +39,12 @@ export const BATCH_CONFIG = {
   BATCH_SIZE: 30,
   /** 批次间延迟（毫秒），给上游 API 恢复时间 */
   BATCH_DELAY_MS: 500,
-  /** v9.2: 延后重试前等待时间（毫秒） */
-  RETRY_DELAY_MS: 3000,
-  /** v9.2: 延后重试的批次大小（更保守） */
+  /** v9.3: 延后重试前等待时间（毫秒） */
+  RETRY_DELAY_MS: 1000,
+  /** v9.2: 延后重试的批次大小 */
   RETRY_BATCH_SIZE: 8,
-  /** v9.2: 延后重试的批间延迟（更保守） */
-  RETRY_BATCH_DELAY_MS: 800,
+  /** v9.3: 延后重试的批间延迟（毫秒） */
+  RETRY_BATCH_DELAY_MS: 1000,
   /** 连续失败阈值：连续 N 批全部失败时自动停止（兜底机制） */
   CONSECUTIVE_FAIL_THRESHOLD: 3,
 };
