@@ -36,7 +36,7 @@ import { TpsRealtimeCreditTracker } from './realtimeCredits';
 
 export const BATCH_CONFIG = {
   /** 每批并发获取的详情页数量 */
-  BATCH_SIZE: 30,
+  BATCH_SIZE: 10,
   /** 批次间延迟（毫秒），给上游 API 恢复时间 */
   BATCH_DELAY_MS: 500,
   /** v9.3: 延后重试前等待时间（毫秒） */
