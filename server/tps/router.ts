@@ -44,6 +44,7 @@ import {
   saveTpsDetailCache,
   logApi,
   getUserCredits,
+  getUserActiveTpsTask,
 } from "./db";
 import { getDb, logUserActivity } from "../db";
 import { tpsSearchTasks } from "../../drizzle/schema";
@@ -177,6 +178,23 @@ export const tpsRouter = router({
         throw new TRPCError({
           code: "FORBIDDEN",
           message: `积分不足，至少需要 ${minRequiredCredits.toFixed(1)} 积分才能开始搜索，当前余额 ${userCredits.toFixed(1)} 积分`,
+        });
+      }
+      
+      // ==================== 并发任务限制：每用户同时只能有 1 个 TPS 任务 ====================
+      const activeTask = await getUserActiveTpsTask(userId);
+      if (activeTask) {
+        const statusText = activeTask.status === 'running' ? '正在运行' : '等待执行';
+        const progressText = activeTask.progress > 0 ? `，当前进度 ${activeTask.progress}%` : '';
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: JSON.stringify({
+            type: 'TASK_LIMIT',
+            taskId: activeTask.taskId,
+            status: activeTask.status,
+            progress: activeTask.progress,
+            text: `您有一个TPS任务${statusText}中${progressText}，请等待当前任务完成后再提交新任务。`,
+          }),
         });
       }
       

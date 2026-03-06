@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { parseErrorMessage } from "@/lib/utils";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { 
@@ -39,7 +39,8 @@ import {
   TrendingUp,
   Building,
   Calendar,
-  Shield
+  Shield,
+  ExternalLink
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -194,15 +195,41 @@ export default function TpsSearch() {
   const estimatedDetailPageCost = MAX_PREDEDUCT_DETAIL_PAGES * detailCost;
   const estimatedCost = estimatedSearchPageCost + estimatedDetailPageCost;
   
+  // 活跃任务提示状态
+  const [activeTaskInfo, setActiveTaskInfo] = useState<{
+    taskId: string;
+    status: string;
+    progress: number;
+  } | null>(null);
+  
   // 提交搜索
   const searchMutation = trpc.tps.search.useMutation({
     onSuccess: (data) => {
+      setActiveTaskInfo(null);
       toast.success("搜索任务已提交", {
         description: `任务ID: ${data.taskId.slice(0, 8)}...`,
       });
       setLocation(`/tps/task/${data.taskId}`);
     },
     onError: (error: any) => {
+      // 解析 TASK_LIMIT 错误，显示友好提示
+      try {
+        const parsed = JSON.parse(error.message);
+        if (parsed.type === 'TASK_LIMIT') {
+          setActiveTaskInfo({
+            taskId: parsed.taskId,
+            status: parsed.status,
+            progress: parsed.progress,
+          });
+          toast.error("任务提交受限", {
+            description: parsed.text,
+            duration: 5000,
+          });
+          return;
+        }
+      } catch {
+        // 不是 JSON 格式，继续默认处理
+      }
       toast.error("搜索失败", {
         description: parseErrorMessage(error.message),
       });
@@ -611,6 +638,33 @@ export default function TpsSearch() {
                 )}
               </CardContent>
             </Card>
+
+            {/* 活跃任务提示横幅 */}
+            {activeTaskInfo && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <AlertCircle className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-amber-300 mb-1">您有一个任务{activeTaskInfo.status === 'running' ? '正在运行' : '等待执行'}中</p>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      每位用户同一时间只能运行 1 个 TPS 搜索任务。请等待当前任务完成后再提交新任务。
+                      {activeTaskInfo.progress > 0 && `（当前进度：${activeTaskInfo.progress}%）`}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-amber-500/50 hover:bg-amber-500/10 text-amber-300"
+                      onClick={() => setLocation(`/tps/task/${activeTaskInfo.taskId}`)}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      查看当前任务进度
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 提交按钮 - 金色渐变 */}
             <Button

@@ -12,7 +12,7 @@ import {
   creditLogs,
   apiLogs,
 } from "../../drizzle/schema";
-import { eq, and, inArray, desc, sql, gte } from "drizzle-orm";
+import { eq, and, or, inArray, desc, sql, gte } from "drizzle-orm";
 import crypto from "crypto";
 
 // 获取数据库实例的辅助函数
@@ -116,6 +116,37 @@ export async function updateTpsConfig(data: {
 }
 
 // ==================== 搜索任务相关 ====================
+
+/**
+ * 检查用户是否有正在运行或等待中的 TPS 任务
+ * 返回第一个活跃任务（如果存在），否则返回 null
+ */
+export async function getUserActiveTpsTask(userId: number) {
+  const database = await db();
+  const activeTasks = await database
+    .select({
+      taskId: tpsSearchTasks.taskId,
+      status: tpsSearchTasks.status,
+      progress: tpsSearchTasks.progress,
+      totalSubTasks: tpsSearchTasks.totalSubTasks,
+      completedSubTasks: tpsSearchTasks.completedSubTasks,
+      createdAt: tpsSearchTasks.createdAt,
+    })
+    .from(tpsSearchTasks)
+    .where(
+      and(
+        eq(tpsSearchTasks.userId, userId),
+        or(
+          eq(tpsSearchTasks.status, "running"),
+          eq(tpsSearchTasks.status, "pending")
+        )
+      )
+    )
+    .orderBy(desc(tpsSearchTasks.createdAt))
+    .limit(1);
+  
+  return activeTasks[0] || null;
+}
 
 /**
  * 创建搜索任务
