@@ -184,7 +184,16 @@ export default function TpsTask() {
   // 获取搜索结果
   const { data: results, refetch: refetchResults } = trpc.tps.getTaskResults.useQuery(
     { taskId: taskId!, page, pageSize },
-    { enabled: !!taskId && (task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "failed" || task?.status === "cancelled") }
+    { 
+      enabled: !!taskId && !!task?.status,
+      refetchInterval: (query) => {
+        // 任务运行中时每5秒自动刷新结果，实时显示已找到的数据
+        if (task?.status === "running" || task?.status === "pending") {
+          return 5000;
+        }
+        return false;
+      },
+    }
   );
   
   // v7.0: 任务阶段状态（通过WS实时更新）
@@ -234,6 +243,7 @@ export default function TpsTask() {
           setTotalDetails(msg.data.totalDetails || 0);
         }
         refetchTask();
+        refetchResults(); // 实时刷新搜索结果表格
       }
     });
     const unsub2 = subscribe("task_completed", (msg: WsMessage) => {
@@ -750,16 +760,23 @@ export default function TpsTask() {
           </Card>
         )}
         
-        {/* 搜索结果表格 */}
-        {(task?.status === "completed" || task?.status === "insufficient_credits" || task?.status === "service_busy" || task?.status === "cancelled") && results && results.results.length > 0 && (
+        {/* 搜索结果表格 - 运行中也实时显示 */}
+        {results && results.results.length > 0 && (
           <Card className="rainbow-border">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Search className="h-5 w-5 text-amber-400" />
                 搜索结果
+                {(task?.status === "running" || task?.status === "pending") && (
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30 animate-pulse ml-2">
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    实时更新中
+                  </Badge>
+                )}
               </CardTitle>
               <CardDescription>
                 共 {results.total} 条结果，当前显示第 {page} 页
+                {(task?.status === "running" || task?.status === "pending") && " · 数据持续增加中..."}
               </CardDescription>
             </CardHeader>
             <CardContent>
